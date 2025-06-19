@@ -191,17 +191,29 @@ export function run<Fmt extends Record<string, Term<any>> = Record<string, Term<
 // makeFacts: create a fact database with a goal and set method (supports multiple terms)
 export function makeFacts() {
     const facts: Term[][] = [];
+
     function goal(...query: Term[]): Goal {
+        console.log("running goal");
+        let smFacts = facts;
+        let i = -1;
+        for (const qterm of Object.values(query)) {
+            i++;
+            if (isVar(qterm)) continue;
+            console.log("FILTER", qterm);
+            smFacts = smFacts.filter(fdata => fdata[i] === qterm);
+        }
         return function* (s: Subst) {
-            for (const fact of facts) {
+            for (const fact of smFacts) {
                 const s2 = unify(query, fact, s);
                 if (s2) yield s2
             }
         };
     }
+
     goal.set = (...fact: Term[]) => {
         facts.push(fact);
     };
+    goal.raw = facts;
     return goal;
 }
 

@@ -1,5 +1,7 @@
 // MiniKanren-style logic programming core in TypeScript
 
+import { set } from "lodash";
+
 // Logic variable representation
 export type Var = { tag: 'var', id: number };
 let varCounter = 0;
@@ -191,7 +193,18 @@ export function run<Fmt extends Record<string, Term<any>> = Record<string, Term<
 
 export function makeFacts() {
     const facts: Term[][] = [];
+    // Use Map/Set for indexes (default approach)
     const indexes = new Map<number, Map<any, Set<number>>>();
+
+    function intersect<F>(set_a: Set<F>, set_b: Set<F>) {
+        const set_n = new Set<F>();
+        set_a.forEach(item => {
+            if (set_b.has(item)) {
+                set_n.add(item);
+            }
+        });
+        return set_n;
+    }
 
     function goalFn(...query: Term[]): Goal {
         return function* (s: Subst) {
@@ -206,7 +219,7 @@ export function makeFacts() {
                 if (!indexes.has(i)) continue;
                 const index = indexes.get(i);
                 if (!index) continue;
-                const factNums = index?.get(wq);
+                const factNums = index.get(wq);
                 if (!factNums) continue;
 
                 if (!found) {
@@ -215,11 +228,8 @@ export function makeFacts() {
                     continue;
                 }
 
-                intersection.forEach(item => {
-                    if (!factNums.has(item)) {
-                        intersection.delete(item);
-                    }
-                });
+                intersection = intersect(intersection, factNums);
+                if (intersection.size === 0) break;
             }
 
             if (!found) {
@@ -252,19 +262,23 @@ export function makeFacts() {
         facts.push(fact);
         fact.forEach((term, i) => {
             if (isIndexable(term)) {
-                if (!indexes.has(i)) {
-                    indexes.set(i, new Map<any, Set<number>>());
+                let index = indexes.get(i);
+                if (!index) {
+                    index = new Map<any, Set<number>>();
+                    indexes.set(i, index);
                 }
-                const index = indexes.get(i)!;
-                if (!index.has(term)) {
-                    index.set(term, new Set<number>());
+                let set = index.get(term);
+                if (!set) {
+                    set = new Set<number>();
+                    index.set(term, set);
                 }
-                index.get(term)!.add(factIndex);
+                set.add(factIndex);
             }
         });
     };
 
     wrapper.raw = facts;
+    wrapper.indexes = indexes;
     return wrapper;
 }
 

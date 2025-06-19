@@ -127,7 +127,8 @@ export function conde(...clauses: Goal[][]): Goal {
 }
 
 // 'and' is now an alias for conde with a single clause
-export const and = (...goals: Goal[]) => conde(goals);
+export const oldand = (...goals: Goal[]) => conde(goals);
+export const and = (...goals: Goal[]) => goals.reduce((a, b) => conj(a, b));
 export const or = (...goals: Goal[]) => {
     if (goals.length === 0) throw new Error("or requires at least one goal");
     return goals.reduce((a, b) => disj(a, b));
@@ -188,33 +189,83 @@ export function run<Fmt extends Record<string, Term<any>> = Record<string, Term<
     return withFluentGen(gen);
 }
 
-// makeFacts: create a fact database with a goal and set method (supports multiple terms)
 export function makeFacts() {
     const facts: Term[][] = [];
+    const indexes = new Map<number, Map<any, Set<number>>>();
 
-    function goal(...query: Term[]): Goal {
-        console.log("running goal");
-        let smFacts = facts;
-        let i = -1;
-        for (const qterm of Object.values(query)) {
-            i++;
-            if (isVar(qterm)) continue;
-            console.log("FILTER", qterm);
-            smFacts = smFacts.filter(fdata => fdata[i] === qterm);
-        }
+    function goalFn(...query: Term[]): Goal {
         return function* (s: Subst) {
-            for (const fact of smFacts) {
-                const s2 = unify(query, fact, s);
-                if (s2) yield s2
+            const walkedQuery = query.map(term => walk(term, s));
+
+            let intersection: Set<number> = new Set<number>();
+            let found = false;
+            let i = -1;
+            for (const wq of walkedQuery) {
+                i++;
+                if (isVar(wq)) continue;
+                if (!indexes.has(i)) continue;
+                const index = indexes.get(i);
+                if (!index) continue;
+                const factNums = index?.get(wq);
+                if (!factNums) continue;
+
+                if (!found) {
+                    found = true;
+                    intersection = new Set(factNums);
+                    continue;
+                }
+
+                intersection.forEach(item => {
+                    if (!factNums.has(item)) {
+                        intersection.delete(item);
+                    }
+                });
+            }
+
+            if (!found) {
+                for (const fact of facts) {
+                    const s1 = unify(query, fact, s);
+                    if (s1) {
+                        yield s1;
+                    }
+                }
+                return;
+            }
+
+            for (const factIndex of intersection) {
+                const fact = facts[factIndex];
+                const s1 = unify(query, fact, s);
+                if (s1) {
+                    yield s1;
+                }
             }
         };
     }
 
-    goal.set = (...fact: Term[]) => {
+    const isIndexable = (v: any) =>
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
+
+    const wrapper = (...query: Term[]): Goal => goalFn(...query);
+
+    wrapper.set = (...fact: Term[]) => {
+        const factIndex = facts.length;
         facts.push(fact);
+        fact.forEach((term, i) => {
+            if (isIndexable(term)) {
+                if (!indexes.has(i)) {
+                    indexes.set(i, new Map<any, Set<number>>());
+                }
+                const index = indexes.get(i)!;
+                if (!index.has(term)) {
+                    index.set(term, new Set<number>());
+                }
+                index.get(term)!.add(factIndex);
+            }
+        });
     };
-    goal.raw = facts;
-    return goal;
+
+    wrapper.raw = facts;
+    return wrapper;
 }
 
 // aggregator: collect all possible values of a logic variable into an array and bind to sourceVar in a single solution

@@ -1,142 +1,136 @@
 // Run handlers for MiniKanren-style logic programming
-import { Term, Subst, Var, walk, isVar, lvar } from './core.ts';
+import { Term, Subst, Var, walk, isVar, lvar, logicListToArray } from './core.ts';
 import { Goal } from './relation.ts';
 
-export async function* run<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
-    f: (...vars: Term<any>[]) => [Fmt, Goal] | Goal | [Goal],
-    n: number = Infinity
-) {
-    const s0: Subst = new Map();
-    let result: [Fmt, Goal] | Goal | [Goal];
-    let vars: Term<any>[] = [];
-    vars = Array.from({ length: f.length }, () => lvar());
-    result = f(...vars);
+/**
+ * The output type for formatted substitutions.
+ */
+export type RunResult<Fmt extends Record<string, Term<any>>> = { [K in keyof Fmt]: Term };
 
-    async function* substToObjGen(substs: AsyncGenerator<Subst>, formatter: Fmt): AsyncGenerator<{ [K in keyof Fmt]: Term }> {
-        let count = 0;
-        for await (const s of substs) {
-            if (count++ >= n) break;
-            const out: Partial<{ [K in keyof Fmt]: Term }> = {};
-            for (const key in formatter) {
-                const v = formatter[key];
-                if (v && typeof v === 'object' && 'id' in v) {
-                    out[key] = walk(v, s);
-                } else {
-                    out[key] = v;
-                }
+/**
+ * Formats substitutions into user-facing objects, converting logic lists to arrays.
+ */
+export async function* formatSubstitutions<Fmt extends Record<string, Term<any>>>(
+    substs: AsyncGenerator<Subst>,
+    formatter: Fmt,
+    n: number
+): AsyncGenerator<RunResult<Fmt>> {
+    let count = 0;
+    for await (const s of substs) {
+        if (count++ >= n) break;
+        const out: Partial<RunResult<Fmt>> = {};
+        for (const key in formatter) {
+            const v = formatter[key];
+            if (v && typeof v === 'object' && 'id' in v) {
+                out[key] = walk(v, s);
+            } else {
+                out[key] = v;
             }
-            yield out as { [K in keyof Fmt]: Term };
         }
-    }
-    async function* substToObjGenVars(substs: AsyncGenerator<Subst>): AsyncGenerator<{ [K in keyof Fmt]: Term }> {
-        let count = 0;
-        for await (const s of substs) {
-            if (count++ >= n) break;
-            const out: Record<string, Term> = {};
-            vars.forEach(v => {
-                out[(v as any).id] = walk(v, s);
-            });
-            yield out as { [K in keyof Fmt]: Term };
-        }
-    }
-    let gen: AsyncGenerator<{ [K in keyof Fmt]: Term }>;
-    if (Array.isArray(result)) {
-        if (result.length === 2 && typeof result[0] === 'object' && result[0] !== null) {
-            const formatter = result[0] as Fmt;
-            const goal = result[1] as Goal;
-            gen = substToObjGen(goal(s0), formatter);
-        } else if (result.length === 1 && typeof result[0] === 'function') {
-            const goal = result[0] as Goal;
-            gen = substToObjGenVars(goal(s0));
-        } else {
-            throw new Error("Invalid array structure returned from goal function");
-        }
-    } else {
-        const goal = result as Goal;
-        gen = substToObjGenVars(goal(s0));
-    }
-    for await (const item of gen) {
-        yield item;
+        yield deepConvertLogicLists(out) as RunResult<Fmt>;
     }
 }
 
-export async function* runEasy<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
-    f: ($: Record<string, Var>) => [Fmt, Goal] | Goal | [Goal],
-    n: number = Infinity
-) {
-    const s0: Subst = new Map();
-    const varMap = new Map<string, Var>();
-    const $ = new Proxy({}, {
-        get(target, prop: string) {
+/**
+ * Create a Proxy for logic variables, with customizable key type.
+ */
+export function createLogicVarProxy<K extends string | symbol = string>(varMap?: Map<K, Var>): Record<K, Var> {
+    if (!varMap) varMap = new Map<K, Var>();
+    return new Proxy({}, {
+        get(target, prop: K) {
             if (prop === "_") {
                 return lvar();
             }
-            if (!varMap.has(prop)) {
-                varMap.set(prop, lvar());
+            if (!varMap!.has(prop)) {
+                varMap!.set(prop, lvar());
             }
-            return varMap.get(prop);
+            return varMap!.get(prop);
         },
-        has(target, prop: string) {
+        has(target, prop: K) {
             return true;
         },
         ownKeys(target) {
-            return Array.from(varMap.keys());
+            return Array.from(varMap!.keys());
         },
-        getOwnPropertyDescriptor(target, prop: string) {
+        getOwnPropertyDescriptor(target, prop: K) {
             return {
                 enumerable: true,
                 configurable: true
             };
         }
-    });
-    const result = f($);
-    const vars = Array.from(varMap.values());
-    async function* substToObjGen(substs: AsyncGenerator<Subst>, formatter: Fmt): AsyncGenerator<{ [K in keyof Fmt]: Term }> {
-        let count = 0;
-        for await (const s of substs) {
-            if (count++ >= n) break;
-            const out: Partial<{ [K in keyof Fmt]: Term }> = {};
-            for (const key in formatter) {
-                const v = formatter[key];
-                if (v && typeof v === 'object' && 'id' in v) {
-                    out[key] = walk(v, s);
-                } else {
-                    out[key] = v;
-                }
-            }
-            yield out as { [K in keyof Fmt]: Term };
-        }
+    }) as Record<K, Var>;
+}
+
+/**
+ * Main run function for logic programs. Expects a function returning [formatter, goal].
+ */
+export async function* run<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
+    f: (...vars: Term<any>[]) => [Fmt, Goal],
+    n: number = Infinity
+) {
+    const s0: Subst = new Map();
+    let vars: Term<any>[] = [];
+    vars = Array.from({ length: f.length }, () => lvar());
+    const result = f(...vars);
+    if (!Array.isArray(result) || result.length !== 2 || typeof result[0] !== 'object' || typeof result[1] !== 'function') {
+        throw new Error('run expects a function returning [formatter, goal]');
     }
-    async function* substToObjGenVars(substs: AsyncGenerator<Subst>): AsyncGenerator<{ [K in keyof Fmt]: Term }> {
-        let count = 0;
-        for await (const s of substs) {
-            if (count++ >= n) break;
-            const out: Record<string, Term> = {};
-            vars.forEach(v => {
-                out[(v as any).id] = walk(v, s);
-            });
-            yield out as { [K in keyof Fmt]: Term };
-        }
-    }
-    let gen: AsyncGenerator<{ [K in keyof Fmt]: Term }>;
-    if (Array.isArray(result)) {
-        if (result.length === 2 && typeof result[0] === 'object' && result[0] !== null) {
-            const formatter = result[0] as Fmt;
-            const goal = result[1] as Goal;
-            gen = substToObjGen(goal(s0), formatter);
-        } else if (result.length === 1 && typeof result[0] === 'function') {
-            const goal = result[0] as Goal;
-            gen = substToObjGenVars(goal(s0));
-        } else {
-            throw new Error("Invalid array structure returned from goal function");
-        }
-    } else {
-        const goal = result as Goal;
-        gen = substToObjGenVars(goal(s0));
-    }
-    for await (const item of gen) {
+    const formatter = result[0] as Fmt;
+    const goal = result[1] as Goal;
+    for await (const item of formatSubstitutions(goal(s0), formatter, n)) {
         yield item;
     }
+}
+
+/**
+ * Main runEasy function for logic programs using a Proxy for logic variables.
+ */
+export async function* runEasy<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
+    f: ($: Record<string, Var>) => [Fmt, Goal],
+    n: number = Infinity
+) {
+    const s0: Subst = new Map();
+    const $ = createLogicVarProxy();
+    const result = f($);
+    if (!Array.isArray(result) || result.length !== 2 || typeof result[0] !== 'object' || typeof result[1] !== 'function') {
+        throw new Error('runEasy expects a function returning [formatter, goal]');
+    }
+    const formatter = result[0] as Fmt;
+    const goal = result[1] as Goal;
+    for await (const item of formatSubstitutions(goal(s0), formatter, n)) {
+        yield item;
+    }
+}
+
+// --- Helpers ---
+
+/**
+ * Returns true if the value is a logic list (cons/nil).
+ */
+export function isLogicList(val: any): boolean {
+    return val && typeof val === 'object' && 'tag' in val && (val.tag === 'cons' || val.tag === 'nil');
+}
+
+/**
+ * Recursively converts any logic lists in the value to JS arrays.
+ */
+export function deepConvertLogicLists(val: any): any {
+    if (isLogicList(val)) {
+        // Recursively convert logic list to array, and also convert elements
+        const arr = logicListToArray(val).map(deepConvertLogicLists);
+        return arr;
+    } else if (Array.isArray(val)) {
+        return val.map(deepConvertLogicLists);
+    } else if (val && typeof val === 'object' && !isVar(val)) {
+        const out: any = {};
+        for (const k in val) {
+            if (Object.prototype.hasOwnProperty.call(val, k)) {
+                out[k] = deepConvertLogicLists(val[k]);
+            }
+        }
+        return out;
+    }
+    return val;
 }
 
 // Utility to add fluent methods to a generator

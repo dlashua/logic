@@ -282,6 +282,109 @@ export function makeFacts() {
     return wrapper;
 }
 
+// makeFactsObj: object-based fact storage and querying
+export function makeFactsObj(keys: string[]) {
+    const facts: Record<string, Term>[] = [];
+    // Indexes: Map<key, Map<value, Set<factIndex>>>
+    const indexes = new Map<string, Map<any, Set<number>>>();
+
+    function intersect<F>(set_a: Set<F>, set_b: Set<F>) {
+        const set_n = new Set<F>();
+        set_a.forEach(item => {
+            if (set_b.has(item)) {
+                set_n.add(item);
+            }
+        });
+        return set_n;
+    }
+
+    function goalFn(queryObj: Record<string, Term>): Goal {
+        const keys = Object.keys(queryObj);
+        return function* (s: Subst) {
+            // Walk all query terms
+            const walkedQuery: Record<string, Term> = {};
+            for (const k of keys) {
+                walkedQuery[k] = walk(queryObj[k], s);
+            }
+
+            // Index intersection logic
+            let intersection: Set<number> = new Set<number>();
+            let found = false;
+            for (const k of keys) {
+                const wq = walkedQuery[k];
+                if (isVar(wq)) continue;
+                const index = indexes.get(k);
+                if (!index) continue;
+                const factNums = index.get(wq);
+                if (!factNums) continue;
+                if (!found) {
+                    found = true;
+                    intersection = new Set(factNums);
+                    continue;
+                }
+                intersection = intersect(intersection, factNums);
+                if (intersection.size === 0) break;
+            }
+            // console.log("intersection", queryObj, intersection);
+
+            if (!found) {
+                for (const fact of facts) {
+                    const s1 = unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+                    if (s1) yield s1;
+                }
+                return;
+            }
+
+            for (const factIndex of intersection) {
+                const fact = facts[factIndex];
+                const s1 = unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+                if (s1) yield s1;
+            }
+        };
+    }
+
+    const isIndexable = (v: any) =>
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
+
+    // Wrapper function for querying
+    function wrapper(queryObj: Record<string, Term>): Goal {
+        return goalFn(queryObj);
+    }
+
+    // Set method for adding facts
+    wrapper.set = (factObj: Record<string, Term>) => {
+        const keys = Object.keys(factObj);
+        const factIndex = facts.length;
+        // Ensure all keys are present
+        const fact: Record<string, Term> = {};
+        for (const k of keys) {
+            fact[k] = factObj[k];
+        }
+        facts.push(fact);
+        for (const k of keys) {
+            const term = fact[k];
+            if (isIndexable(term)) {
+                let index = indexes.get(k);
+                if (!index) {
+                    index = new Map<any, Set<number>>();
+                    indexes.set(k, index);
+                }
+                let set = index.get(term);
+                if (!set) {
+                    set = new Set<number>();
+                    index.set(term, set);
+                }
+                set.add(factIndex);
+            }
+        }
+    };
+
+    wrapper.raw = facts;
+    wrapper.indexes = indexes;
+    wrapper.keys = keys;
+    return wrapper;
+}
+
 // aggregator: collect all possible values of a logic variable into an array and bind to sourceVar in a single solution
 export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
     return function* (s: Subst) {

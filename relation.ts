@@ -165,6 +165,8 @@ export function membero(x: Term, list: Term): Goal {
 
 /**
  * Wrap a rule so it always deduplicates by the first argument (logic var or ground term).
+ * 
+ * @reconsider
  */
 export function RelUnique(
     rule: (x: Term, ...rest: any[]) => Goal
@@ -175,6 +177,8 @@ export function RelUnique(
 
 /**
  * Wrap a Goal to deduplicate solutions by a key function or a logic variable/ground term.
+ * 
+ * @reconsider
  */
 export function uniqueGoalBy(key: ((subst: Subst) => string) | Term, goal: Goal): Goal {
     let keyFn: (subst: Subst) => string;
@@ -191,6 +195,9 @@ export function uniqueGoalBy(key: ((subst: Subst) => string) | Term, goal: Goal)
 
 /**
  * Helper: yield only unique solutions for a given logic variable or tuple (like SQL DISTINCT).
+ * 
+ * @reconsider
+ * @like uniqueGoalBy
  */
 export function distinctVar<T>(sourceVar: Term<T> | Term<T>[], subgoal: Goal): Goal {
     if (!Array.isArray(sourceVar)) {
@@ -274,174 +281,6 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
             // xs = nil, so zs = ys
             const s1 = unify(ys, zs, s);
             if (s1) yield s1;
-        }
-    };
-}
-
-
-
-export const pluso = mapRel((x: number, y: number) => x + y);
-
-/**
- * minuso(x, y, z): x - y = z
- */
-export const minuso = mapRel((x: number, y: number) => x - y);
-
-/**
- * divo(x, y, z): x / y = z (integer division)
- */
-export const divo = mapRel((x: number, y: number) => Math.floor(x / y));
-
-/**
- * leq(x, y): x <= y
- */
-export const leq = filterRel((x: number, y: number) => x <= y);
-
-/**
- * geq(x, y): x >= y
- */
-export const geq = filterRel((x: number, y: number) => x >= y);
-
-/**
- * leqo(x, y): constraint, succeeds if x <= y
- */
-export const leqo = filterRel((a: number, b: number) => a <= b);
-
-/**
- * geqo(x, y): constraint, succeeds if x >= y
- */
-export const geqo = filterRel((a: number, b: number) => a >= b);
-
-/**
- * lasto(xs, x): x is the last element of logic list xs.
- */
-export function lasto(xs: Term, x: Term): Goal {
-    return async function* (s: Subst) {
-        const l = walk(xs, s);
-        if (l && typeof l === 'object' && 'tag' in l) {
-            if (l.tag === 'cons') {
-                const consNode = l as { tag: 'cons', head: Term, tail: Term };
-                if (isNil(consNode.tail)) {
-                    const s1 = unify(x, consNode.head, s);
-                    if (s1) yield s1;
-                } else {
-                    yield* await lasto(consNode.tail, x)(s);
-                }
-            }
-        }
-    };
-}
-
-/**
- * reverso(xs, ys): ys is the reverse of logic list xs.
- */
-export function reverso(xs: Term, ys: Term): Goal {
-    return async function* (s: Subst) {
-        // Use an accumulator for efficient reverse
-        async function* revAcc(xs: Term, acc: Term, s: Subst): AsyncGenerator<Subst> {
-            const l = walk(xs, s);
-            if (isCons(l)) {
-                const consNode = l as { tag: 'cons', head: Term, tail: Term };
-                const newAcc = { tag: 'cons', head: consNode.head, tail: acc };
-                yield* await revAcc(consNode.tail, newAcc, s);
-            } else if (isNil(l)) {
-                const s1 = unify(acc, ys, s);
-                if (s1) yield s1;
-            }
-        }
-        yield* await revAcc(xs, { tag: 'nil' }, s);
-    };
-}
-
-/**
- * alldistincto(xs): true if all elements of xs are distinct.
- */
-export function alldistincto(xs: Term): Goal {
-    return async function* (s: Subst) {
-        const arr = walk(xs, s);
-        let jsArr: any[] = [];
-        if (arr && typeof arr === 'object' && 'tag' in arr) {
-            // Convert logic list to JS array
-            let cur: Term = arr;
-            while (isCons(cur)) {
-                jsArr.push(cur.head);
-                cur = cur.tail;
-            }
-        } else if (Array.isArray(arr)) {
-            jsArr = arr;
-        }
-        const seen = new Set();
-        let allDistinct = true;
-        for (const v of jsArr) {
-            const key = JSON.stringify(v);
-            if (seen.has(key)) {
-                allDistinct = false;
-                break;
-            }
-            seen.add(key);
-        }
-        if (allDistinct) yield s;
-    };
-}
-
-/**
- * lengtho(xs, n): n is the length of logic list xs. Works in both directions.
- */
-export function lengtho(xs: Term, n: Term): Goal {
-    return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
-        const nVal = walk(n, s);
-        if (Array.isArray(xsVal)) {
-            // If xs is a JS array
-            const s2 = unify(n, xsVal.length, s);
-            if (s2) yield s2;
-        } else if (isCons(xsVal)) {
-            // If xs is a logic list
-            let count = 0;
-            let cur: Term = xsVal;
-            while (isCons(cur)) {
-                const consNode = cur as { tag: 'cons', head: Term, tail: Term };
-                count++;
-                cur = consNode.tail as Term;
-            }
-            if (isNil(cur)) {
-                const s2 = unify(n, count, s);
-                if (s2) yield s2;
-            }
-        } else if (typeof nVal === 'number' && isVar(xsVal)) {
-            // If n is known, generate a fresh list of that length
-            let list: Term = { tag: 'nil' };
-            for (let i = 0; i < nVal; i++) {
-                list = { tag: 'cons', head: lvar(), tail: list };
-            }
-            const s2 = unify(xs, list, s);
-            if (s2) yield s2;
-        }
-    };
-}
-
-/**
- * removeFirsto(xs, x, ys): ys is xs with the first occurrence of x removed
- */
-export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
-    return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
-        if (isNil(xsVal)) {
-            // Removing from empty list yields empty list
-            yield* eq(ys, nil)(s);
-            return;
-        }
-        if (isCons(xsVal)) {
-            if (xsVal.head === x) {
-                // Remove first occurrence
-                yield* eq(ys, xsVal.tail)(s);
-            } else {
-                // Recurse on tail
-                const rest = lvar();
-                for await (const s1 of and(eq(ys, cons(xsVal.head, rest)), removeFirsto(xsVal.tail, x, rest))(s)) {
-                    yield s1;
-                }
-            }
         }
     };
 }
@@ -540,4 +379,69 @@ export function mapo(rel: (x: Term, y: Term) => Goal, xs: Term, ys: Term): Goal 
     };
 }
 
+// Helper to call aggregateVarMulti with goal function arguments
+export function aggregateRel(goalFn: (...args: Var[]) => Goal): (...args: Var[]) => Goal {
+    return (...args: Var[]) => {
+        if (args.length < 2) throw new Error("aggregateRel requires at least two arguments");
+        const out = args.at(-1);
+        return collecto(
+            out,
+            goalFn(...args),
+            out
+        );
+    };
+}
+
+/**
+ * not(goal): Succeeds if the given goal fails (negation as failure).
+ */
+export function not(goal: Goal): Goal {
+    return async function* (s: Subst) {
+        const gen = goal(s)[Symbol.asyncIterator]();
+        const { done } = await gen.next();
+        if (done) yield s;
+    };
+}
+
+/**
+ * pluso(x, y, z): x + y = z
+ */
+export const pluso = mapRel((x: number, y: number) => x + y);
+/**
+ * subo(x, y, z): x - y = z
+ */
+export const subo = mapRel((x: number, y: number) => x - y);
+/**
+ * multo(x, y, z): x * y = z
+ */
+export const multo = mapRel((x: number, y: number) => x * y);
+/**
+ * divo(x, y, z): x / y = z (integer division)
+ */
+export const divo = mapRel((x: number, y: number) => Math.floor(x / y));
+/**
+ * removeFirsto(xs, x, ys): ys is xs with the first occurrence of x removed
+ */
+export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
+    return async function* (s: Subst) {
+        const xsVal = walk(xs, s);
+        if (isNil(xsVal)) {
+            // Removing from empty list yields empty list
+            yield* eq(ys, nil)(s);
+            return;
+        }
+        if (isCons(xsVal)) {
+            if (xsVal.head === x) {
+                // Remove first occurrence
+                yield* eq(ys, xsVal.tail)(s);
+            } else {
+                // Recurse on tail
+                const rest = lvar();
+                for await (const s1 of and(eq(ys, cons(xsVal.head, rest)), removeFirsto(xsVal.tail, x, rest))(s)) {
+                    yield s1;
+                }
+            }
+        }
+    };
+}
 

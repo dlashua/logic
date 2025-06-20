@@ -2,19 +2,35 @@
 import { Term, Subst, Var, walk, isVar, unify } from './core.ts';
 import { Goal } from './relation.ts';
 
-export function makeFacts() {
+/**
+ * A relation for tuple facts (array-based).
+ * Has a callable interface and a .set method for adding facts.
+ */
+export interface FactRelation {
+    (...query: Term[]): Goal;
+    set: (...fact: Term[]) => void;
+    raw: Term[][];
+    indexes: Map<number, Map<any, Set<number>>>;
+}
+
+/**
+ * A relation for object facts (object-based).
+ * Has a callable interface and a .set method for adding facts.
+ */
+export interface FactObjRelation {
+    (queryObj: Record<string, Term>): Goal;
+    set: (factObj: Record<string, Term>) => void;
+    raw: Record<string, Term>[];
+    indexes: Map<string, Map<any, Set<number>>>;
+    keys: string[];
+}
+
+/**
+ * Create a tuple-based fact relation (like a table of tuples).
+ */
+export function makeFacts(): FactRelation {
     const facts: Term[][] = [];
     const indexes = new Map<number, Map<any, Set<number>>>();
-
-    function intersect<F>(set_a: Set<F>, set_b: Set<F>) {
-        const set_n = new Set<F>();
-        set_a.forEach(item => {
-            if (set_b.has(item)) {
-                set_n.add(item);
-            }
-        });
-        return set_n;
-    }
 
     function goalFn(...query: Term[]): Goal {
         return async function* (s: Subst) {
@@ -62,12 +78,12 @@ export function makeFacts() {
         };
     }
 
-    const isIndexable = (v: any) =>
-        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
+    const relation = (...query: Term[]): Goal => goalFn(...query);
 
-    const wrapper = (...query: Term[]): Goal => goalFn(...query);
-
-    wrapper.set = (...fact: Term[]) => {
+    /**
+     * Add a fact (tuple) to the relation.
+     */
+    relation.set = (...fact: Term[]) => {
         const factIndex = facts.length;
         facts.push(fact);
         fact.forEach((term, i) => {
@@ -87,24 +103,17 @@ export function makeFacts() {
         });
     };
 
-    wrapper.raw = facts;
-    wrapper.indexes = indexes;
-    return wrapper;
+    relation.raw = facts;
+    relation.indexes = indexes;
+    return relation;
 }
 
-export function makeFactsObj(keys: string[]) {
+/**
+ * Create an object-based fact relation (like a table of objects).
+ */
+export function makeFactsObj(keys: string[]): FactObjRelation {
     const facts: Record<string, Term>[] = [];
     const indexes = new Map<string, Map<any, Set<number>>>();
-
-    function intersect<F>(set_a: Set<F>, set_b: Set<F>) {
-        const set_n = new Set<F>();
-        set_a.forEach(item => {
-            if (set_b.has(item)) {
-                set_n.add(item);
-            }
-        });
-        return set_n;
-    }
 
     function goalFn(queryObj: Record<string, Term>): Goal {
         const keys = Object.keys(queryObj);
@@ -148,14 +157,14 @@ export function makeFactsObj(keys: string[]) {
         };
     }
 
-    const isIndexable = (v: any) =>
-        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
-
-    function wrapper(queryObj: Record<string, Term>): Goal {
+    function relation(queryObj: Record<string, Term>): Goal {
         return goalFn(queryObj);
     }
 
-    wrapper.set = (factObj: Record<string, Term>) => {
+    /**
+     * Add a fact (object) to the relation.
+     */
+    relation.set = (factObj: Record<string, Term>) => {
         const keys = Object.keys(factObj);
         const factIndex = facts.length;
         const fact: Record<string, Term> = {};
@@ -181,12 +190,37 @@ export function makeFactsObj(keys: string[]) {
         }
     };
 
-    wrapper.raw = facts;
-    wrapper.indexes = indexes;
-    wrapper.keys = keys;
-    return wrapper;
+    relation.raw = facts;
+    relation.indexes = indexes;
+    relation.keys = keys;
+    return relation;
 }
 
+// --- Helpers ---
+
+/**
+ * Returns the intersection of two sets.
+ */
+export function intersect<F>(set_a: Set<F>, set_b: Set<F>): Set<F> {
+    const set_n = new Set<F>();
+    set_a.forEach(item => {
+        if (set_b.has(item)) {
+            set_n.add(item);
+        }
+    });
+    return set_n;
+}
+
+/**
+ * Returns true if a value is indexable (string, number, boolean, or null).
+ */
+export function isIndexable(v: any): boolean {
+    return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
+}
+
+/**
+ * Aggregates all possible values of a logic variable into an array and binds to sourceVar in a single solution.
+ */
 export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
     return async function* (s: Subst) {
         const results: Term[] = [];
@@ -199,6 +233,9 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
     };
 }
 
+/**
+ * For each unique combination of groupVars, aggregate all values of each aggVar in aggVars, and yield a substitution with arrays bound to each aggVar.
+ */
 export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goal): Goal {
     return async function* (s: Subst) {
         const groupMap = new Map<string, Term[][]>();

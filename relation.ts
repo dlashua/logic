@@ -445,3 +445,27 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
     };
 }
 
+/**
+ * ifte: if-then-else logic goal.
+ * Usage: ifte(cond, thenGoal, elseGoal)
+ * - cond: a goal function (async generator)
+ * - thenGoal: a goal function (async generator)
+ * - elseGoal: a goal function (async generator)
+ */
+export function ifte(cond: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
+    return async function* (s: Subst) {
+        let found = false;
+        for await (const s1 of cond(s)) {
+            found = true;
+            for await (const s2 of thenGoal(s1)) {
+                yield s2;
+            }
+        }
+        if (!found) {
+            for await (const s3 of elseGoal(s)) {
+                yield s3;
+            }
+        }
+    };
+}
+

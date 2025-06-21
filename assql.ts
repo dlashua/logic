@@ -1,9 +1,9 @@
 import { find } from "lodash";
-import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run, or, ifte, disj, Rel, fresh } from "./logic_lib.ts";
+import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run, or, ifte, disj, Rel, fresh, collecto, runEasy } from "./logic_lib.ts";
 import knex, { Knex } from "knex";
 
 
-const $ = createLogicVarProxy();
+const $$ = createLogicVarProxy();
 
 /**
  * makeSQLRelObj: Like makeSQLRel, but query is an object with keys as column names.
@@ -142,35 +142,44 @@ const friends =
         ),
     )
 
+const favnum = makeFacts();
+favnum.set("aubrey", 1);
+favnum.set("daniel", 2);
+favnum.set("jen", 3);
+favnum.set("corey", 4);
+
 const debugGoal = (label: string) => async function* (s: Subst) {
     console.log(`[DEBUG] ${label}:`, s);
     yield s;
 };
 
 // Stepwise debug: test only friends($.name, $.f_name) with eq($.name, "daniel")
-const x = and(
-    person_color($.name, $.color),
-    friends($.name, $.f_name),
-    person_color($.f_name, $.f_color),
-)
-
-const m = new Map();
-let outid = 0;
-import { formatSubstitutions } from "./run.ts";
-
-(async () => {
-    let count = 0;
-    for await (const out of formatSubstitutions(x(m), {
+await runEasy(($) => [
+    {
         name: $.name,
         color: $.color,
-        f_name: $.f_name,
-        f_color: $.f_color,
-    }, 10)) {
-        console.log("OUT", outid++, out);
-    }
-    console.log("DONE");
-    await relDB.db.destroy(); // or whatever your knex instance is called
-})();
+        favnum: $.favnum,
+        // f_name: $.f_name,
+        f_names: $.f_names,
+        // f_color: $.f_color,
+    },
+    and(
+        person_color($.name, $.color),
+        collecto(
+            { name: $.f_name, color: $.f_color },
+            and(
+                friends($.name, $.f_name),
+                person_color($.f_name, $.f_color),
+            ),
+            $.f_names,
+        ),
+        favnum($.name, $.favnum),
+    )
+]).forEach((x: any) => console.log(x))
+
+await relDB.db.destroy();
+
+
 
 /**
  * runGoal: logic goal that runs T.run for the current substitution and yields all resulting substitutions.

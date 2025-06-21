@@ -94,16 +94,13 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                 }
                 // If there are no output variables, do nothing
                 if (outputVars.length === 0) return;
-                // Only support one output variable at a time for now
-                if (outputVars.length > 1) {
-                    throw new Error('Only one output variable supported per SQL relation call for now.');
-                }
-                const outCol = outputVars[0];
-                // Run the SQL query for all possible values
-                const rows = await db(table).select(outCol).where(where);
+                // Generalized: support multiple output variables
+                const rows = await db(table).select(outputVars).where(where);
                 for (const row of rows) {
                     const s2 = new Map(s);
-                    s2.set(queryObj[outCol].id, row[outCol]);
+                    for (const col of outputVars) {
+                        s2.set(queryObj[col].id, row[col]);
+                    }
                     yield s2;
                 }
             };
@@ -152,12 +149,9 @@ const debugGoal = (label: string) => async function* (s: Subst) {
 
 // Stepwise debug: test only friends($.name, $.f_name) with eq($.name, "daniel")
 const x = and(
-    // eq($.name, "daniel"),
-    // debugGoal('before friends'),
+    person_color($.name, $.color),
     friends($.name, $.f_name),
-    // debugGoal('after friends'),
-    // relDB.run,
-    // debugGoal('after relDB.run'),
+    person_color($.f_name, $.f_color),
 )
 
 const m = new Map();
@@ -168,12 +162,11 @@ import { formatSubstitutions } from "./run.ts";
     let count = 0;
     for await (const out of formatSubstitutions(x(m), {
         name: $.name,
-        // color: $.color,
+        color: $.color,
         f_name: $.f_name,
-        // f_color: $.f_color,
+        f_color: $.f_color,
     }, 10)) {
         console.log("OUT", outid++, out);
-        if (++count >= 5) break; // Hard stop after 5 results
     }
     console.log("DONE");
     await relDB.db.destroy(); // or whatever your knex instance is called

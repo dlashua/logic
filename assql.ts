@@ -28,7 +28,7 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
             const selectCols: string[] = [];
             const whereClauses: { col: string; val: any }[] = [];
             for (const col in q.params) {
-                const v = walk(q.params[col], subst);
+                const v = await walk(q.params[col], subst);
                 if (isVar(v)) {
                     selectCols.push(col);
                 } else {
@@ -52,13 +52,11 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                 let ok = false;
                 for (const col of selectCols) {
                     const origVal = q.params[col];
-                    if (isVar(origVal)) {
-                        const walked = walk(origVal, s2);
-                        const unified = unify(walked, row[col], s2);
-                        if (unified) {
-                            s2 = unified;
-                            ok = true;
-                        }
+                    const walked = await walk(origVal, s2);
+                    const unified = await unify(walked, row[col], s2);
+                    if (unified) {
+                        s2 = unified;
+                        ok = true;
                     }
                 }
                 if (ok) {
@@ -72,81 +70,50 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
     };
     const makeRel = async (table: string, primaryKey: string = "id") => {
         return function goal(queryObj: Record<string, any>) {
-            const record_queries = async function* (s: any) {
-                // Check if all values in queryObj are grounded (not variables)
-                // let allGrounded = true;
-                // for (const col in queryObj) {
-                //     if (isVar(queryObj[col])) {
-                //         allGrounded = false;
-                //         break;
-                //     }
-                // }
-                // if (allGrounded) {
-                //     console.log("ALL TERMS GROUNDED");
-                //     // All terms are grounded, do nothing and yield nothing
-                //     return;
-                // }
-                // Find logic variable columns and their var ids
-                const logicVars: Record<string, string> = {};
+            return async function* (s: Subst) {
+                // If all values are grounded, do nothing
+                let allGrounded = true;
                 for (const col in queryObj) {
-                    const v = queryObj[col];
-                    if (isVar(v)) logicVars[col] = v.id;
-                }
-                // Try to find a compatible pattern
-                let merged = false;
-                for (const pat of patterns) {
-                    if (pat.table !== table) continue;
-                    // Only check columns that exist in both pat and queryObj
-                    let compatible = true;
-                    for (const col in pat.params) {
-                        if (!(col in queryObj)) continue;
-                        const vPat = pat.params[col];
-                        const vNew = queryObj[col];
-                        if (isVar(vPat) && isVar(vNew)) {
-                            if (vPat.id !== vNew.id) {
-                                compatible = false;
-                                break;
-                            }
-                        } else if (isVar(vPat) !== isVar(vNew)) {
-                            compatible = false;
-                            break;
-                        } else if (!isVar(vPat) && vPat !== vNew) {
-                            compatible = false;
-                            break;
-                        }
+                    if (isVar(queryObj[col])) {
+                        allGrounded = false;
+                        break;
                     }
-                    if (!compatible) continue;
-                    for (const col in queryObj) {
-                        if (!(col in pat.params)) pat.params[col] = queryObj[col];
-                    }
-                    merged = true;
-                    break;
                 }
-                if (!merged) patterns.push({ table, params: { ...queryObj } });
-                // console.dir({ name: "PAT", patterns, s: JSON.stringify(s.entries()) }, { depth: 100 });
-                yield s;
+                if (allGrounded) return;
+
+                // Build where clause from grounded columns
+                const where: Record<string, any> = {};
+                const outputVars: string[] = [];
+                for (const col in queryObj) {
+                    const v = await walk(queryObj[col], s);
+                    if (isVar(v)) {
+                        outputVars.push(col);
+                    } else {
+                        where[col] = v;
+                    }
+                }
+                // If there are no output variables, do nothing
+                if (outputVars.length === 0) return;
+                // Only support one output variable at a time for now
+                if (outputVars.length > 1) {
+                    throw new Error('Only one output variable supported per SQL relation call for now.');
+                }
+                const outCol = outputVars[0];
+                // Run the SQL query for all possible values
+                const rows = await db(table).select(outCol).where(where);
+                for (const row of rows) {
+                    const s2 = new Map(s);
+                    s2.set(queryObj[outCol].id, row[outCol]);
+                    yield s2;
+                }
             };
-            if (patterns.map(x => x.table).includes(table)) {
-                return record_queries;
-            }
-            return async function* (s: any) {
-                const myruncnt = runcnt++;
-                // console.log("RUNNING", myruncnt, s);
-                for await (const new_s of run(s)) {
-                    if (new_s) {
-                        // console.log("RUN YIELD", myruncnt, new_s);
-                        yield* record_queries(new_s);
-                    }
-                }
-                // console.log("DONE RUNNING", myruncnt);
-            }
         };
     };
 
-    return { makeRel, run };
+    return { makeRel, run, db };
 }
 
-const taps = (msg) =>
+const taps = (msg: string) =>
     async function* (s: Subst) {
         console.log("TAP", msg, s);
         yield s;
@@ -178,22 +145,39 @@ const friends =
         ),
     )
 
+const debugGoal = (label: string) => async function* (s: Subst) {
+    console.log(`[DEBUG] ${label}:`, s);
+    yield s;
+};
+
+// Stepwise debug: test only friends($.name, $.f_name) with eq($.name, "daniel")
 const x = and(
-    person_color($.name, $.color),
+    // eq($.name, "daniel"),
+    // debugGoal('before friends'),
     friends($.name, $.f_name),
-    person_color($.f_name, $.f_color),
-    relDB.run,
+    // debugGoal('after friends'),
+    // relDB.run,
+    // debugGoal('after relDB.run'),
 )
 
 const m = new Map();
 let outid = 0;
-for await (const subst of x(m)) {
-    // Now run the DB queries for this substitution
-    // for await (const dbSubst of T.run(subst)) {
-    // dbSubst is a substitution unified with DB results
-    console.log("OUT", outid++, subst);
-    // }
-}
+import { formatSubstitutions } from "./run.ts";
+
+(async () => {
+    let count = 0;
+    for await (const out of formatSubstitutions(x(m), {
+        name: $.name,
+        // color: $.color,
+        f_name: $.f_name,
+        // f_color: $.f_color,
+    }, 10)) {
+        console.log("OUT", outid++, out);
+        if (++count >= 5) break; // Hard stop after 5 results
+    }
+    console.log("DONE");
+    await relDB.db.destroy(); // or whatever your knex instance is called
+})();
 
 /**
  * runGoal: logic goal that runs T.run for the current substitution and yields all resulting substitutions.

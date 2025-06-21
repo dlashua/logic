@@ -22,7 +22,7 @@ export async function* formatSubstitutions<Fmt extends Record<string, Term<any>>
         for (const key in formatter) {
             const v = formatter[key];
             if (v && typeof v === 'object' && 'id' in v) {
-                out[key] = walk(v, s);
+                out[key] = await walk(v, s);
             } else {
                 out[key] = v;
             }

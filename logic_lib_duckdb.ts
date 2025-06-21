@@ -28,7 +28,7 @@ export function makeFactsDuckDB(table: string, columns: string[], dbPath: string
 
             for (const row of rows) {
                 const fact = columns.map(col => row[col] === undefined ? null : row[col]);
-                const s1 = unify(query, fact, s);
+                const s1 = await unify(query, fact, s);
                 if (s1) yield s1;
             }
         };
@@ -64,7 +64,7 @@ export function makeFactsObjDuckDB(table: string, keys: string[], dbPath: string
                 for (const k of qKeys) {
                     fact[k] = row[k] === undefined ? null : row[k];
                 }
-                const s1 = unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+                const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
                 if (s1) yield s1;
             }
         };

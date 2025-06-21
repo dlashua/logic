@@ -34,7 +34,7 @@ export function makeFacts(): FactRelation {
 
     function goalFn(...query: Term[]): Goal {
         return async function* (s: Subst) {
-            const walkedQuery = query.map(term => walk(term, s));
+            const walkedQuery = await Promise.all(query.map(term => walk(term, s)));
 
             let intersection: Set<number> = new Set<number>();
             let found = false;
@@ -60,7 +60,7 @@ export function makeFacts(): FactRelation {
 
             if (!found) {
                 for (const fact of facts) {
-                    const s1 = unify(query, fact, s);
+                    const s1 = await unify(query, fact, s);
                     if (s1) {
                         yield s1;
                     }
@@ -70,7 +70,7 @@ export function makeFacts(): FactRelation {
 
             for (const factIndex of intersection) {
                 const fact = facts[factIndex];
-                const s1 = unify(query, fact, s);
+                const s1 = await unify(query, fact, s);
                 if (s1) {
                     yield s1;
                 }
@@ -120,7 +120,7 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
         return async function* (s: Subst) {
             const walkedQuery: Record<string, Term> = {};
             for (const k of keys) {
-                walkedQuery[k] = walk(queryObj[k], s);
+                walkedQuery[k] = await walk(queryObj[k], s);
             }
 
             let intersection: Set<number> = new Set<number>();
@@ -143,7 +143,7 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
 
             if (!found) {
                 for (const fact of facts) {
-                    const s1 = unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+                    const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
                     if (s1) yield s1;
                 }
                 return;
@@ -151,7 +151,7 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
 
             for (const factIndex of intersection) {
                 const fact = facts[factIndex];
-                const s1 = unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+                const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
                 if (s1) yield s1;
             }
         };
@@ -225,7 +225,7 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
     return async function* (s: Subst) {
         const results: Term[] = [];
         for await (const subst of subgoal(s)) {
-            results.push(walk(sourceVar, subst));
+            results.push(await walk(sourceVar, subst));
         }
         const s2 = new Map(s);
         s2.set(sourceVar.id, results);
@@ -240,7 +240,7 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
     return async function* (s: Subst) {
         const groupMap = new Map<string, Term[][]>();
         for await (const subst of subgoal(s)) {
-            const groupKey = JSON.stringify(groupVars.map(v => walk(v, subst)));
+            const groupKey = JSON.stringify(await Promise.all(groupVars.map(v => walk(v, subst))));
             let aggArrays = groupMap.get(groupKey);
             if (!aggArrays) {
                 aggArrays = aggVars.map(() => []);
@@ -260,7 +260,7 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
             const groupValues = JSON.parse(groupKey);
             const s2 = new Map(s);
             groupVars.forEach((v, i) => s2.set(v.id, groupValues[i]));
-            aggVars.forEach((v, i) => s2.set(v.id, aggArrays[i]));
+            aggVars.forEach((v, i) => s2.set(v.id, aggArrays[i].map(async x => await x)));
             yield s2;
         }
     };

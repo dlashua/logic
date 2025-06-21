@@ -17,15 +17,15 @@ export function RelUnique(
 /**
  * Wrap a Goal to deduplicate solutions by a key function or a logic variable/ground term.
  */
-export function uniqueGoalBy(key: ((subst: Subst) => string) | Term, goal: Goal): Goal {
-    let keyFn: (subst: Subst) => string;
+export function uniqueGoalBy(key: ((subst: Subst) => Promise<string>) | Term, goal: Goal): Goal {
+    let keyFn: (subst: Subst) => Promise<string>;
     if (typeof key === 'function') {
-        keyFn = key as (subst: Subst) => string;
+        keyFn = key as (subst: Subst) => Promise<string>;
     } else if (typeof key === 'object' && key !== null && 'tag' in key && key.tag === 'var') {
-        keyFn = (subst: Subst) => String(walk(key, subst));
+        keyFn = async (subst: Subst) => String(await walk(key, subst));
     } else {
         const groundKey = String(key);
-        keyFn = () => groundKey;
+        keyFn = async () => groundKey;
     }
     return (s: Subst) => uniqueBy(goal(s), keyFn);
 }
@@ -40,7 +40,7 @@ export function distinctVar<T>(sourceVar: Term<T> | Term<T>[], subgoal: Goal): G
     return async function* (s: Subst) {
         const seen = new Set<string>();
         for await (const subst of subgoal(s)) {
-            const value = sourceVar.map(v => walk(v, subst));
+            const value = await Promise.all(sourceVar.map(v => walk(v, subst)));
             const key = JSON.stringify(value);
             if (!seen.has(key)) {
                 seen.add(key);
@@ -53,10 +53,10 @@ export function distinctVar<T>(sourceVar: Term<T> | Term<T>[], subgoal: Goal): G
 /**
  * Remove duplicates from an async generator based on a key function.
  */
-export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) => K): AsyncGenerator<T> {
+export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) => Promise<K>): AsyncGenerator<T> {
     const seen = new Set<K>();
     for await (const item of gen) {
-        const key = keyFn(item);
+        const key = await keyFn(item);
         if (!seen.has(key)) {
             seen.add(key);
             yield item;
@@ -69,7 +69,7 @@ export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) =
  */
 export function alldistincto(xs: Term): Goal {
     return async function* (s: Subst) {
-        const arr = walk(xs, s);
+        const arr = await walk(xs, s);
         let jsArr: any[] = [];
         if (arr && typeof arr === 'object' && 'tag' in arr) {
             // Convert logic list to JS array
@@ -100,7 +100,7 @@ export function alldistincto(xs: Term): Goal {
  */
 export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
     return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
+        const xsVal = await walk(xs, s);
         if (isNil(xsVal)) {
             // Removing from empty list yields empty list
             yield* eq(ys, nil)(s);
@@ -139,7 +139,7 @@ export function logicListToArray(list: Term): Term[] {
  */
 export function permuteo(xs: Term, ys: Term): Goal {
     return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
+        const xsVal = await walk(xs, s);
         if (isNil(xsVal)) {
             yield* eq(ys, nil)(s);
             return;
@@ -152,9 +152,9 @@ export function permuteo(xs: Term, ys: Term): Goal {
                 for await (const s1 of and(removeFirsto(xsVal, head, rest),
                     permuteo(rest, lvar()),
                     eq(ys, cons(head, lvar())))(s)) {
-                    const ysVal2 = walk(ys, s1);
+                    const ysVal2 = await walk(ys, s1);
                     if (isCons(ysVal2)) {
-                        for await (const s2 of eq(ysVal2.tail, walk(lvar(), s1))(s1)) {
+                        for await (const s2 of eq(ysVal2.tail, await walk(lvar(), s1))(s1)) {
                             yield s2;
                         }
                     }
@@ -173,7 +173,7 @@ export function collecto(x: Term, goal: Goal, xs: Term): Goal {
         // Collect all values of x under goal
         const results: Term[] = [];
         for await (const s1 of goal(s)) {
-            results.push(walk(x, s1));
+            results.push(await walk(x, s1));
         }
         // Convert results to a logic list
         let logicList: LogicList = nil;
@@ -192,8 +192,8 @@ export function collecto(x: Term, goal: Goal, xs: Term): Goal {
  */
 export function mapo(rel: (x: Term, y: Term) => Goal, xs: Term, ys: Term): Goal {
     return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
-        const ysVal = walk(ys, s);
+        const xsVal = await walk(xs, s);
+        const ysVal = await walk(ys, s);
         if (isNil(xsVal)) {
             // xs is empty, ys must be empty
             yield* eq(ys, nil)(s);

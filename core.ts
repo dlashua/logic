@@ -40,35 +40,35 @@ export function isVar(x: Term): x is Var {
 
 /**
  * Walk: find the value a variable is bound to, recursively.
- * If the value is a thunk, evaluate it and cache the result.
+ * If the value is a thunk, evaluate it (await if async) and cache the result.
  */
-export function walk(u: Term, s: Subst): Term {
+export async function walk(u: Term, s: Subst): Promise<Term> {
     if (isVar(u) && s.has(u.id)) {
         let v = s.get(u.id)!;
         // Evaluate thunks until we get a non-thunk
         while (typeof v === 'function') {
-            v = (v as Thunk)();
+            v = await (v as Thunk | AsyncThunk)();
         }
         return walk(v, s);
     }
     // Handle logic lists
     if (u && typeof u === 'object' && 'tag' in u) {
         if ((u as any).tag === 'cons') {
-            return cons(walk((u as any).head, s), walk((u as any).tail, s));
+            return cons(await walk((u as any).head, s), await walk((u as any).tail, s));
         }
         if ((u as any).tag === 'nil') {
             return nil;
         }
     }
     if (Array.isArray(u)) {
-        return u.map(x => walk(x, s));
+        return Promise.all(u.map(x => walk(x, s)));
     }
     if (u && typeof u === 'object' && !isVar(u)) {
         // Recursively walk object properties (but not null)
         const out: Record<string, Term> = {};
         for (const k in u) {
             if (Object.prototype.hasOwnProperty.call(u, k)) {
-                out[k] = walk((u as any)[k], s);
+                out[k] = await walk((u as any)[k], s);
             }
         }
         return out;
@@ -76,19 +76,21 @@ export function walk(u: Term, s: Subst): Term {
     return u;
 }
 
+export type AsyncThunk = () => Promise<Term>;
+
 /**
  * Unification: attempts to unify two terms under a substitution.
  */
-export function unify(u: Term, v: Term, s: Subst): Subst | null {
-    u = walk(u, s);
-    v = walk(v, s);
+export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
+    u = await walk(u, s);
+    v = await walk(v, s);
     if (isVar(u)) {
         return extendSubst(u, v, s);
     } else if (isVar(v)) {
         return extendSubst(v, u, s);
     } else if (Array.isArray(u) && Array.isArray(v) && u.length === v.length) {
         for (let i = 0; i < u.length; i++) {
-            const sNext = unify(u[i], v[i], s);
+            const sNext = await unify(u[i], v[i], s);
             if (!sNext) return null;
             s = sNext;
         }
@@ -96,9 +98,9 @@ export function unify(u: Term, v: Term, s: Subst): Subst | null {
     } else if (u && typeof u === 'object' && v && typeof v === 'object' && 'tag' in u && 'tag' in v) {
         // Logic list unification
         if ((u as any).tag === 'cons' && (v as any).tag === 'cons') {
-            const s1 = unify((u as any).head, (v as any).head, s);
+            const s1 = await unify((u as any).head, (v as any).head, s);
             if (!s1) return null;
-            return unify((u as any).tail, (v as any).tail, s1);
+            return await unify((u as any).tail, (v as any).tail, s1);
         }
         if ((u as any).tag === 'nil' && (v as any).tag === 'nil') {
             return s;

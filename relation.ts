@@ -97,10 +97,13 @@ export const or = (...goals: Goal[]) => {
 export function filterRel(pred: (...args: any[]) => boolean): (...args: Term[]) => Goal {
     return (...args: Term[]) =>
         async function* (s: Subst) {
-            const vals = args.map(arg => walk(arg, s));
+            const vals = await Promise.all(args.map(arg => walk(arg, s)));
             if (pred(...vals)) yield s;
         };
 }
+
+export const gtc = filterRel((x, gt) => x > gt);
+
 
 /**
  * Create a relation from a function mapping input terms to an output term.
@@ -108,7 +111,7 @@ export function filterRel(pred: (...args: any[]) => boolean): (...args: Term[]) 
 export const mapRel = <F extends (...args: any) => any>(fn: F) => {
     return function (...args: Parameters<TermedArgs<F>>) {
         return async function* (s: Subst) {
-            const vals = await Promise.all(args.map(arg => walk(arg, s)));
+            const vals = await Promise.all(args.map(async arg => await walk(arg, s)));
             const inVals = vals.slice(0, -1);
             const outVal = vals[vals.length - 1];
             if (inVals.every(v => typeof v !== 'undefined' && !isVar(v))) {
@@ -524,6 +527,46 @@ export function conso(head: Term, tail: Term, xs: Term): Goal {
                 if (s2) yield s2;
             }
         }
+    };
+}
+
+/**
+ * distincto(x, goal, xs): xs is the list of distinct values of x under goal.
+ * Usage: distincto(x, goal, xs)
+ */
+export function distincto(x: Term, goal: Goal, xs: Term): Goal {
+    return async function* (s: Subst) {
+        const seen = new Set<any>();
+        const results: Term[] = [];
+        for await (const s1 of goal(s)) {
+            const val = await walk(x, s1);
+            // Use JSON.stringify for deep equality; customize as needed
+            const key = JSON.stringify(val);
+            if (!seen.has(key)) {
+                seen.add(key);
+                results.push(val);
+            }
+        }
+        // Convert results to a logic list
+        let logicList: LogicList = nil;
+        for (let i = results.length - 1; i >= 0; --i) {
+            logicList = cons(results[i], logicList);
+        }
+        yield* eq(xs, logicList)(s);
+    };
+}
+
+/**
+ * counto(x, goal, n): n is the number of (distinct) values of x under goal.
+ * Usage: counto(x, goal, n)
+ */
+export function counto(x: Term, goal: Goal, n: Term): Goal {
+    return async function* (s: Subst) {
+        let count = 0;
+        for await (const s1 of goal(s)) {
+            count++;
+        }
+        yield* eq(n, count)(s);
     };
 }
 

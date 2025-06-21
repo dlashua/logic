@@ -38,11 +38,14 @@ export function createLogicVarProxy<K extends string | symbol = string>(varMap?:
     if (!varMap) varMap = new Map<K, Var>();
     return new Proxy({}, {
         get(target, prop: K) {
+            if (typeof prop !== "string") {
+                return undefined;
+            }
             if (prop === "_") {
                 return lvar();
             }
             if (!varMap!.has(prop)) {
-                varMap!.set(prop, lvar());
+                varMap!.set(prop, lvar(prop));
             }
             return varMap!.get(prop);
         },

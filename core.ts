@@ -3,14 +3,14 @@
 /**
  * Logic variable representation
  */
-export type Var = { tag: 'var', id: number };
+export type Var = { tag: 'var', id: string };
 let varCounter = 0;
 
 /**
  * Create a new logic variable.
  */
-export function lvar(): Var {
-    return { tag: 'var', id: varCounter++ };
+export function lvar(name = ""): Var {
+    return { tag: 'var', id: `${name}_${varCounter++}` };
 }
 /**
  * Reset the logic variable counter (useful for tests/determinism).
@@ -27,7 +27,7 @@ export type Term<T = unknown> = Var | T | Term<T>[] | null | undefined;
 /**
  * Substitution: mapping from variable id to value
  */
-export type Subst = Map<number, Term>;
+export type Subst = Map<string, Term>;
 
 /**
  * Returns true if the value is a logic variable.

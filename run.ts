@@ -67,7 +67,7 @@ export function createLogicVarProxy<K extends string | symbol = string>(varMap?:
 /**
  * Main run function for logic programs. Expects a function returning [formatter, goal].
  */
-export async function* run<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
+export function run<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
     f: (...vars: Term<any>[]) => [Fmt, Goal],
     n: number = Infinity
 ) {
@@ -80,15 +80,15 @@ export async function* run<Fmt extends Record<string, Term<any>> = Record<string
     }
     const formatter = result[0] as Fmt;
     const goal = result[1] as Goal;
-    for await (const item of formatSubstitutions(goal(s0), formatter, n)) {
-        yield item;
-    }
+    const gen = formatSubstitutions(goal(s0), formatter, n);
+    // Attach async fluent methods
+    return withFluentAsyncGen(gen);
 }
 
 /**
  * Main runEasy function for logic programs using a Proxy for logic variables.
  */
-export async function* runEasy<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
+export function runEasy<Fmt extends Record<string, Term<any>> = Record<string, Term<any>>>(
     f: ($: Record<string, Var>) => [Fmt, Goal],
     n: number = Infinity
 ) {
@@ -100,9 +100,9 @@ export async function* runEasy<Fmt extends Record<string, Term<any>> = Record<st
     }
     const formatter = result[0] as Fmt;
     const goal = result[1] as Goal;
-    for await (const item of formatSubstitutions(goal(s0), formatter, n)) {
-        yield item;
-    }
+    const gen = formatSubstitutions(goal(s0), formatter, n);
+    // Attach async fluent methods
+    return withFluentAsyncGen(gen);
 }
 
 // --- Helpers ---
@@ -169,6 +169,59 @@ export function withFluentGen<T>(gen: Generator<T>) {
             function* groupGen(gen: Generator<R>): Generator<[K, V[]]> {
                 const map = new Map<K, V[]>();
                 for (const item of gen) {
+                    const key = keyFn(item);
+                    const value = valueFn(item);
+                    if (!map.has(key)) map.set(key, []);
+                    map.get(key)!.push(value);
+                }
+                for (const entry of map.entries()) {
+                    yield entry;
+                }
+            }
+            return attachFluent<[K, V[]]>(groupGen(g));
+        };
+
+        return fluent;
+    }
+
+    return attachFluent<T>(gen);
+}
+
+// Utility to add fluent methods to an async generator
+export function withFluentAsyncGen<T>(gen: AsyncGenerator<T>) {
+    type FluentAsyncGen<R> = AsyncGenerator<R> & {
+        toArray(): Promise<R[]>;
+        forEach(cb: (item: R) => Promise<void> | void): Promise<void>;
+        map<U>(cb: (item: R) => Promise<U> | U): FluentAsyncGen<U>;
+        groupBy<K, V>(keyFn: (item: R) => K, valueFn: (item: R) => V): FluentAsyncGen<[K, V[]]>;
+    };
+
+    function attachFluent<R>(g: AsyncGenerator<R>): FluentAsyncGen<R> {
+        const fluent = g as FluentAsyncGen<R>;
+
+        fluent.toArray = async () => {
+            const arr: R[] = [];
+            for await (const item of g) arr.push(item);
+            return arr;
+        };
+
+        fluent.forEach = async (cb: (item: R) => Promise<void> | void) => {
+            for await (const item of g) await cb(item);
+        };
+
+        fluent.map = <U>(cb: (item: R) => Promise<U> | U): FluentAsyncGen<U> => {
+            async function* mapped(gen: AsyncGenerator<R>) {
+                for await (const item of gen) {
+                    yield await cb(item);
+                }
+            }
+            return attachFluent<U>(mapped(g));
+        };
+
+        fluent.groupBy = <K, V>(keyFn: (item: R) => K, valueFn: (item: R) => V): FluentAsyncGen<[K, V[]]> => {
+            async function* groupGen(gen: AsyncGenerator<R>): AsyncGenerator<[K, V[]]> {
+                const map = new Map<K, V[]>();
+                for await (const item of gen) {
                     const key = keyFn(item);
                     const value = valueFn(item);
                     if (!map.has(key)) map.set(key, []);

@@ -11,7 +11,7 @@ export type Goal = (s: Subst) => AsyncGenerator<Subst>;
  */
 export function eq(u: Term, v: Term): Goal {
     return async function* (s: Subst) {
-        const s2 = unify(u, v, s);
+        const s2 = await unify(u, v, s);
         if (s2) yield s2;
     };
 }
@@ -38,7 +38,7 @@ export function fresh(f: (...vars: Var[]) => Goal | [Record<string, Var>, Goal] 
         } else {
             throw new Error('Invalid result from fresh subgoal');
         }
-        yield* await goal(s);
+        for await (const s1 of goal(s)) yield s1;
     };
 }
 
@@ -47,8 +47,8 @@ export function fresh(f: (...vars: Var[]) => Goal | [Record<string, Var>, Goal] 
  */
 export function disj(g1: Goal, g2: Goal): Goal {
     return async function* (s: Subst) {
-        yield* await g1(s);
-        yield* await g2(s);
+        for await (const s2 of g1(s)) yield s2;
+        for await (const s2 of g2(s)) yield s2;
     };
 }
 
@@ -58,7 +58,7 @@ export function disj(g1: Goal, g2: Goal): Goal {
 export function conj(g1: Goal, g2: Goal): Goal {
     return async function* (s: Subst) {
         for await (const s1 of g1(s)) {
-            yield* await g2(s1);
+            for await (const s2 of g2(s1)) yield s2;
         }
     };
 }
@@ -70,7 +70,7 @@ export function conde(...clauses: Goal[][]): Goal {
     return async function* (s: Subst) {
         for (const clause of clauses) {
             const goal = clause.reduce((a, b) => (ss: Subst) => conj(a, b)(ss));
-            yield* await goal(s);
+            for await (const s1 of goal(s)) yield s1;
         }
     };
 }
@@ -105,17 +105,15 @@ export function filterRel(pred: (...args: any[]) => boolean): (...args: Term[]) 
 /**
  * Create a relation from a function mapping input terms to an output term.
  */
-export function mapRel<F extends (...args: any) => any>(
-    fn: F
-) {
+export const mapRel = <F extends (...args: any) => any>(fn: F) => {
     return function (...args: Parameters<TermedArgs<F>>) {
         return async function* (s: Subst) {
-            const vals = args.map(arg => walk(arg, s));
+            const vals = await Promise.all(args.map(arg => walk(arg, s)));
             const inVals = vals.slice(0, -1);
             const outVal = vals[vals.length - 1];
             if (inVals.every(v => typeof v !== 'undefined' && !isVar(v))) {
                 const result = fn(...(inVals as Parameters<F>));
-                const s2 = unify(outVal, result, s);
+                const s2 = await unify(outVal, result, s);
                 if (s2) yield s2;
             }
         };
@@ -134,14 +132,12 @@ export const mapInlineLazy = <F extends (...args: any) => any>(fn: F, ...args: P
     return async function* (s: Subst) {
         const inArgs = args.slice(0, -1);
         const outVar = args[args.length - 1];
-        // Only store a thunk if outVar is a logic variable
         if (isVar(outVar)) {
-            s.set(outVar.id, () => fn(...inArgs.map(arg => walk(arg, s))));
+            s.set(outVar.id, async () => fn(...await Promise.all(inArgs.map(arg => walk(arg, s)))));
             yield s;
         } else {
-            // If outVar is not a variable, behave like mapInline
-            const result = fn(...inArgs.map(arg => walk(arg, s)));
-            const s2 = unify(outVar, result, s);
+            const result = fn(...await Promise.all(inArgs.map(arg => walk(arg, s))));
+            const s2 = await unify(outVar, result, s);
             if (s2) yield s2;
         }
     };
@@ -167,16 +163,17 @@ export function Rel(fn: (...args: any[]) => Goal): (...args: any[]) => Goal {
  */
 export function membero(x: Term, list: Term): Goal {
     return async function* (s: Subst) {
-        const l = walk(list, s);
+        const l = await walk(list, s);
         if (l && typeof l === 'object' && 'tag' in l) {
             if ((l as any).tag === 'cons') {
-                const s1 = unify(x, (l as any).head, s);
+                const s1 = await unify(x, (l as any).head, s);
                 if (s1) yield s1;
-                yield* await membero(x, (l as any).tail)(s);
+                for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
             }
         } else if (Array.isArray(l)) {
             for (const item of l) {
-                const s2 = unify(x, item, s);
+                const walkedItem = await walk(item, s);
+                const s2 = await unify(x, walkedItem, s);
                 if (s2) yield s2;
             }
         }
@@ -200,15 +197,15 @@ export function RelUnique(
  * 
  * @reconsider
  */
-export function uniqueGoalBy(key: ((subst: Subst) => string) | Term, goal: Goal): Goal {
-    let keyFn: (subst: Subst) => string;
+export function uniqueGoalBy(key: ((subst: Subst) => Promise<string>) | Term, goal: Goal): Goal {
+    let keyFn: (subst: Subst) => Promise<string>;
     if (typeof key === 'function') {
-        keyFn = key as (subst: Subst) => string;
+        keyFn = key as (subst: Subst) => Promise<string>;
     } else if (typeof key === 'object' && key !== null && 'tag' in key && key.tag === 'var') {
-        keyFn = (subst: Subst) => String(walk(key, subst));
+        keyFn = async (subst: Subst) => String(await walk(key, subst));
     } else {
         const groundKey = String(key);
-        keyFn = () => groundKey;
+        keyFn = async () => groundKey;
     }
     return (s: Subst) => uniqueBy(goal(s), keyFn);
 }
@@ -226,7 +223,7 @@ export function distinctVar<T>(sourceVar: Term<T> | Term<T>[], subgoal: Goal): G
     return async function* (s: Subst) {
         const seen = new Set<string>();
         for await (const subst of subgoal(s)) {
-            const value = sourceVar.map(v => walk(v, subst));
+            const value = await Promise.all(sourceVar.map(v => walk(v, subst)));
             const key = JSON.stringify(value);
             if (!seen.has(key)) {
                 seen.add(key);
@@ -239,10 +236,10 @@ export function distinctVar<T>(sourceVar: Term<T> | Term<T>[], subgoal: Goal): G
 /**
  * Remove duplicates from an async generator based on a key function.
  */
-export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) => K): AsyncGenerator<T> {
+export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) => Promise<K>): AsyncGenerator<T> {
     const seen = new Set<K>();
     for await (const item of gen) {
-        const key = keyFn(item);
+        const key = await keyFn(item);
         if (!seen.has(key)) {
             seen.add(key);
             yield item;
@@ -256,10 +253,10 @@ export async function* uniqueBy<T, K>(gen: AsyncGenerator<T>, keyFn: (item: T) =
  */
 export function firsto(x: Term, xs: Term): Goal {
     return async function* (s: Subst) {
-        const l = walk(xs, s);
+        const l = await walk(xs, s);
         if (isCons(l)) {
             const consNode = l as { tag: 'cons', head: Term, tail: Term };
-            const s1 = unify(x, consNode.head, s);
+            const s1 = await unify(x, consNode.head, s);
             if (s1) yield s1;
         }
     };
@@ -271,10 +268,10 @@ export function firsto(x: Term, xs: Term): Goal {
  */
 export function resto(xs: Term, tail: Term): Goal {
     return async function* (s: Subst) {
-        const l = walk(xs, s);
+        const l = await walk(xs, s);
         if (isCons(l)) {
             const consNode = l as { tag: 'cons', head: Term, tail: Term };
-            const s1 = unify(tail, consNode.tail, s);
+            const s1 = await unify(tail, consNode.tail, s);
             if (s1) yield s1;
         }
     };
@@ -286,20 +283,19 @@ export function resto(xs: Term, tail: Term): Goal {
  */
 export function appendo(xs: Term, ys: Term, zs: Term): Goal {
     return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
+        const xsVal = await walk(xs, s);
         if (isCons(xsVal)) {
             const consNode = xsVal as { tag: 'cons', head: Term, tail: Term };
-            // xs = cons(head, tail)
             const head = consNode.head;
             const tail = consNode.tail;
-            // zs = cons(head, rest)
             const rest = lvar();
-            for await (const s1 of unify(zs, { tag: 'cons', head, tail: rest }, s) ? [unify(zs, { tag: 'cons', head, tail: rest }, s)!] : []) {
-                yield* await appendo(tail, ys, rest)(s1);
+            // Fix: don't double-await unify, and don't use for-await on a non-async iterable
+            const s1 = await unify(zs, { tag: 'cons', head, tail: rest }, s);
+            if (s1) {
+                for await (const s2 of appendo(tail, ys, rest)(s1)) yield s2;
             }
         } else if (isNil(xsVal)) {
-            // xs = nil, so zs = ys
-            const s1 = unify(ys, zs, s);
+            const s1 = await unify(ys, zs, s);
             if (s1) yield s1;
         }
     };
@@ -444,7 +440,7 @@ export const divo = mapRel((x: number, y: number) => Math.floor(x / y));
  */
 export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
     return async function* (s: Subst) {
-        const xsVal = walk(xs, s);
+        const xsVal = await walk(xs, s);
         if (isNil(xsVal)) {
             // Removing from empty list yields empty list
             yield* eq(ys, nil)(s);
@@ -484,6 +480,48 @@ export function ifte(cond: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
         if (!found) {
             for await (const s3 of elseGoal(s)) {
                 yield s3;
+            }
+        }
+    };
+}
+
+/**
+ * lasto(x, xs): x is the last element of logic list xs.
+ * Usage: lasto(x, xs)
+ */
+export function lasto(x: Term, xs: Term): Goal {
+    return async function* (s: Subst) {
+        const xsVal = await walk(xs, s);
+        if (isCons(xsVal)) {
+            for await (const s1 of lasto(x, xsVal.tail)(s)) {
+                yield s1;
+            }
+        } else if (isNil(xsVal)) {
+        } else {
+            const s1 = await unify(x, xsVal, s);
+            if (s1) yield s1;
+        }
+    };
+}
+
+/**
+ * conso(head, tail, xs): xs is the logic list with head as first element and tail as rest.
+ * Usage: conso(head, tail, xs)
+ */
+export function conso(head: Term, tail: Term, xs: Term): Goal {
+    return async function* (s: Subst) {
+        const xsVal = await walk(xs, s);
+        if (isCons(xsVal)) {
+            const s1 = await unify(head, xsVal.head, s);
+            if (s1) {
+                const s2 = await unify(tail, xsVal.tail, s1);
+                if (s2) yield s2;
+            }
+        } else if (isNil(xsVal)) {
+            const s1 = await unify(head, nil, s);
+            if (s1) {
+                const s2 = await unify(tail, nil, s1);
+                if (s2) yield s2;
             }
         }
     };

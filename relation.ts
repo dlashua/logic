@@ -128,6 +128,26 @@ export const mapInline = <F extends (...args: any) => any>(fn: F, ...args: Param
 }
 
 /**
+ * mapInlineLazy: Like mapInline, but stores the mapping as a thunk for lazy evaluation.
+ */
+export const mapInlineLazy = <F extends (...args: any) => any>(fn: F, ...args: Parameters<TermedArgs<F>>) => {
+    return async function* (s: Subst) {
+        const inArgs = args.slice(0, -1);
+        const outVar = args[args.length - 1];
+        // Only store a thunk if outVar is a logic variable
+        if (isVar(outVar)) {
+            s.set(outVar.id, () => fn(...inArgs.map(arg => walk(arg, s))));
+            yield s;
+        } else {
+            // If outVar is not a variable, behave like mapInline
+            const result = fn(...inArgs.map(arg => walk(arg, s)));
+            const s2 = unify(outVar, result, s);
+            if (s2) yield s2;
+        }
+    };
+}
+
+/**
  * Type helper for mapping function signatures to relation signatures.
  */
 export type TermedArgs<T extends (...args: any) => any> =

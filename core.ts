@@ -21,13 +21,15 @@ export function resetVarCounter() {
 
 /**
  * Term type with generics for better type hinting
+ * Now supports thunks for lazy evaluation.
  */
-export type Term<T = unknown> = Var | T | Term<T>[] | null | undefined;
+export type Thunk = () => Term;
+export type Term<T = unknown> = Var | T | Term<T>[] | Thunk | null | undefined;
 
 /**
  * Substitution: mapping from variable id to value
  */
-export type Subst = Map<string, Term>;
+export type Subst = Map<string, Term<any>>;
 
 /**
  * Returns true if the value is a logic variable.
@@ -38,10 +40,16 @@ export function isVar(x: Term): x is Var {
 
 /**
  * Walk: find the value a variable is bound to, recursively.
+ * If the value is a thunk, evaluate it and cache the result.
  */
 export function walk(u: Term, s: Subst): Term {
     if (isVar(u) && s.has(u.id)) {
-        return walk(s.get(u.id)!, s);
+        let v = s.get(u.id)!;
+        // Evaluate thunks until we get a non-thunk
+        while (typeof v === 'function') {
+            v = (v as Thunk)();
+        }
+        return walk(v, s);
     }
     // Handle logic lists
     if (u && typeof u === 'object' && 'tag' in u) {

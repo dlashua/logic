@@ -1,150 +1,101 @@
 import { find } from "lodash";
-import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify } from "./logic_lib.ts";
-import knex from "knex";
+import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run } from "./logic_lib.ts";
+import knex, { Knex } from "knex";
 
 
 const $ = createLogicVarProxy();
-
-export const makeSQLRel = (table) => {
-    const patterns = [];
-    const fn = function T(...query: Term[]) {
-        const columns = ["e", "a", "v"];
-        return async function* (s: Subst) {
-            const params: Record<string, any> = {};
-            const select: [string, number][] = [];
-            const where: string[] = [];
-            const varMap: Record<string, string> = {};
-            query.forEach((q, i) => {
-                const v = walk(q, s);
-                if (isVar(v)) {
-                    select.push([columns[i], v.id]);
-                    varMap[columns[i]] = `var_${v.id}`;
-                } else {
-                    where.push(`${columns[i]} = ${typeof v === 'string' ? `'${v}'` : v}`);
-                }
-                params[columns[i]] = v;
-            });
-            patterns.push({ select, where, varMap, params, table });
-            yield s;
-        };
-    };
-    fn.sql = () => patterns;
-    return fn;
-}
 
 /**
  * makeSQLRelObj: Like makeSQLRel, but query is an object with keys as column names.
  * Smarter version: merges patterns with the same table and primary key variable.
  */
-export const makeRelDB = async (knex_connect_options) => {
+export const makeRelDB = async (knex_connect_options: Knex.Config) => {
     const db = knex(knex_connect_options);
     return (table: string, primaryKey: string = "id") => {
         type Pattern = {
-            select: [string, number][];
-            where: string[];
-            varMap: Record<string, string>;
-            params: Record<string, any>;
             table: string;
+            params: Record<string, any>;
         };
         const patterns: Pattern[] = [];
-        const fn = function T(queryObj: Record<string, Term>) {
-            return async function* (s: Subst) {
-                const params: Record<string, any> = {};
-                const select: [string, number][] = [];
-                const where: string[] = [];
-                const varMap: Record<string, string> = {};
-                for (const col of Object.keys(queryObj)) {
-                    const v = walk(queryObj[col], s);
-                    if (isVar(v)) {
-                        select.push([col, v.id]);
-                        varMap[col] = `var_${v.id}`;
-                    } else {
-                        where.push(`${col} = ${typeof v === 'string' ? `'${v}'` : v}`);
-                    }
-                    params[col] = v;
+        const fn = function goal(queryObj: Record<string, any>) {
+            return async function* (s: any) {
+                // Find logic variable columns and their var ids
+                const logicVars: Record<string, string> = {};
+                for (const col in queryObj) {
+                    const v = queryObj[col];
+                    if (isVar(v)) logicVars[col] = v.id;
                 }
-                patterns.push({ select, where, varMap, params, table });
-                // Don't yield yet; wait for all patterns to be collected
+                // Try to find a compatible pattern
+                let merged = false;
+                for (const pat of patterns) {
+                    if (pat.table !== table) continue;
+                    // Only check columns that exist in both pat and queryObj
+                    let compatible = true;
+                    for (const col in pat.params) {
+                        if (!(col in queryObj)) continue;
+                        const vPat = pat.params[col];
+                        const vNew = queryObj[col];
+                        if (isVar(vPat) && isVar(vNew)) {
+                            if (vPat.id !== vNew.id) {
+                                compatible = false;
+                                break;
+                            }
+                        } else if (isVar(vPat) !== isVar(vNew)) {
+                            compatible = false;
+                            break;
+                        } else if (!isVar(vPat) && vPat !== vNew) {
+                            compatible = false;
+                            break;
+                        }
+                    }
+                    if (!compatible) continue;
+                    for (const col in queryObj) {
+                        if (!(col in pat.params)) pat.params[col] = queryObj[col];
+                    }
+                    merged = true;
+                    break;
+                }
+                if (!merged) patterns.push({ table, params: { ...queryObj } });
+                // console.dir({ name: "PAT", patterns }, { depth: 100 });
                 yield s;
             };
         };
-        fn.sql = () => {
-            // Group by table and primary key var id (if present)
-            const grouped: Record<string, Pattern> = {};
-            for (const pat of patterns) {
-                const pkVar = pat.varMap[primaryKey];
-                const groupKey = pkVar ? `${pat.table}|${pkVar}` : `${pat.table}|${Math.random()}`;
-                if (!grouped[groupKey]) {
-                    grouped[groupKey] = {
-                        select: [...pat.select],
-                        where: [...pat.where],
-                        varMap: { ...pat.varMap },
-                        params: { ...pat.params },
-                        table: pat.table
-                    };
-                } else {
-                    // Merge selects
-                    for (const sel of pat.select) {
-                        if (!grouped[groupKey].select.some(([c, id]) => c === sel[0] && id === sel[1])) {
-                            grouped[groupKey].select.push(sel);
-                        }
-                    }
-                    // Merge where clauses
-                    for (const w of pat.where) {
-                        if (!grouped[groupKey].where.includes(w)) {
-                            grouped[groupKey].where.push(w);
-                        }
-                    }
-                    // Merge varMaps and params
-                    Object.assign(grouped[groupKey].varMap, pat.varMap);
-                    Object.assign(grouped[groupKey].params, pat.params);
-                }
-            }
-            patterns.splice(0, patterns.length);
-            return Object.values(grouped);
-        };
         let qcnt = 0;
-        // The generator that actually runs the SQL and yields substitutions
-        fn.run = async function* (s: Subst) {
-            // console.dir(patterns, { depth: 100 });
-            const queries = fn.sql();
-            while (queries.length > 0) {
-                const q = queries.shift();
-                const myqid = ++qcnt;
-                // For this subst, reconstruct select/where from params and varMap
-                let selectCols: string[] = [];
-                let whereClauses: string[] = [];
-                for (const col of Object.keys(q.params)) {
-                    const origVal = q.params[col];
-                    const val = isVar(origVal) ? walk(origVal, s) : origVal;
-                    if (isVar(val)) {
+        fn.run = async function* (s: any) {
+            async function* runPatterns(idx: number, subst: Subst): AsyncGenerator<Subst> {
+                if (idx >= patterns.length) {
+                    yield subst;
+                    return;
+                }
+                const q = patterns[idx];
+                const selectCols: string[] = [];
+                const whereClauses: { col: string; val: any }[] = [];
+                for (const col in q.params) {
+                    const v = walk(q.params[col], subst);
+                    if (isVar(v)) {
                         selectCols.push(col);
                     } else {
-                        whereClauses.push(`${col} = ${typeof val === 'string' ? `'${val}'` : val}`);
+                        whereClauses.push({ col, val: v });
                     }
                 }
-                // Build knex query
-                if (selectCols.length === 0) {
-                    console.log("Q", myqid, "NONE", whereClauses);
-                    continue;
+                if (!selectCols.length) {
+                    // No variables to select, just continue
+                    yield* runPatterns(idx + 1, subst);
+                    return;
                 }
                 let k = db(q.table).select(selectCols);
-                for (const w of [...q.where, ...whereClauses]) {
-                    const [col, val] = w.split(/\s*=\s*/);
-                    k = k.where(col, '=', val.replace(/^'|'$/g, ''));
+                for (const { col, val } of whereClauses) {
+                    k = k.where(col, '=', val);
                 }
-                console.log("Q", myqid, k.toString());
+                console.log("Q", k.toString());
                 const rows = await k;
                 for (const row of rows) {
-                    // console.log("R", myqid, JSON.stringify(row));
-                    let s2 = new Map(s);
+                    let s2: Subst = new Map(subst as Subst);
                     let ok = false;
                     for (const col of selectCols) {
-                        // Find the varId for this col
                         const origVal = q.params[col];
                         if (isVar(origVal)) {
                             const walked = walk(origVal, s2);
-                            // console.log("before unify", { walked, origVal, s2, col, row })
                             const unified = unify(walked, row[col], s2);
                             if (unified) {
                                 s2 = unified;
@@ -153,17 +104,16 @@ export const makeRelDB = async (knex_connect_options) => {
                         }
                     }
                     if (ok) {
-                        yield s2;
-                    } else {
-                        console.log("NY", myqid, JSON.stringify(row));
+                        yield* runPatterns(idx + 1, s2);
                     }
                 }
-                // s = lastmap;
             }
+            yield* runPatterns(0, s);
         };
         return fn;
     };
 }
+
 
 const makeSQLRelObj = await makeRelDB({
     client: 'better-sqlite3',
@@ -177,11 +127,14 @@ const T = await makeSQLRelObj("people");
 const x = and(
     // eq($.name, "daniel"),
     T({ id: $.id, name: $.name }),
+    T.run,
     T({ id: $.id, color: $.color }),
+    T.run,
     T({ id: $.id, friend: $.f_id }),
-    runGoal(T),
+    // runGoal(T),
     T({ id: $.f_id, name: $.f_name, color: $.f_color }),
-    runGoal(T),
+    T.run,
+    // eq($.id, 1),
 
     // T($.id, "address_id", $.a_id),
     // T($.a_id, "type", "address"),
@@ -205,13 +158,16 @@ for await (const subst of x(m)) {
  * runGoal: logic goal that runs T.run for the current substitution and yields all resulting substitutions.
  * Usage: and(T({...}), runGoal(T), ...)
  */
-export function runGoal(T) {
-    return async function* (s) {
+export function runGoal(T: { run: (s: Subst) => AsyncGenerator<Subst> }) {
+    return async function* (s: Subst) {
         for await (const s2 of T.run(s)) {
             yield s2;
         }
     };
 }
+
+
+
 
 
 

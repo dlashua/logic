@@ -1,5 +1,5 @@
 import { find } from "lodash";
-import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run } from "./logic_lib.ts";
+import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run, or, ifte, disj, Rel, fresh } from "./logic_lib.ts";
 import knex, { Knex } from "knex";
 
 
@@ -9,16 +9,83 @@ const $ = createLogicVarProxy();
  * makeSQLRelObj: Like makeSQLRel, but query is an object with keys as column names.
  * Smarter version: merges patterns with the same table and primary key variable.
  */
+let runcnt = 0;
+
 export const makeRelDB = async (knex_connect_options: Knex.Config) => {
     const db = knex(knex_connect_options);
-    return (table: string, primaryKey: string = "id") => {
-        type Pattern = {
-            table: string;
-            params: Record<string, any>;
-        };
-        const patterns: Pattern[] = [];
-        const fn = function goal(queryObj: Record<string, any>) {
-            return async function* (s: any) {
+    type Pattern = {
+        table: string;
+        params: Record<string, any>;
+    };
+    const patterns: Pattern[] = [];
+    const run = async function* (s: any) {
+        async function* runPatterns(idx: number, subst: Subst): AsyncGenerator<Subst> {
+            if (idx >= patterns.length) {
+                yield subst;
+                return;
+            }
+            const q = patterns[idx];
+            const selectCols: string[] = [];
+            const whereClauses: { col: string; val: any }[] = [];
+            for (const col in q.params) {
+                const v = walk(q.params[col], subst);
+                if (isVar(v)) {
+                    selectCols.push(col);
+                } else {
+                    whereClauses.push({ col, val: v });
+                }
+            }
+            if (!selectCols.length) {
+                // console.log("Q", "NONE", q);
+                yield* runPatterns(idx + 1, subst);
+                return;
+            }
+            let k = db(q.table).select(selectCols);
+            for (const { col, val } of whereClauses) {
+                k = k.where(col, '=', val);
+            }
+            console.log("Q", k.toString());
+            const rows = await k;
+            for (const row of rows) {
+                console.log("R", JSON.stringify(row));
+                let s2: Subst = new Map(subst as Subst);
+                let ok = false;
+                for (const col of selectCols) {
+                    const origVal = q.params[col];
+                    if (isVar(origVal)) {
+                        const walked = walk(origVal, s2);
+                        const unified = unify(walked, row[col], s2);
+                        if (unified) {
+                            s2 = unified;
+                            ok = true;
+                        }
+                    }
+                }
+                if (ok) {
+                    yield* runPatterns(idx + 1, s2);
+                }
+            }
+            // patterns.splice(idx, 1);
+        }
+        yield* runPatterns(0, s);
+        // patterns.splice(0, patterns.length);
+    };
+    const makeRel = async (table: string, primaryKey: string = "id") => {
+        return function goal(queryObj: Record<string, any>) {
+            const record_queries = async function* (s: any) {
+                // Check if all values in queryObj are grounded (not variables)
+                // let allGrounded = true;
+                // for (const col in queryObj) {
+                //     if (isVar(queryObj[col])) {
+                //         allGrounded = false;
+                //         break;
+                //     }
+                // }
+                // if (allGrounded) {
+                //     console.log("ALL TERMS GROUNDED");
+                //     // All terms are grounded, do nothing and yield nothing
+                //     return;
+                // }
                 // Find logic variable columns and their var ids
                 const logicVars: Record<string, string> = {};
                 for (const col in queryObj) {
@@ -56,93 +123,67 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                     break;
                 }
                 if (!merged) patterns.push({ table, params: { ...queryObj } });
-                // console.dir({ name: "PAT", patterns }, { depth: 100 });
+                // console.dir({ name: "PAT", patterns, s: JSON.stringify(s.entries()) }, { depth: 100 });
                 yield s;
             };
-        };
-        let qcnt = 0;
-        fn.run = async function* (s: any) {
-            async function* runPatterns(idx: number, subst: Subst): AsyncGenerator<Subst> {
-                if (idx >= patterns.length) {
-                    yield subst;
-                    return;
-                }
-                const q = patterns[idx];
-                const selectCols: string[] = [];
-                const whereClauses: { col: string; val: any }[] = [];
-                for (const col in q.params) {
-                    const v = walk(q.params[col], subst);
-                    if (isVar(v)) {
-                        selectCols.push(col);
-                    } else {
-                        whereClauses.push({ col, val: v });
-                    }
-                }
-                if (!selectCols.length) {
-                    // No variables to select, just continue
-                    yield* runPatterns(idx + 1, subst);
-                    return;
-                }
-                let k = db(q.table).select(selectCols);
-                for (const { col, val } of whereClauses) {
-                    k = k.where(col, '=', val);
-                }
-                console.log("Q", k.toString());
-                const rows = await k;
-                for (const row of rows) {
-                    let s2: Subst = new Map(subst as Subst);
-                    let ok = false;
-                    for (const col of selectCols) {
-                        const origVal = q.params[col];
-                        if (isVar(origVal)) {
-                            const walked = walk(origVal, s2);
-                            const unified = unify(walked, row[col], s2);
-                            if (unified) {
-                                s2 = unified;
-                                ok = true;
-                            }
-                        }
-                    }
-                    if (ok) {
-                        yield* runPatterns(idx + 1, s2);
-                    }
-                }
+            if (patterns.map(x => x.table).includes(table)) {
+                return record_queries;
             }
-            yield* runPatterns(0, s);
+            return async function* (s: any) {
+                const myruncnt = runcnt++;
+                // console.log("RUNNING", myruncnt, s);
+                for await (const new_s of run(s)) {
+                    if (new_s) {
+                        // console.log("RUN YIELD", myruncnt, new_s);
+                        yield* record_queries(new_s);
+                    }
+                }
+                // console.log("DONE RUNNING", myruncnt);
+            }
         };
-        return fn;
     };
+
+    return { makeRel, run };
 }
 
+const taps = (msg) =>
+    async function* (s: Subst) {
+        console.log("TAP", msg, s);
+        yield s;
+    };
 
-const makeSQLRelObj = await makeRelDB({
+
+const relDB = await makeRelDB({
     client: 'better-sqlite3',
     connection: {
         filename: './test.db'
     },
     useNullAsDefault: true
 });
-const T = await makeSQLRelObj("people");
+const P = await relDB.makeRel("people");
+const F = await relDB.makeRel("friends");
+
+const person_color = Rel((p, c) =>
+    P({ name: p, color: c })
+)
+
+const friends =
+    Rel((f1, f2) =>
+        fresh((f1_id, f2_id) =>
+            and(
+                P({ id: f1_id, name: f1 }),
+                F({ f1: f1_id, f2: f2_id }),
+                P({ id: f2_id, name: f2 }),
+            )
+        ),
+    )
 
 const x = and(
-    // eq($.name, "daniel"),
-    T({ id: $.id, name: $.name }),
-    T.run,
-    T({ id: $.id, color: $.color }),
-    T.run,
-    T({ id: $.id, friend: $.f_id }),
-    // runGoal(T),
-    T({ id: $.f_id, name: $.f_name, color: $.f_color }),
-    T.run,
-    // eq($.id, 1),
-
-    // T($.id, "address_id", $.a_id),
-    // T($.a_id, "type", "address"),
-    // T($.a_id, "city", $.city),
-    // T($.a_id, "state", $.state),
+    person_color($.name, $.color),
+    friends($.name, $.f_name),
+    person_color($.f_name, $.f_color),
+    relDB.run,
 )
-// const w = T($.d_id, "device_name", $.d_name);
-// console.log({ w })
 
 const m = new Map();
 let outid = 0;

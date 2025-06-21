@@ -353,7 +353,7 @@ export function collecto(x: Term, goal: Goal, xs: Term): Goal {
         // Collect all values of x under goal
         const results: Term[] = [];
         for await (const s1 of goal(s)) {
-            results.push(walk(x, s1));
+            results.push(await walk(x, s1)); // FIX: await walk
         }
         // Convert results to a logic list
         let logicList: LogicList = nil;

@@ -1,6 +1,5 @@
 // Relation helpers for MiniKanren-style logic programming
-import { LogicList, Subst, Term, Var, arrayToLogicList, cons, isCons, isNil, isVar, lvar, nil, unify, walk } from './core.ts';
-import { deepWalk } from './run.ts';
+import { Subst, Term, Var,  isVar, lvar, unify, walk } from './core.ts';
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -19,28 +18,15 @@ export function eq(u: Term, v: Term): Goal {
 
 /**
  * Introduces fresh logic variables for a subgoal.
+ * Always expects the callback to return a Goal.
  */
-export function fresh(f: (...vars: Var[]) => Goal | [Record<string, Var>, Goal] | [Goal]): Goal {
+export function fresh(f: (...vars: Var[]) => Goal): Goal {
   const n = f.length;
   return async function* (s: Subst) {
-    const vars = Array.from({
-      length: n, 
+    const vars = Array.from({ 
+      length: n,
     }, () => lvar());
-    const result = f(...vars);
-    let goal: Goal;
-    if (Array.isArray(result)) {
-      if (result.length === 2 && typeof result[1] === 'function') {
-        goal = result[1];
-      } else if (result.length === 1 && typeof result[0] === 'function') {
-        goal = result[0];
-      } else {
-        throw new Error('Invalid array structure returned from fresh subgoal');
-      }
-    } else if (typeof result === 'function') {
-      goal = result;
-    } else {
-      throw new Error('Invalid result from fresh subgoal');
-    }
+    const goal = f(...vars);
     for await (const s1 of goal(s)) yield s1;
   };
 }
@@ -68,7 +54,6 @@ export function conj(g1: Goal, g2: Goal): Goal {
 
 /**
  * Logic programming conditional (multi-statement AND per clause).
- * 
  * This is an OR of ANDs. Each argument is an array of goals. Those
  * goals are anded together and must all succeed. If the goals in the
  * first argument don't succeed, then the second argument is attempted.
@@ -76,7 +61,7 @@ export function conj(g1: Goal, g2: Goal): Goal {
 export function conde(...clauses: Goal[][]): Goal {
   return async function* (s: Subst) {
     for (const clause of clauses) {
-      const goal = clause.reduce((a, b) => (ss: Subst) => conj(a, b)(ss));
+      const goal = and(...clause);
       for await (const s1 of goal(s)) yield s1;
     }
   };
@@ -85,7 +70,10 @@ export function conde(...clauses: Goal[][]): Goal {
 /**
  * Logical AND for multiple goals.
  */
-export const and = (...goals: Goal[]) => goals.reduce((a, b) => conj(a, b));
+export const and = (...goals: Goal[]) => {
+  if (goals.length === 0) throw new Error("and requires at least one goal");
+  return goals.reduce((a, b) => conj(a, b));
+};
 export const all = and;
 
 /**
@@ -182,9 +170,8 @@ export function Rel(fn: (...args: any[]) => Goal): (...args: any[]) => Goal {
  */
 export function not(goal: Goal): Goal {
   return async function* (s: Subst) {
-    const gen = goal(s)[Symbol.asyncIterator]();
-    const { done } = await gen.next();
-    if (done) yield s;
+    for await (const _ of goal(s)) return;
+    yield s;
   };
 }
 

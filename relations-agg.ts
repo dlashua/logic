@@ -9,6 +9,22 @@ import {
 } from './relations.ts';
 
 /**
+ * Helper: deduplicate an array of items using JSON.stringify for deep equality.
+ */
+function deduplicate<T>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const k = JSON.stringify(item);
+    if (!seen.has(k)) {
+      seen.add(k);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+/**
  * Helper: group by key for logic goals, then apply a callback per group.
  * Calls cb(s, key, items) for each group, where key is the group key and items is the array of values.
  */
@@ -29,8 +45,8 @@ export async function* groupByGoal(
       value, 
     });
   }
-  // Group by key
-  const grouped = new Map<any, { key: any, items: any }>();
+  // Group by key (map to array of values)
+  const grouped = new Map<string, { key: any, items: any[] }>();
   for (const { key, value } of pairs) {
     const k = JSON.stringify(key); // Use JSON.stringify for deep equality
     if (!grouped.has(k)) grouped.set(k, {
@@ -49,99 +65,82 @@ export async function* groupByGoal(
 }
 
 /**
- * groupAggregateo(keyVar, valueVar, goal, outKey, outAgg, aggFn):
- * For each group, yields a substitution with outKey = group key and outAgg = aggFn(items).
- * aggFn receives the array of values for the group and returns the aggregate result.
+ * aggregateRelFactory: generic helper for collecto, distincto, counto.
+ * - x: variable to collect
+ * - goal: logic goal
+ * - out: output variable
+ * - aggFn: aggregation function (receives array of results)
+ * - dedup: if true, deduplicate results
  */
-export function groupAggregateo(
-  keyVar: Term,
-  valueVar: Term,
-  goal: Goal,
-  outKey: Term,
-  outAgg: Term,
-  aggFn: (items: any[]) => any,
-): Goal {
-  return async function* (s: Subst) {
-    yield* groupByGoal(keyVar, valueVar, goal, s, async function* (s, key, items) {
-      const agg = aggFn(items);
-      for await (const s2 of eq(outKey, key)(s)) {
-        for await (const s3 of eq(outAgg, agg)(s2)) {
-          yield s3;
-        }
+export function aggregateRelFactory(
+  aggFn: (results: Term[]) => any,
+  dedup = false,
+) {
+  return (
+    x: Term, 
+    goal: Goal, 
+    out: Term,
+  ): Goal => {
+    return async function* (s: Subst) {
+      const results: Term[] = [];
+      for await (const s1 of goal(s)) {
+        const val = await walk(x, s1);
+        results.push(val);
       }
-    });
-  };
+      const agg = aggFn(dedup ? deduplicate(results) : results);
+      yield* eq(out, agg)(s);
+    };
+  }
 }
 
 /**
- * aggregateRel(aggFn): returns a group-by aggregation goal constructor.
- * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg) => Goal
- * Example: const groupCollecto = aggregateRel(arrayToLogicList)
+ * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
+ * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg, dedup?) => Goal
+ * Example: const groupCollecto = groupAggregateRelFactory(arrayToLogicList)
  */
-export function aggregateRel(aggFn: (items: any[]) => any) {
-  return function (keyVar: Term, valueVar: Term, goal: Goal, outKey: Term, outAgg: Term): Goal {
-    return groupAggregateo(keyVar, valueVar, goal, outKey, outAgg, aggFn);
+export function groupAggregateRelFactory(
+  aggFn: (items: any[]) => any,
+) {
+  return function (
+    keyVar: Term, 
+    valueVar: Term, 
+    goal: Goal, 
+    outKey: Term, 
+    outAgg: Term, 
+    dedup = false,
+  ): Goal {
+    return async function* (s: Subst) {
+      yield* groupByGoal(keyVar, valueVar, goal, s, async function* (s, key, items) {
+        const groupItems = dedup ? deduplicate(items) : items;
+        const agg = aggFn(groupItems);
+        for await (const s2 of eq(outKey, key)(s)) {
+          for await (const s3 of eq(outAgg, agg)(s2)) {
+            yield s3;
+          }
+        }
+      });
+    };
   };
 }
 
-export const groupCollecto = aggregateRel(arrayToLogicList);
-export const groupCounto = aggregateRel((items: any[]) => items.length);
+export const groupCollecto = groupAggregateRelFactory(arrayToLogicList);
+export const groupCounto = groupAggregateRelFactory((items: any[]) => items.length);
 
 /**
  * collecto(x, goal, xs): xs is the list of all values x can take under goal (logic relation version)
  * Usage: collecto(x, membero(x, ...), xs)
  */
-export function collecto(x: Term, goal: Goal, xs: Term): Goal {
-  return async function* (s: Subst) {
-    // Collect all values of x under goal
-    const results: Term[] = [];
-    for await (const s1 of goal(s)) {
-      results.push(await walk(x, s1));
-    }
-    // Convert results to a logic list
-    let logicList: LogicList = nil;
-    for (let i = results.length - 1; i >= 0; --i) {
-      logicList = cons(results[i], logicList);
-    }
-    // Unify xs with the collected list
-    yield* eq(xs, logicList)(s);
-  };
-}
+export const collecto = aggregateRelFactory(arr => arrayToLogicList(arr))
 
 /**
  * distincto(x, goal, xs): xs is the list of distinct values of x under goal.
  * Usage: distincto(x, goal, xs)
  */
-export function distincto(x: Term, goal: Goal, xs: Term): Goal {
-  return async function* (s: Subst) {
-    const seen = new Set<any>();
-    const results: Term[] = [];
-    for await (const s1 of goal(s)) {
-      const val = await walk(x, s1);
-      const key = JSON.stringify(val);
-      if (!seen.has(key)) {
-        seen.add(key);
-        results.push(val);
-      }
-    }
-    let logicList: LogicList = nil;
-    for (let i = results.length - 1; i >= 0; --i) {
-      logicList = cons(results[i], logicList);
-    }
-    yield* eq(xs, logicList)(s);
-  };
-}
+export const distincto = aggregateRelFactory(arr => arrayToLogicList(arr), true)
 
 /**
  * counto(x, goal, n): n is the number of (distinct) values of x under goal.
  * Usage: counto(x, goal, n)
  */
-export function counto(x: Term, goal: Goal, n: Term): Goal {
-  return async function* (s: Subst) {
-    let count = 0;
-    for await (const s1 of goal(s)) {
-      count++;
-    }
-    yield* eq(n, count)(s);
-  };
-}
+export const counto = aggregateRelFactory(arr => arr.length);
+

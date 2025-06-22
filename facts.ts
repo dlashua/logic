@@ -1,6 +1,6 @@
 // Fact helpers for MiniKanren-style logic programming
 import { Term, Subst, Var, walk, isVar, unify } from './core.ts';
-import { Goal } from './relation.ts';
+import { Goal } from './relations.ts';
 
 /**
  * A relation for tuple facts (array-based).

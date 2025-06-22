@@ -1,5 +1,6 @@
 // Relation helpers for MiniKanren-style logic programming
-import { Term, Subst, Var, walk, isVar, unify, lvar, isCons, isNil, nil, cons, LogicList } from './core.ts';
+import { Term, Subst, Var, walk, isVar, unify, lvar, isCons, isNil, nil, cons, LogicList, arrayToLogicList } from './core.ts';
+import { deepWalk } from './run.ts';
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -395,19 +396,6 @@ export function mapo(rel: (x: Term, y: Term) => Goal, xs: Term, ys: Term): Goal 
                 yield s1;
             }
         }
-    };
-}
-
-// Helper to call aggregateVarMulti with goal function arguments
-export function aggregateRel(goalFn: (...args: Var[]) => Goal): (...args: Var[]) => Goal {
-    return (...args: Var[]) => {
-        if (args.length < 2) throw new Error("aggregateRel requires at least two arguments");
-        const out = args.at(-1);
-        return collecto(
-            out,
-            goalFn(...args),
-            out
-        );
     };
 }
 

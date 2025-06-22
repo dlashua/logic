@@ -1,6 +1,6 @@
 // Run handlers for MiniKanren-style logic programming
 import { Term, Subst, Var, walk, isVar, lvar, logicListToArray } from './core.ts';
-import { Goal } from './relation.ts';
+import { Goal } from './relations.ts';
 
 /**
  * The output type for formatted substitutions.
@@ -27,7 +27,7 @@ export async function* formatSubstitutions<Fmt extends Record<string, Term<any>>
                 out[key] = v;
             }
         }
-        yield deepConvertLogicLists(out) as RunResult<Fmt>;
+        yield deepWalk(out) as RunResult<Fmt>;
     }
 }
 
@@ -117,18 +117,18 @@ export function isLogicList(val: any): boolean {
 /**
  * Recursively converts any logic lists in the value to JS arrays.
  */
-export function deepConvertLogicLists(val: any): any {
+export function deepWalk(val: any): any {
     if (isLogicList(val)) {
         // Recursively convert logic list to array, and also convert elements
-        const arr = logicListToArray(val).map(deepConvertLogicLists);
+        const arr = logicListToArray(val).map(deepWalk);
         return arr;
     } else if (Array.isArray(val)) {
-        return val.map(deepConvertLogicLists);
+        return val.map(deepWalk);
     } else if (val && typeof val === 'object' && !isVar(val)) {
         const out: any = {};
         for (const k in val) {
             if (Object.prototype.hasOwnProperty.call(val, k)) {
-                out[k] = deepConvertLogicLists(val[k]);
+                out[k] = deepWalk(val[k]);
             }
         }
         return out;

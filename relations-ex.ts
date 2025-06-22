@@ -2,13 +2,13 @@
 // These are not part of the minimal core, but are useful for practical logic programming.
 
 import {
-    Term,
-    Subst,
-    walk,
-    isCons,
+  Subst,
+  Term,
+  isCons,
+  walk,
 } from './core.ts';
 import {
-    Goal,
+  Goal,
 } from './relations.ts';
 
 
@@ -16,31 +16,31 @@ import {
  * alldistincto(xs): true if all elements of xs are distinct.
  */
 export function alldistincto(xs: Term): Goal {
-    return async function* (s: Subst) {
-        const arr = await walk(xs, s);
-        let jsArr: any[] = [];
-        if (arr && typeof arr === 'object' && 'tag' in arr) {
-            // Convert logic list to JS array
-            let cur: Term = arr;
-            while (isCons(cur)) {
-                jsArr.push(cur.head);
-                cur = cur.tail;
-            }
-        } else if (Array.isArray(arr)) {
-            jsArr = arr;
-        }
-        const seen = new Set();
-        let allDistinct = true;
-        for (const v of jsArr) {
-            const key = JSON.stringify(v);
-            if (seen.has(key)) {
-                allDistinct = false;
-                break;
-            }
-            seen.add(key);
-        }
-        if (allDistinct) yield s;
-    };
+  return async function* (s: Subst) {
+    const arr = await walk(xs, s);
+    let jsArr: any[] = [];
+    if (arr && typeof arr === 'object' && 'tag' in arr) {
+      // Convert logic list to JS array
+      let cur: Term = arr;
+      while (isCons(cur)) {
+        jsArr.push(cur.head);
+        cur = cur.tail;
+      }
+    } else if (Array.isArray(arr)) {
+      jsArr = arr;
+    }
+    const seen = new Set();
+    let allDistinct = true;
+    for (const v of jsArr) {
+      const key = JSON.stringify(v);
+      if (seen.has(key)) {
+        allDistinct = false;
+        break;
+      }
+      seen.add(key);
+    }
+    if (allDistinct) yield s;
+  };
 }
 
 

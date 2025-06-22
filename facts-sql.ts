@@ -3,14 +3,19 @@ import knex, { Knex } from "knex";
 
 let runcnt = 0;
 const mutelog = [
-    "PATTERNS BEFORE CHECK",
+    // "PATTERNS BEFORE CHECK",
     "WORKING PATTERN",
-    "TABLE NOT IN PATTERNS. NEED RUN.",
+    // "TABLE NOT IN PATTERNS. NEED RUN.",
     "ADDING PATTERN",
     "MERGING PATTERN",
-    "TABLE IN PATTERNS. NO RUN.",
+    // "TABLE IN PATTERNS. NO RUN.",
     "SKIPPING QUERY",
     "ROW RETURNED",
+    "RUNNING GOAL",
+    "GOAL RUN FINISHED",
+    "QUERY",
+    "STARTING GOAL",
+    "YIELD THROUGH",
 ];
 const log = (msg, ...args) => {
     if (mutelog.includes(msg)) return;
@@ -32,9 +37,11 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
     type Pattern = {
         table: string;
         params: Record<string, any>;
+        queries: [],
     };
     const patterns: Pattern[] = [];
-    const run = async function* (s: any) {
+    const queries = [];
+    const run = async function* (s: any, patterns) {
         async function* runPatterns(idx: number, subst: Subst): AsyncGenerator<Subst> {
             if (idx >= patterns.length) {
                 yield subst;
@@ -64,6 +71,8 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                 k = k.where(col, '=', val);
             }
             log("QUERY", {sql: k.toString()});
+            q.queries.push(k.toString());
+            queries.push(k.toString());
             const rows = await k;
             for (const row of rows) {
                 log("ROW RETURNED", {row});
@@ -72,8 +81,7 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                 for (const col of selectCols) {
                     const origVal = q.params[col];
                     if (isVar(origVal)) {
-                        const walked = await walk(origVal, s2);
-                        const unified = await unify(walked, row[col], s2);
+                        const unified = await unify(walkedQ[col], row[col], s2);
                         if (unified) {
                             s2 = unified;
                             ok = true;
@@ -95,8 +103,9 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
     const makeRel = async (table: string, primaryKey: string = "id") => {
         return function goal(queryObj: Record<string, any>) {
             const myruncnt = runcnt++;
+            log("STARTING GOAL", {myruncnt, table, queryObj});
 
-            const record_queries = async function* (s: any) {
+            const record_queries = function (queryObj) {
                 // Check if all values in queryObj are grounded (not variables)
                 // let allGrounded = true;
                 // for (const col in queryObj) {
@@ -147,44 +156,35 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
                     break;
                 }
                 if (!merged) {
-                    patterns.push({ table, params: { ...queryObj } });
-                    log("ADDING PATTERN", myruncnt, table, queryObj);
+                    patterns.push({ table, params: { ...queryObj }, queries: [] });
+                    log("ADDING PATTERN", {myruncnt, table, queryObj});
                 } else {
-                    log("MERGING PATTERN", myruncnt, table, queryObj);
+                    log("MERGING PATTERN", {myruncnt, table, queryObj});
                 }
-
-                // console.dir({ name: "PAT", patterns, s: JSON.stringify(s.entries()) }, { depth: 100 });
-                yield s;
             };
 
+            record_queries(queryObj);
 
             return async function* (s: any) {
-                
-                log("PATTERNS BEFORE CHECK", {
-                    runNum: myruncnt, 
-                    patterns}, {depth: 100});
-                if (patterns.map(x => x.table).includes(table)) {
-                    log("TABLE IN PATTERNS. NO RUN.", myruncnt, table);
-                    yield* record_queries(s);
+                if (myruncnt !== runcnt - 1) {
+                    log("YIELD THROUGH", {myruncnt, table, queryObj});
+                    if(s) yield s;
                     return;
                 }
-    
-    
+
+                log("RUNNING GOAL", {myruncnt, table, queryObj, patterns});
                 
-                    log("TABLE NOT IN PATTERNS. NEED RUN.", {runNum: myruncnt, table, patterns});
-                    // log("RUNNING", myruncnt, s);
-                    for await (const new_s of run(s)) {
-                        if (new_s) {
-                            // log("RUN YIELD", myruncnt, new_s);
-                            yield* record_queries(new_s);
-                        }
-                    }
-                    // log("DONE RUNNING", myruncnt);
-                
+                // const thispatterns = [...patterns];
+                // patterns.splice(0, patterns.length);
+
+                for await (const s3 of run(s, patterns)) {
+                    if(s3) yield s3;
+                }
+                log("GOAL RUN FINISHED", {myruncnt, table, queryObj, patterns});
             }
 
         };
     };
 
-    return { makeRel, db, run };
+    return { makeRel, db, run, queries };
 }

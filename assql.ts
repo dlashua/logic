@@ -1,6 +1,7 @@
 import {
   Rel,
   Subst,
+  Term,
   and,
   collecto,
   createLogicVarProxy,  
@@ -31,10 +32,10 @@ const relDB = await makeRelDB({
 const P = await relDB.makeRel("people");
 const F = await relDB.makeRel("friends");
 
-const person_color = Rel((p, c) =>
+const person_color = Rel((p: Term<any>, c: Term<any>) =>
   P({
     name: p,
-    color: c, 
+    color: c,
   }),
 )
 

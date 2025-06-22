@@ -143,6 +143,20 @@ export const mapInlineLazy = <F extends (...args: any) => any>(fn: F, ...args: P
 
 /**
  * Type helper for mapping function signatures to relation signatures.
+ *
+ * When you create a new relation using mapRel, mapInline, or mapInlineLazy, this type ensures:
+ *   - All input arguments are wrapped as Term<T> (logic variables or values)
+ *   - The last argument is the output term (Term<R>)
+ *   - The resulting function returns a Goal
+ *
+ * Example:
+ *   // A function (x: number, y: number) => number
+ *   const plus = (x: number, y: number) => x + y;
+ *   // Create a relation: pluso(x, y, z)
+ *   const pluso: (...args: TermedArgs<typeof plus>) => Goal = mapRel(plus);
+ *   // pluso(x, y, z) is now type-safe: (Term<number>, Term<number>, Term<number>) => Goal
+ *
+ * This allows users to define new relations with correct and accurate types, improving safety and developer experience.
  */
 export type TermedArgs<T extends (...args: any) => any> =
     T extends (...args: infer A) => infer R
@@ -152,7 +166,7 @@ export type TermedArgs<T extends (...args: any) => any> =
 /**
  * Type helper for defining a relation with argument inference.
  */
-export function Rel(fn: (...args: any[]) => Goal): (...args: any[]) => Goal {
+export function Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => ReturnType<F> {
   return fn;
 }
 

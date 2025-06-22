@@ -1,4 +1,4 @@
-import { Subst, isVar, unify, walk } from "./logic_lib.ts";
+import { Goal, Subst, isVar, unify, walk, Term } from "./logic_lib.ts";
 import knex, { Knex } from "knex";
 
 export const makeRelDB = async (knex_connect_options: Knex.Config) => {
@@ -62,7 +62,7 @@ export const makeRelDB = async (knex_connect_options: Knex.Config) => {
       // patterns.splice(0, patterns.length);
     };
     const makeRel = async (table: string, primaryKey = "id") => {
-      return function goal(queryObj: Record<string, any>) {
+      return function goal(queryObj: Record<string, Term<any>>): Goal {
         return async function* (s: Subst) {
           // If all values are grounded, do nothing
           let allGrounded = true;

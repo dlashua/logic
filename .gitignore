@@ -2,4 +2,8 @@ node_modules
 .vscode
 .github
 data.json
+hold/**
+*.db
+*.duckdb
+pnpm-workspace.yaml
 

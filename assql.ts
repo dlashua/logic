@@ -1,25 +1,14 @@
-import {
-  Rel,
-  Subst,
-  Term,
-  and,
-  collecto,
-  createLogicVarProxy,  
-  fresh,  
-  makeFacts,  
-  runEasy, 
-} from "./logic_lib.ts";
+import { and, eq, lvar, makeFacts, createLogicVarProxy, mapInline, Subst, Term, walk, isVar, unify, run, or, ifte, disj, Rel, fresh, runEasy } from "./logic_lib.ts";
+import knex, { Knex } from "knex";
 import { makeRelDB } from "./facts-sql.ts";
-
 
 const $$ = createLogicVarProxy();
 
-
-const taps = (msg: string) =>
-  async function* (s: Subst) {
-    console.log("TAP", msg, s);
-    yield s;
-  };
+const taps = (msg) =>
+    async function* (s: Subst) {
+        console.log("TAP", msg, s);
+        yield s;
+    };
 
 
 const relDB = await makeRelDB({
@@ -32,87 +21,77 @@ const relDB = await makeRelDB({
 const P = await relDB.makeRel("people");
 const F = await relDB.makeRel("friends");
 
-const person_color = Rel((p: Term<any>, c: Term<any>) =>
-  P({
-    name: p,
-    color: c,
-  }),
+
+const id_name = Rel((i, p) =>
+  P({ id: i, name: p})
+)
+
+const person_color = Rel((p, c) =>
+    P({ name: p, color: c })
+)
+
+const person_car = Rel((p, c) =>
+    P({ name: p, car: c })
 )
 
 const friends =
-    Rel((f1, f2) =>
-      fresh((f1_id, f2_id) =>
-        and(
-          P({
-            id: f1_id,
-            name: f1, 
-          }),
-          F({
-            f1: f1_id,
-            f2: f2_id, 
-          }),
-          P({
-            id: f2_id,
-            name: f2, 
-          }),
-        ),
-      ),
+    Rel((f1, f2) => {
+        // fresh((f1_id, f2_id) =>
+        const f1_id = lvar();
+        const f2_id = lvar();
+        return    and(
+                P({ id: f1_id, name: f1 }),
+                F({ f1: f1_id, f2: f2_id }),
+                P({ id: f2_id, name: f2 }),
+            )
+        // ),
+      }
     )
 
 const favnum = makeFacts();
-favnum.set("aubrey", 1);
-favnum.set("daniel", 2);
-favnum.set("jen", 3);
-favnum.set("corey", 4);
+favnum.set("daniel", 3);
 
-const debugGoal = (label: string) => async function* (s: Subst) {
-  console.log(`[DEBUG] ${label}:`, s);
-  yield s;
-};
 
-await runEasy(($) => [
+const results = runEasy(($) => [
   {
     name: $.name,
     color: $.color,
-    favnum: $.favnum,
-    // f_name: $.f_name,
-    f_names: $.f_names,
-    // f_color: $.f_color,
+    car: $.car,
+    // favnum: $.favnum,
+    f_name: $.f_name,
+    f_color: $.f_color,
   },
   and(
     person_color($.name, $.color),
-    collecto(
-      {
-        name: $.f_name,
-        color: $.f_color, 
-      },
-      and(
-        friends($.name, $.f_name),
-        person_color($.f_name, $.f_color),
-      ),
-      $.f_names,
-    ),
-    favnum($.name, $.favnum),
-  ),
-]).forEach((x: any) => console.log(x))
+    person_car($.name, $.car),
+    // favnum($.name, $.favnum),
+    friends($.name, $.f_name),
+    person_color($.f_name, $.f_color),
+
+    // F({ f1: $.p_id, f2: $.f_id}),
+    // id_name($.p_id, $.name),
+    // id_name($.f_id, $.f_name),
+    // person_color($.name, $.color),
+    // person_color($.f_name, $.f_color),
+    // person_car($.name, $.car),
+
+    // taps("FINAL"),
+  )
+]
+)
+
+let outid = 0;
+for await (const out of results) {
+    // Now run the DB queries for this substitution
+    // for await (const dbSubst of T.run(subst)) {
+    // dbSubst is a substitution unified with DB results
+    console.log("OUT", outid++, out);
+    // }
+}
 
 await relDB.db.destroy();
 
-
-
-/**
- * runGoal: logic goal that runs T.run for the current substitution and yields all resulting substitutions.
- * Usage: and(T({...}), runGoal(T), ...)
- */
-export function runGoal(T: { run: (s: Subst) => AsyncGenerator<Subst> }) {
-  return async function* (s: Subst) {
-    for await (const s2 of T.run(s)) {
-      yield s2;
-    }
-  };
-}
-
-
+console.log(relDB.queries);
 
 
 

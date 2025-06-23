@@ -53,7 +53,12 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
     }
     const patterns: Pattern[] = [];
     const queries: string[] = [];
-    const run = async function* (s: Subst, patterns: Pattern[], myruncnt) {
+    const realQueries: string[] = [];
+    const cacheQueries: string[] = [];
+    // Record cache for fully grounded queries
+    const recordCache = new Map<string, any>();
+
+    const run = async function* (s: Subst, patterns: Pattern[], myruncnt: number) {
       async function* runPatterns(idx: number, subst: Subst): AsyncGenerator<Subst> {
         if (idx >= patterns.length) {
           yield subst;
@@ -69,44 +74,142 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
         const walkedQ: Record<string, Term> = {};
         for (const col in q.params) {
           walkedQ[col] = await walk(q.params[col], subst);
-          // log("W", col, v);
           if (isVar(walkedQ[col])) {
             selectCols.push(col);
           } else {
             whereClauses.push({
               col,
-              val: walkedQ[col], 
+              val: walkedQ[col],
             });
           }
         }
         let rows;
+
         if (!selectCols.length) {
-          // log("SKIPPING QUERY", {
-          //   q,
-          //   walkedQ,
-          //   myruncnt,
-          // });
-          // rows = [walkedQ];
           selectCols.push(...Object.keys(walkedQ));
-          // yield* runPatterns(idx + 1, subst);
-          // return;
-        } 
+        }
+
+        // Ensure selectCols includes all columns from whereClauses
+        for (const { col } of whereClauses) {
+          if (!selectCols.includes(col)) {
+            selectCols.push(col);
+          }
+        }
+
+        // Filter out undefined values in whereClauses to avoid undefined bindings
+        const validWhereClauses = whereClauses.filter(({ val }) => val !== undefined);
+        if (validWhereClauses.length !== whereClauses.length) {
+          log("WARNING: Undefined value in whereClauses", {
+            whereClauses,
+            validWhereClauses, 
+          });
+        }
+
+        const cacheKey = JSON.stringify({
+          table: q.table,
+          select: selectCols,
+          where: validWhereClauses.map(({ col, val }) => [col,
+            val]),
+        });
+
         let k = db(q.table).select(selectCols);
-        for (const { col, val } of whereClauses) {
+        for (const { col, val } of validWhereClauses) {
           // @ts-expect-error knex types are weird
           k = k.where(col, '=', val);
         }
-  
-        const sqlQuery = k.toString();
-        log("QUERY", {
-          sql: sqlQuery,
-          myruncnt,
-        });
-        q.queries.push(sqlQuery);
-        queries.push(sqlQuery);
-        rows = await k;
+        const sqlStr = k.toString();
 
+        if (recordCache.has(cacheKey)) {
+          rows = recordCache.get(cacheKey);
+          const sqlQuery = `CACHE HIT ${sqlStr} ${cacheKey}`;
+          q.queries.push(sqlQuery);
+          queries.push(sqlQuery);
+          cacheQueries.push(sqlQuery);
+        } else {
+          // Subsumption: look for a broader or narrower cache entry
+          let subsumed = false;
+          for (const [otherKey,
+            cachedRows] of recordCache.entries()) {
+            const other = JSON.parse(otherKey);
+            if (other.table !== q.table) continue;
+            const selectColsArr: string[] = selectCols;
+            const otherSelectArr: string[] = other.select as string[];
+            const selectSet = new Set(selectColsArr);
+            const otherSelectSet = new Set(otherSelectArr);
+            // Check if cached select is a superset or subset of requested select
+            const selectSuperset = [...selectSet].every((col: string) => otherSelectSet.has(col));
+            const selectSubset = [...otherSelectSet].every((col: string) => selectSet.has(col));
+            // Map where clauses for both queries
+            const whereMap = new Map(whereClauses.map(({ col, val }) => [col,
+              val]));
+            const otherWhereArr: [string, any][] = other.where as [string, any][];
+            const otherWhereMap = new Map(otherWhereArr);
+            // Check if cached where is a subset or superset of requested where
+            let whereSubset = true;
+            for (const [col,
+              val] of otherWhereArr) {
+              if (!whereMap.has(col) || whereMap.get(col) !== val) {
+                whereSubset = false;
+                break;
+              }
+            }
+            let whereSuperset = true;
+            for (const { col, val } of whereClauses) {
+              if (!otherWhereMap.has(col) || otherWhereMap.get(col) !== val) {
+                whereSuperset = false;
+                break;
+              }
+            }
+            // Only use cache if cached select includes all columns needed for whereClauses
+            const allWhereColsInCache = whereClauses.every(({ col }) => otherSelectSet.has(col));
+            if (!allWhereColsInCache) continue;
+            // Only use cache if cached select is a superset of requested select
+            if (!selectSuperset) continue;
+            // Only use cache if cached where is a subset of requested where
+            let cachedWhereIsSubset = true;
+            for (const [col,
+              val] of otherWhereArr) {
+              if (!whereMap.has(col) || whereMap.get(col) !== val) {
+                cachedWhereIsSubset = false;
+                break;
+              }
+            }
+            if (!cachedWhereIsSubset) continue;
+            // Use the cache
+            rows = cachedRows.filter((row: any) =>
+              whereClauses.every(({ col, val }) => row[col] === val),
+            ).map((row: any) => {
+              const filtered: any = {};
+              for (const col of selectCols) filtered[col] = row[col];
+              return filtered;
+            });
+            const sqlQuery = `CACHE SUBSUMED ${sqlStr} ${otherKey}`;
+            q.queries.push(sqlQuery);
+            queries.push(sqlQuery);
+            cacheQueries.push(sqlQuery);
+            subsumed = true;
+            break;
+          }
+          if (!subsumed) {
+
+            log("QUERY", {
+              sql: sqlStr,
+              myruncnt,
+            });
+            q.queries.push(sqlStr);
+            queries.push(sqlStr);
+            realQueries.push(sqlStr);
+            rows = await k;
+            // Cache the result (including empty array for no rows)
+            recordCache.set(cacheKey, rows);
+          }
+        }
         
+        // If no rows, skip yielding
+        if (!rows || rows.length === 0) {
+          return;
+        }
+
         for (const row of rows) {
           log("ROW RETURNED", {
             row,
@@ -117,16 +220,23 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
           for (const col of selectCols) {
             const origVal = q.params[col];
             if (isVar(origVal)) {
-              log("UNIFY", {
-                myruncnt,
-                col,
-                left: walkedQ[col],
-                right: row[col],
-              });
               const unified = await unify(walkedQ[col], row[col], s2);
               if (unified) {
+                log("UNIFY", {
+                  myruncnt,
+                  col,
+                  left: walkedQ[col] as string | number | object,
+                  right: row[col],
+                });
                 s2 = unified;
                 ok = true;
+              } else {
+                log("NO UNIFY", {
+                  myruncnt,
+                  col,
+                  left: walkedQ[col] as string | number | object,
+                  right: row[col],
+                });
               }
             } else {
               break;
@@ -136,11 +246,8 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
             yield* runPatterns(idx + 1, s2);
           }
         }
-        // patterns.splice(idx, 1);
       }
       yield* runPatterns(0, s);
-      // process.exit();
-      // patterns.splice(0, patterns.length);
     };
 
 
@@ -154,7 +261,7 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
           queryObj,
         });
 
-        const record_queries = async function (queryObj: Record<string, Term>, subst) {
+        const record_queries = async function (queryObj: Record<string, Term>, subst: Subst) {
           // Check if all values in queryObj are grounded (not variables)
           // let allGrounded = true;
           // for (const col in queryObj) {
@@ -241,9 +348,17 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
         
         return async function* (s: Subst) {
           await record_queries(queryObj, s);
-          if (
-            opts.queryMode != "each"
-            && myruncnt > 1000) {
+          if (!(
+            opts.queryMode === "each"
+            || (
+              opts.queryMode === "last"
+              && myruncnt !== runcnt -1
+            )
+            || (
+              opts.queryMode === "first"
+              && myruncnt !== 0
+            )
+          )) {
             log("YIELD THROUGH", {
               myruncnt,
               table,
@@ -299,5 +414,7 @@ export const makeRelDB = async (knex_connect_options: Knex.Config, opts?: Record
       db,
       run,
       queries, 
+      realQueries,
+      cacheQueries,
     };
 }

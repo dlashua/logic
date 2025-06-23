@@ -1,6 +1,15 @@
 // Relation helpers for MiniKanren-style logic programming
-import { Subst, Term, Var,  isVar, lvar, unify, walk } from './core.ts';
-import * as L from './logic_lib.ts';
+
+import {
+  isVar,
+  lvar,
+  type Subst,
+  type Term,
+  unify,
+  type Var,
+  walk,
+} from "./core.ts";
+import * as L from "./logic_lib.ts";
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -24,9 +33,7 @@ export function eq(u: Term, v: Term): Goal {
 export function fresh(f: (...vars: Var[]) => Goal): Goal {
   const n = f.length;
   return async function* (s: Subst) {
-    const vars = Array.from({ 
-      length: n,
-    }, () => lvar());
+    const vars = Array.from({ length: n }, () => lvar());
     const goal = f(...vars);
     for await (const s1 of goal(s)) yield s1;
   };
@@ -90,57 +97,69 @@ export const or = (...goals: Goal[]) => {
 /**
  * Create a relation from a predicate that takes any number of arguments.
  */
-export function filterRel(pred: (...args: any[]) => boolean): (...args: Term[]) => Goal {
+export function filterRel(
+  pred: (...args: any[]) => boolean,
+): (...args: Term[]) => Goal {
   return (...args: Term[]) =>
     async function* (s: Subst) {
-      const vals = await Promise.all(args.map(arg => walk(arg, s)));
+      const vals = await Promise.all(args.map((arg) => walk(arg, s)));
       if (pred(...vals)) yield s;
     };
 }
 
 export const gtc = filterRel((x, gt) => x > gt);
 
-
 /**
  * Create a relation from a function mapping input terms to an output term.
  */
 export const mapRel = <F extends (...args: any) => any>(fn: F) => {
-  return function (...args: Parameters<TermedArgs<F>>) {
-    return async function* (s: Subst) {
-      const vals = await Promise.all(args.map(async arg => await walk(arg, s)));
+  return (...args: Parameters<TermedArgs<F>>) =>
+    async function* (s: Subst) {
+      const vals = await Promise.all(
+        args.map(async (arg) => await walk(arg, s)),
+      );
       const inVals = vals.slice(0, -1);
       const outVal = vals[vals.length - 1];
-      if (inVals.every(v => typeof v !== 'undefined' && !isVar(v))) {
+      if (inVals.every((v) => typeof v !== "undefined" && !isVar(v))) {
         const result = fn(...(inVals as Parameters<F>));
         const s2 = await unify(outVal, result, s);
         if (s2) yield s2;
       }
     };
-  };
 };
 
-export const mapInline = <F extends (...args: any) => any>(fn: F, ...args: Parameters<TermedArgs<F>>) => {
+export const mapInline = <F extends (...args: any) => any>(
+  fn: F,
+  ...args: Parameters<TermedArgs<F>>
+) => {
   const mr = mapRel(fn);
   return mr(...args);
-}
+};
 
 /**
  * mapInlineLazy: Like mapInline, but stores the mapping as a thunk for lazy evaluation.
  */
-export const mapInlineLazy = <F extends (...args: any) => any>(fn: F, ...args: Parameters<TermedArgs<F>>) => {
+export const mapInlineLazy = <F extends (...args: any) => any>(
+  fn: F,
+  ...args: Parameters<TermedArgs<F>>
+) => {
   return async function* (s: Subst) {
     const inArgs = args.slice(0, -1);
     const outVar = args[args.length - 1];
     if (isVar(outVar)) {
-      s.set(outVar.id, async () => fn(...await Promise.all(inArgs.map(arg => walk(arg, s)))));
+      s.set(outVar.id, async () =>
+        fn(...(await Promise.all(inArgs.map((arg) => walk(arg, s))))),
+      );
       yield s;
     } else {
-      const result = fn(...await Promise.all(inArgs.map(arg => walk(arg, s))));
+      const result = fn(
+        ...(await Promise.all(inArgs.map((arg) => walk(arg, s)))),
+      );
       const s2 = await unify(outVar, result, s);
       if (s2) yield s2;
     }
   };
-}
+};
 
 /**
  * Type helper for mapping function signatures to relation signatures.
@@ -159,26 +178,31 @@ export const mapInlineLazy = <F extends (...args: any) => any>(fn: F, ...args: P
  *
  * This allows users to define new relations with correct and accurate types, improving safety and developer experience.
  */
-export type TermedArgs<T extends (...args: any) => any> =
-    T extends (...args: infer A) => infer R
-    ? (...args: [...{ [I in keyof A]: (Term<A[I]> | A[I]) }, out: Term<R>]) => Goal
-    : never;
+export type TermedArgs<T extends (...args: any) => any> = T extends (
+  ...args: infer A
+) => infer R
+  ? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<R>]) => Goal
+  : never;
 
 /**
  * Type helper for defining a relation with argument inference.
  */
-export function Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => Goal {
+export function Rel<F extends (...args: any) => any>(
+  fn: F,
+): (...args: Parameters<F>) => Goal {
   return fn;
 }
 
-export function ___Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => Goal {
+export function ___Rel<F extends (...args: any) => any>(
+  fn: F,
+): (...args: Parameters<F>) => Goal {
   const fnName = fn.name;
   return (...args) => {
     const start = Date.now();
     const res = fn(...args);
     console.log("REL", fnName, Date.now() - start);
     return res;
-  }
+  };
 }
 
 // --- List relations moved to relations-list.ts ---
@@ -236,11 +260,11 @@ export function ifte(g1: Goal, g2: Goal): Goal {
   };
 }
 export const eitherOr = ifte;
-export const neq_C = (x, y) => L.not(L.eq(x, y));
+export const neq_C = L.Rel((x: Term, y: Term) => L.not(L.eq(x, y)));
 
-export const distincto_G = (t, g) => {
+export const distincto_G = L.Rel((t: Term, g: Goal) => {
   // Track seen values for t in this execution
-  return async function* (s) {
+  return async function* (s: Subst) {
     const seen = new Set();
     for await (const s2 of g(s)) {
       const w_t = await L.walk(t, s2);
@@ -254,5 +278,4 @@ export const distincto_G = (t, g) => {
       yield s2;
     }
   };
-};
-
+});

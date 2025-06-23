@@ -1,16 +1,8 @@
 // Extended (non-primitive) logic relations for MiniKanren-style logic programming
 // These are not part of the minimal core, but are useful for practical logic programming.
 
-import {
-  Subst,
-  Term,
-  isCons,
-  walk,
-} from './core.ts';
-import {
-  Goal,
-} from './relations.ts';
-
+import { isCons, type Subst, type Term, walk } from "./core.ts";
+import type { Goal } from "./relations.ts";
 
 /**
  * alldistincto(xs): true if all elements of xs are distinct.
@@ -19,7 +11,7 @@ export function alldistincto(xs: Term): Goal {
   return async function* (s: Subst) {
     const arr = await walk(xs, s);
     let jsArr: any[] = [];
-    if (arr && typeof arr === 'object' && 'tag' in arr) {
+    if (arr && typeof arr === "object" && "tag" in arr) {
       // Convert logic list to JS array
       let cur: Term = arr;
       while (isCons(cur)) {
@@ -42,6 +34,3 @@ export function alldistincto(xs: Term): Goal {
     if (allDistinct) yield s;
   };
 }
-
-
-

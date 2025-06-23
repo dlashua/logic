@@ -1,6 +1,13 @@
-import { and, eq, lvar, makeFacts, createLogicVarProxy, Subst,  or,  Rel,  runEasy } from "./logic_lib.ts";
-import knex, { Knex } from "knex";
 import { makeRelDB } from "./facts-sql.ts";
+import {
+  and,
+  createLogicVarProxy,
+  lvar,
+  makeFacts,
+  Rel,
+  runEasy,
+  type Subst,
+} from "./logic_lib.ts";
 
 const $$ = createLogicVarProxy();
 
@@ -10,65 +17,60 @@ const taps = (msg: string) =>
     yield s;
   };
 
-
 const relDB = await makeRelDB({
-  client: 'better-sqlite3',
+  client: "better-sqlite3",
   connection: {
-    filename: './test.db',
+    filename: "./test.db",
   },
   useNullAsDefault: true,
 });
 const P = await relDB.makeRel("people");
 const F = await relDB.makeRel("friends");
 
-
 const id_name = Rel((i, p) =>
   P({
     id: i,
     name: p,
   }),
-)
+);
 
 const person_color = Rel((p, c) =>
   P({
     name: p,
-    color: c, 
+    color: c,
   }),
-)
+);
 
 const person_car = Rel((p, c) =>
   P({
     name: p,
-    car: c, 
+    car: c,
   }),
-)
+);
 
-const friends =
-    Rel((f1, f2) => {
-      // fresh((f1_id, f2_id) =>
-      const f1_id = lvar();
-      const f2_id = lvar();
-      return    and(
-        P({
-          id: f1_id,
-          name: f1, 
-        }),
-        F({
-          f1: f1_id,
-          f2: f2_id, 
-        }),
-        P({
-          id: f2_id,
-          name: f2, 
-        }),
-      )
-      // ),
-    },
-    )
+const friends = Rel((f1, f2) => {
+  // fresh((f1_id, f2_id) =>
+  const f1_id = lvar();
+  const f2_id = lvar();
+  return and(
+    P({
+      id: f1_id,
+      name: f1,
+    }),
+    F({
+      f1: f1_id,
+      f2: f2_id,
+    }),
+    P({
+      id: f2_id,
+      name: f2,
+    }),
+  );
+  // ),
+});
 
 const favnum = makeFacts();
 favnum.set("daniel", 3);
-
 
 const results = runEasy(($) => [
   {
@@ -95,8 +97,7 @@ const results = runEasy(($) => [
 
     // taps("FINAL"),
   ),
-],
-)
+]);
 
 let outid = 0;
 for await (const out of results) {
@@ -110,8 +111,3 @@ for await (const out of results) {
 await relDB.db.destroy();
 
 console.log(relDB.queries);
-
-
-
-
-

@@ -1,7 +1,18 @@
-import { DuckDBInstance } from '@duckdb/node-api';
-import { Goal, Subst, Term, isVar, unify, walk } from './logic_lib.ts';
+import { DuckDBInstance } from "@duckdb/node-api";
+import {
+  type Goal,
+  isVar,
+  type Subst,
+  type Term,
+  unify,
+  walk,
+} from "./logic_lib.ts";
 
-export function makeFactsDuckDB(table: string, columns: string[], dbPath: string) {
+export function makeFactsDuckDB(
+  table: string,
+  columns: string[],
+  dbPath: string,
+) {
   return (...query: Term[]) => {
     return async function* (s: Subst) {
       const where: string[] = [];
@@ -20,14 +31,18 @@ export function makeFactsDuckDB(table: string, columns: string[], dbPath: string
       const db = await DuckDBInstance.create(dbPath);
       const conn = await db.connect();
 
-      const sql = `SELECT ${columns.join(", ")} FROM ${table}` + (where.length ? ` WHERE ${where.join(' AND ')}` : '');
+      const sql =
+        `SELECT ${columns.join(", ")} FROM ${table}` +
+        (where.length ? ` WHERE ${where.join(" AND ")}` : "");
       // console.log(sql, params);
 
       const reader = await conn.runAndReadAll(sql, params);
       const rows = reader.getRowObjectsJS();
 
       for (const row of rows) {
-        const fact = columns.map(col => row[col] === undefined ? null : row[col]);
+        const fact = columns.map((col) =>
+          row[col] === undefined ? null : row[col],
+        );
         const s1 = await unify(query, fact, s);
         if (s1) yield s1;
       }
@@ -35,7 +50,11 @@ export function makeFactsDuckDB(table: string, columns: string[], dbPath: string
   };
 }
 
-export function makeFactsObjDuckDB(table: string, keys: string[], dbPath: string) {
+export function makeFactsObjDuckDB(
+  table: string,
+  keys: string[],
+  dbPath: string,
+) {
   function goalFn(queryObj: Record<string, Term>): Goal {
     return async function* (s: Subst) {
       const where: string[] = [];
@@ -54,7 +73,9 @@ export function makeFactsObjDuckDB(table: string, keys: string[], dbPath: string
       }
       const db = await DuckDBInstance.create(dbPath);
       const conn = await db.connect();
-      const sql = `SELECT ${qKeys.join(", ")} FROM ${table}` + (where.length ? ` WHERE ${where.join(' AND ')}` : '');
+      const sql =
+        `SELECT ${qKeys.join(", ")} FROM ${table}` +
+        (where.length ? ` WHERE ${where.join(" AND ")}` : "");
       // console.log(sql, params);
       const reader = await conn.runAndReadAll(sql, params);
       const rows = reader.getRowObjectsJS();
@@ -64,7 +85,11 @@ export function makeFactsObjDuckDB(table: string, keys: string[], dbPath: string
         for (const k of qKeys) {
           fact[k] = row[k] === undefined ? null : row[k];
         }
-        const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+        const s1 = await unify(
+          keys.map((k) => queryObj[k]),
+          keys.map((k) => fact[k]),
+          s,
+        );
         if (s1) yield s1;
       }
     };

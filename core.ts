@@ -3,7 +3,10 @@
 /**
  * Logic variable representation
  */
-export interface Var { tag: 'var', id: string }
+export interface Var {
+  tag: "var";
+  id: string;
+}
 let varCounter = 0;
 
 /**
@@ -11,8 +14,8 @@ let varCounter = 0;
  */
 export function lvar(name = ""): Var {
   return {
-    tag: 'var',
-    id: `${name}_${varCounter++}`, 
+    tag: "var",
+    id: `${name}_${varCounter++}`,
   };
 }
 /**
@@ -38,7 +41,12 @@ export type Subst = Map<string, Term<any>>;
  * Returns true if the value is a logic variable.
  */
 export function isVar(x: Term): x is Var {
-  return typeof x === 'object' && x !== null && 'tag' in x && (x as Var).tag === 'var';
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    "tag" in x &&
+    (x as Var).tag === "var"
+  );
 }
 
 /**
@@ -49,28 +57,31 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
   if (isVar(u) && s.has(u.id)) {
     let v = s.get(u.id)!;
     // Evaluate thunks until we get a non-thunk
-    while (typeof v === 'function') {
+    while (typeof v === "function") {
       v = await (v as Thunk | AsyncThunk)();
     }
     return walk(v, s);
   }
   // Handle logic lists
-  if (u && typeof u === 'object' && 'tag' in u) {
-    if ((u as any).tag === 'cons') {
-      return cons(await walk((u as any).head, s), await walk((u as any).tail, s));
+  if (u && typeof u === "object" && "tag" in u) {
+    if ((u as any).tag === "cons") {
+      return cons(
+        await walk((u as any).head, s),
+        await walk((u as any).tail, s),
+      );
     }
-    if ((u as any).tag === 'nil') {
+    if ((u as any).tag === "nil") {
       return nil;
     }
   }
   if (Array.isArray(u)) {
-    return Promise.all(u.map(x => walk(x, s)));
+    return Promise.all(u.map((x) => walk(x, s)));
   }
-  if (u && typeof u === 'object' && !isVar(u)) {
+  if (u && typeof u === "object" && !isVar(u)) {
     // Recursively walk object properties (but not null)
     const out: Record<string, Term> = {};
     for (const k in u) {
-      if (Object.prototype.hasOwnProperty.call(u, k)) {
+      if (Object.hasOwn(u, k)) {
         out[k] = await walk((u as any)[k], s);
       }
     }
@@ -98,14 +109,21 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
       s = sNext;
     }
     return s;
-  } else if (u && typeof u === 'object' && v && typeof v === 'object' && 'tag' in u && 'tag' in v) {
+  } else if (
+    u &&
+    typeof u === "object" &&
+    v &&
+    typeof v === "object" &&
+    "tag" in u &&
+    "tag" in v
+  ) {
     // Logic list unification
-    if ((u as any).tag === 'cons' && (v as any).tag === 'cons') {
+    if ((u as any).tag === "cons" && (v as any).tag === "cons") {
       const s1 = await unify((u as any).head, (v as any).head, s);
       if (!s1) return null;
       return await unify((u as any).tail, (v as any).tail, s1);
     }
-    if ((u as any).tag === 'nil' && (v as any).tag === 'nil') {
+    if ((u as any).tag === "nil" && (v as any).tag === "nil") {
       return s;
     }
     return null;
@@ -119,7 +137,11 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
 /**
  * Extends a substitution with a new variable binding, with occurs check.
  */
-export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
+export async function extendSubst(
+  v: Var,
+  val: Term,
+  s: Subst,
+): Promise<Subst | null> {
   if (await occursCheck(v, val, s)) return null;
   const s2 = new Map(s);
   s2.set(v.id, val);
@@ -131,11 +153,17 @@ export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | 
 /**
  * A cons cell node for logic lists.
  */
-export interface ConsNode { tag: 'cons', head: Term, tail: Term }
+export interface ConsNode {
+  tag: "cons";
+  head: Term;
+  tail: Term;
+}
 /**
  * A nil node for logic lists.
  */
-export interface NilNode { tag: 'nil' }
+export interface NilNode {
+  tag: "nil";
+}
 /**
  * Logic list canonical representation.
  */
@@ -145,16 +173,16 @@ export type LogicList = ConsNode | NilNode;
  * The canonical nil value for logic lists.
  */
 export const nil: NilNode = {
-  tag: 'nil', 
+  tag: "nil",
 };
 /**
  * Create a cons cell for a logic list.
  */
 export function cons(head: Term, tail: Term): ConsNode {
   return {
-    tag: 'cons',
+    tag: "cons",
     head,
-    tail, 
+    tail,
   };
 }
 /**
@@ -169,7 +197,12 @@ export function arrayToLogicList(arr: Term[]): LogicList {
 export function logicListToArray(list: Term): Term[] {
   const out = [];
   let cur = list;
-  while (cur && typeof cur === 'object' && 'tag' in cur && (cur as any).tag === 'cons') {
+  while (
+    cur &&
+    typeof cur === "object" &&
+    "tag" in cur &&
+    (cur as any).tag === "cons"
+  ) {
     out.push((cur as any).head);
     cur = (cur as any).tail;
   }
@@ -196,8 +229,8 @@ export async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
   x = await walk(x, s);
   if (isVar(x)) return v.id === x.id;
   if (Array.isArray(x)) {
-    const results = await Promise.all(x.map(e => occursCheck(v, e, s)));
-    return results.some(x => x === true);
+    const results = await Promise.all(x.map((e) => occursCheck(v, e, s)));
+    return results.some((x) => x === true);
   }
   return false;
 }
@@ -205,13 +238,13 @@ export async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
 /**
  * Returns true if the value is a cons cell (logic list node).
  */
-export function isCons(x: any): x is { tag: 'cons', head: Term, tail: Term } {
-  return x && typeof x === 'object' && 'tag' in x && x.tag === 'cons';
+export function isCons(x: any): x is { tag: "cons"; head: Term; tail: Term } {
+  return x && typeof x === "object" && "tag" in x && x.tag === "cons";
 }
 
 /**
  * Returns true if the value is a nil node (logic list end).
  */
-export function isNil(x: any): x is { tag: 'nil' } {
-  return x && typeof x === 'object' && 'tag' in x && x.tag === 'nil';
+export function isNil(x: any): x is { tag: "nil" } {
+  return x && typeof x === "object" && "tag" in x && x.tag === "nil";
 }

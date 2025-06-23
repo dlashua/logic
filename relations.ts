@@ -237,33 +237,21 @@ export function ifte(g1: Goal, g2: Goal): Goal {
 }
 export const eitherOr = ifte;
 export const neq_C = (x, y) => L.not(L.eq(x, y));
-export const distincto_C = (t) => {
-  const seen = new Set();
-  return async function* (s) {
-    const w_t = await L.walk(t, s);
-    if (L.isVar(w_t)) {
-      yield s;
-      return;
-    }
-    if (seen.has(w_t)) return;
-    seen.add(w_t);
-    yield s;
-  };
-};
 
 export const distincto_G = (t, g) => {
+  // Track seen values for t in this execution
   return async function* (s) {
-    if (s) {
-      const dfn = distincto_C(t);
-      for await (const s2 of g(s)) {
-        if (s2) {
-          for await (const s3 of dfn(s2)) {
-            if (s3) {
-              yield s3;
-            }
-          }
-        }
+    const seen = new Set();
+    for await (const s2 of g(s)) {
+      const w_t = await L.walk(t, s2);
+      if (L.isVar(w_t)) {
+        yield s2;
+        continue;
       }
+      const key = JSON.stringify(w_t);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      yield s2;
     }
   };
 };

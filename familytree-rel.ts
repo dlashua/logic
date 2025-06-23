@@ -43,16 +43,16 @@ export const kidsAgg = L.Rel((v, s) => {
 export const grandparent_kid = L.Rel((gp, k) => {
   const $$ = L.createLogicVarProxy(undefined, "grandparent_kid_");
   return L.and(
-    anyParentOf($$.p, gp),
     anyParentOf(k, $$.p),
+    anyParentOf($$.p, gp),
   )
 });
 
 export const greatgrandparent_kid = L.Rel((ggp, k) => {
   const $$ = L.createLogicVarProxy(undefined, "greatgrandparent_kid_");
   return L.and(
-    anyParentOf($$.gp, ggp),
-    grandparent_kid($$.gp, k),
+    anyParentOf(k, $$.p),
+    grandparent_kid(ggp, $$.p),
   )
 });
 
@@ -336,7 +336,19 @@ export const uncleOf = L.Rel((out_v, out_c) => {
     L.and(
       anyParentOf(out_v, $$.p),
       anyParentOf($$.p, $$.p1),
-      anyKidOf($$.p1, out_c),
+      anyKidOf($$.p1, $$.u),
+      L.or(
+        L.eq(out_c, $$.u),
+        L.and(
+          relationship($$.u, $$.us),
+          L.eq(out_c, $$.us),
+        ),
+        L.and(
+          relationship($$.us, $$.u),
+          L.eq(out_c, $$.us),
+        ),
+      ),
+      L.not(anyParentOf(out_v, out_c)),
       neq_C(out_c, $$.p),
       distincto_C(out_c),
     )
@@ -356,12 +368,29 @@ export const greatuncleOf = L.Rel((out_v, out_c) => {
   const $$ = L.createLogicVarProxy(undefined, "uncleof_");
   return (
     L.and(
-      anyParentOf(out_v, $$.p),
-      anyParentOf($$.p, $$.p1),
-      anyParentOf($$.p1, $$.p2),
-      anyKidOf($$.p2, out_c),
-      neq_C(out_c, $$.p1),
-      distincto_C(out_c),
+      L.and(
+        anyParentOf(out_v, $$.p),
+        anyParentOf($$.p, $$.p1),
+        anyParentOf($$.p1, $$.p2),
+        anyKidOf($$.p2, $$.u),
+        L.not(anyParentOf($$.p, $$.u)),
+        L.or(
+          L.eq(out_c, $$.u),
+          L.and(
+            relationship($$.u, $$.us),
+            L.eq(out_c, $$.us),
+          ),
+          L.and(
+            relationship($$.us, $$.u),
+            L.eq(out_c, $$.us),
+          ),
+        ),
+        L.not(anyParentOf(out_v, out_c)),
+        neq_C(out_c, $$.p),
+        neq_C(out_c, $$.p1),
+        neq_C(out_c, $$.p2),
+        distincto_C(out_c),
+      ),
     )
   );
 });

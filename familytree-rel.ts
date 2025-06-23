@@ -1,5 +1,5 @@
 import * as L from "./logic_lib.ts";
-import { neq_C, distincto_G, distincto_C } from "./relations.ts";
+import { neq_C, distincto_G } from "./relations.ts";
 
 let parent_kid = (p: L.Term,k: L.Term) => { throw "must set parent_kid"};
 let relationship = (a: L.Term,b: L.Term) => { throw "must set relationship"};
@@ -16,13 +16,13 @@ export const parentOf = L.Rel((v, p) => parent_kid(p, v));
 
 export const person = L.Rel((p) => {
   const $$ = L.createLogicVarProxy(undefined, "person_");
-  return L.and(
+  return L.distincto_G(
+    p,
     L.or(
       parent_kid(p, $$.kid),
       parent_kid($$.parent, p),
     ),
-    distincto_C(p),
-  );
+  )
 });
 
 // export const kidsAgg = L.groupAggregateRelFactory((v, k) => L.distinctVar(
@@ -285,18 +285,20 @@ export function uncleOfLevel(level = 1) {
   return L.Rel((person: any, uncle: any) => {
     const ancestor = L.lvar("uncle_ancestor");
     const sibling = L.lvar("uncle_sibling");
-    return L.and(
-      ancestorOf(level)(person, ancestor),
-      siblingOf(ancestor, sibling),
-      // uncle can be sibling or sibling-in-law
-      L.or(
-        L.eq(uncle, sibling),
-        relationshipEitherWay(sibling, uncle),
+    return L.distincto_G(
+      uncle,
+      L.and(
+        ancestorOf(level)(person, ancestor),
+        siblingOf(ancestor, sibling),
+        // uncle can be sibling or sibling-in-law
+        L.or(
+          L.eq(uncle, sibling),
+          relationshipEitherWay(sibling, uncle),
+        ),
+        // Exclude direct ancestors
+        L.not(anyParentOf(person, uncle)),
       ),
-      // Exclude direct ancestors
-      L.not(anyParentOf(person, uncle)),
-      distincto_C(uncle),
-    );
+    )
   });
 }
 
@@ -338,19 +340,21 @@ function cousinOf(a: any, b: any, degree = 1, removal = 0): any {
       );
     }
   }
-  return L.and(
-    ancestorOf(levelA)(a, ancestorA),
-    ancestorOf(levelB)(b, ancestorB),
-    L.eq(ancestorA, ancestorB),
-    ...noCloserCommon,
-    // L.not(L.eq(a, b)),
-    // L.not(siblingOf(a, b)),
-    // L.not(anyParentOf(a, b)),
-    // L.not(anyParentOf(b, a)),
-    L.not(isSiblingOfAnyAncestor(a, b, Math.max(levelA, levelB))),
-    L.not(isSiblingOfAnyAncestor(b, a, Math.max(levelA, levelB))),
-    distincto_C(b),
-  );
+  return L.distincto_G(
+    b,
+    L.and(
+      ancestorOf(levelA)(a, ancestorA),
+      ancestorOf(levelB)(b, ancestorB),
+      L.eq(ancestorA, ancestorB),
+      ...noCloserCommon,
+      // L.not(L.eq(a, b)),
+      // L.not(siblingOf(a, b)),
+      // L.not(anyParentOf(a, b)),
+      // L.not(anyParentOf(b, a)),
+      L.not(isSiblingOfAnyAncestor(a, b, Math.max(levelA, levelB))),
+      L.not(isSiblingOfAnyAncestor(b, a, Math.max(levelA, levelB))),
+    ),
+  )
 }
 
 export const cousinsAgg = L.Rel((v, s, degree = 1, removal = 0) => {
@@ -369,12 +373,14 @@ export const thirdcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 3);
 // Nephew/Niece relation: nephewOf(person, nephew)
 export const nephewOf = L.Rel((person, nephew) => {
   const parent = L.lvar("nephew_parent");
-  return L.and(
-    anyParentOf(nephew, parent),
-    siblingOf(person, parent),
-    L.not(L.eq(person, nephew)),
-    distincto_C(nephew),
-  );
+  return L.distincto_G(
+    nephew,
+    L.and(
+      anyParentOf(nephew, parent),
+      siblingOf(person, parent),
+      L.not(L.eq(person, nephew)),
+    ),
+  )
 });
 
 

@@ -1,8 +1,8 @@
 import * as L from "./logic_lib.ts";
 import { neq_C, distincto_G, distincto_C } from "./relations.ts";
 
-let parent_kid = () => { throw "must set parent_kid"};
-let relationship = () => { throw "must set relationship"};
+let parent_kid = (p: L.Term,k: L.Term) => { throw "must set parent_kid"};
+let relationship = (a: L.Term,b: L.Term) => { throw "must set relationship"};
 
 export function set_parent_kid(fn) {
   parent_kid = fn;
@@ -40,21 +40,9 @@ export const kidsAgg = L.Rel((v, s) => {
   );
 });
 
-export const grandparent_kid = L.Rel((gp, k) => {
-  const $$ = L.createLogicVarProxy(undefined, "grandparent_kid_");
-  return L.and(
-    anyParentOf(k, $$.p),
-    anyParentOf($$.p, gp),
-  )
-});
-
-export const greatgrandparent_kid = L.Rel((ggp, k) => {
-  const $$ = L.createLogicVarProxy(undefined, "greatgrandparent_kid_");
-  return L.and(
-    anyParentOf(k, $$.p),
-    grandparent_kid(ggp, $$.p),
-  )
-});
+// Refactored using generalized ancestorOf
+export const grandparent_kid = ancestorOf(2);
+export const greatgrandparent_kid = ancestorOf(3);
 
 export const grandparentAgg = L.Rel((k, gp) => {
   const in_s = L.lvar("in_s");
@@ -113,42 +101,26 @@ export const parentAgg = L.Rel((k, p) => {
   );
 });
 
-export const stepParentOf = L.Rel((kid, stepparent) => {
+// Helper: succeeds if a is in a relationship with b or b with a
+export const relationshipEitherWay =  L.Rel((a: L.Term, b: L.Term) => {
+  return L.or(relationship(a, b), relationship(b, a));
+});
+
+export const stepParentOf = L.Rel((kid: any, stepparent: any) => {
   const $$ = L.createLogicVarProxy(undefined, "stepparentof_");
   return L.and(
     parentOf(kid, $$.parent),
-    L.or(
-      L.and(
-        relationship($$.parent, stepparent),
-        neq_C(stepparent, $$.parent),
-        L.not(parentOf(kid, stepparent)),
-      ),
-      L.and(
-        relationship(stepparent, $$.parent),
-        neq_C(stepparent, $$.parent),
-        L.not(parentOf(kid, stepparent)),
-      ),
-    ),
+    relationshipEitherWay($$.parent, stepparent),
+    L.not(parentOf(kid, stepparent)),
   );
 });
 
-export const stepKidOf = L.Rel((stepparent, kid) => {
+export const stepKidOf = L.Rel((stepparent: any, kid: any) => {
   const $$ = L.createLogicVarProxy(undefined, "stepkidof_");
   return L.and(
-    L.or(
-      L.and(
-        relationship($$.parent, stepparent),
-        neq_C(stepparent, $$.parent),
-        parentOf(kid, $$.parent),
-        L.not(parentOf(kid, stepparent)),
-      ),
-      L.and(
-        relationship(stepparent, $$.parent),
-        neq_C(stepparent, $$.parent),
-        parentOf(kid, $$.parent),
-        L.not(parentOf(kid, stepparent)),
-      ),
-    ),
+    relationshipEitherWay(stepparent, $$.parent),
+    parentOf(kid, $$.parent),
+    L.not(parentOf(kid, stepparent)),
   );
 });
 
@@ -161,8 +133,8 @@ export const stepParentAgg = L.Rel((k, p) => {
   );
 });
 
-export const tap = (msg) => {
-  return function* (s) {
+export const tap = (msg: any) => {
+  return function* (s: any) {
     console.log(msg, s);
     yield s;
   };
@@ -227,15 +199,12 @@ export const halfSiblingsAgg = L.Rel((v, s) => {
   );
 });
 
-export const stepSiblingOf = L.Rel((out_v, out_s) => {
+export const stepSiblingOf = L.Rel((out_v: any, out_s: any) => {
   const $$ = L.createLogicVarProxy(undefined, "stepsiblingof_");
   return (
     L.and(
       parentOf(out_v, $$.vparent),
-      L.or(
-        relationship($$.vparent, $$.Mstepsibling_parent),
-        relationship($$.Mstepsibling_parent, $$.vparent),
-      ),
+      relationshipEitherWay($$.vparent, $$.Mstepsibling_parent),
       parentOf(out_s, $$.Mstepsibling_parent),
       neq_C(out_v, out_s),
       // tap("SSSS"),
@@ -270,90 +239,9 @@ export const siblingsAgg = L.Rel((v, s) => {
   );
 });
 
-export const cousinOf = L.Rel((out_v, out_c, level = 1) => {
-  // Build ancestor chain for out_v
-  const upVars = [out_v];
-  for (let i = 0; i <= level; ++i) {
-    upVars.push(L.lvar(`cousinOf_up_${i}`));
-  }
-
-  // Build descendant chain for out_c (start at highest ancestor and work down)
-  const downVars = [upVars[upVars.length - 1]];
-  for (let i = level - 1; i >= 0; --i) {
-    downVars.push(L.lvar(`cousinOf_down_${i}`));
-  }
-  downVars.push(out_c);
-
-  // Constraints for going up from out_v
-  const goals = [];
-  const gt = [];
-  for (let i = 0; i <= level; ++i) {
-    goals.push(anyParentOf(upVars[i], upVars[i + 1]));
-    gt.push(`apo ${upVars[i].id} ${upVars[i + 1].id}`)
-  }
-
-  // Constraints for going down to out_c (reverse order)
-  for (let i = 0; i <= level; ++i) {
-    
-    goals.push(anyKidOf(downVars[i], downVars[i + 1]));
-    gt.push(`ako ${downVars[i].id} ${downVars[i + 1].id}`)
-    
-    goals.push(neq_C(downVars[i + 1], upVars[level - i]));
-    if(i < level) {
-      gt.push(`neq ${downVars[i + 1].id} ${upVars[level - i].id}`)
-    }
-  }
-
-  // console.log("CCCCC", level, gt);
-
-  return L.and(
-    ...goals,
-    distincto_C(out_c),
-  );
-});
-
-export const firstcousinOf = (a, b) => cousinOf(a, b, 1);
-export const secondcousinOf = (a, b) => cousinOf(a, b, 2);
-export const thirdcousinOf = (a, b) => cousinOf(a, b, 3);
-
-// Generalized cousinsAgg relation
-export const cousinsAgg = L.Rel((v, s, level = 1) => {
-  const in_s = L.lvar("in_s");
-  return L.collecto(
-    in_s,
-    cousinOf(v, in_s, level),
-    s,
-  );
-});
-
-export const firstcousinsAgg = (v, s) => cousinsAgg(v, s, 1);
-export const secondcousinsAgg = (v, s) => cousinsAgg(v, s, 2);
-export const thirdcousinsAgg = (v, s) => cousinsAgg(v, s, 3);
-
-export const uncleOf = L.Rel((out_v, out_c) => {
-  const $$ = L.createLogicVarProxy(undefined, "uncleof_");
-  return (
-    L.and(
-      anyParentOf(out_v, $$.p),
-      anyParentOf($$.p, $$.p1),
-      anyKidOf($$.p1, $$.u),
-      L.or(
-        L.eq(out_c, $$.u),
-        L.and(
-          relationship($$.u, $$.us),
-          L.eq(out_c, $$.us),
-        ),
-        L.and(
-          relationship($$.us, $$.u),
-          L.eq(out_c, $$.us),
-        ),
-      ),
-      L.not(anyParentOf(out_v, out_c)),
-      neq_C(out_c, $$.p),
-      distincto_C(out_c),
-    )
-  );
-});
+// Refactored using uncleOfLevel
+export const uncleOf = uncleOfLevel(1);
+export const greatuncleOf = uncleOfLevel(2);
 
 export const uncleAgg = L.Rel((v, s) => {
   const in_s = L.lvar("in_s");
@@ -361,37 +249,6 @@ export const uncleAgg = L.Rel((v, s) => {
     in_s,
     uncleOf(v, in_s),
     s,
-  );
-});
-
-export const greatuncleOf = L.Rel((out_v, out_c) => {
-  const $$ = L.createLogicVarProxy(undefined, "uncleof_");
-  return (
-    L.and(
-      L.and(
-        anyParentOf(out_v, $$.p),
-        anyParentOf($$.p, $$.p1),
-        anyParentOf($$.p1, $$.p2),
-        anyKidOf($$.p2, $$.u),
-        L.not(anyParentOf($$.p, $$.u)),
-        L.or(
-          L.eq(out_c, $$.u),
-          L.and(
-            relationship($$.u, $$.us),
-            L.eq(out_c, $$.us),
-          ),
-          L.and(
-            relationship($$.us, $$.u),
-            L.eq(out_c, $$.us),
-          ),
-        ),
-        L.not(anyParentOf(out_v, out_c)),
-        neq_C(out_c, $$.p),
-        neq_C(out_c, $$.p1),
-        neq_C(out_c, $$.p2),
-        distincto_C(out_c),
-      ),
-    )
   );
 });
 
@@ -403,5 +260,91 @@ export const greatuncleAgg = L.Rel((v, s) => {
     s,
   );
 });
+
+// Refactored cousin relations using cousinOfGeneral
+export const cousinOf = (a: any, b: any, level = 1) => cousinOfGeneral(level, level)(a, b);
+export const firstcousinOf = (a: any, b: any) => cousinOf(a, b, 1);
+export const secondcousinOf = (a: any, b: any) => cousinOf(a, b, 2);
+export const thirdcousinOf = (a: any, b: any) => cousinOf(a, b, 3);
+
+export const cousinsAgg = L.Rel((v, s, level = 1) => {
+  const in_s = L.lvar("in_s");
+  return L.collecto(
+    in_s,
+    cousinOf(v, in_s, level),
+    s,
+  );
+});
+
+export const firstcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 1);
+export const secondcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 2);
+export const thirdcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 3);
+
+// Generalized ancestor relation: ancestorOf(level)(descendant, ancestor)
+export function ancestorOf(level: number) {
+  return L.Rel((descendant, ancestor) => {
+    if (level < 1) return L.eq(descendant, ancestor);
+    const chain = [descendant];
+    for (let i = 0; i < level; ++i) {
+      chain.push(L.lvar(`ancestor_${i}`));
+    }
+    const goals = [];
+    for (let i = 0; i < level; ++i) {
+      goals.push(anyParentOf(chain[i], chain[i + 1]));
+    }
+    goals.push(L.eq(chain[level], ancestor));
+    return L.and(...goals);
+  });
+}
+
+// Generalized uncle/aunt relation: uncleOfLevel(level)(person, uncle)
+export function uncleOfLevel(level = 1) {
+  return L.Rel((person: any, uncle: any) => {
+    const ancestor = L.lvar("uncle_ancestor");
+    const sibling = L.lvar("uncle_sibling");
+    return L.and(
+      ancestorOf(level)(person, ancestor),
+      siblingOf(ancestor, sibling),
+      // uncle can be sibling or sibling-in-law
+      L.or(
+        L.eq(uncle, sibling),
+        relationshipEitherWay(sibling, uncle),
+      ),
+      // Exclude direct ancestors
+      L.not(anyParentOf(person, uncle)),
+      distincto_C(uncle),
+    );
+  });
+}
+
+// Generalized cousin relation with removal: cousinOfGeneral(upA, upB)(a, b)
+export function cousinOfGeneral(upA = 1, upB = 1) {
+  return L.Rel((a, b) => {
+    const ancestorA = L.lvar("cousinGen_ancestorA");
+    const ancestorB = L.lvar("cousinGen_ancestorB");
+    return L.and(
+      ancestorOf(upA)(a, ancestorA),
+      ancestorOf(upB)(b, ancestorB),
+      L.eq(ancestorA, ancestorB),
+      L.not(L.eq(a, b)),
+      L.not(siblingOf(a, b)), // Prevent siblings from being reported as cousins
+      distincto_C(b),
+    );
+  });
+}
+
+// Nephew/Niece relation: nephewOf(person, nephew)
+export const nephewOf = L.Rel((person, nephew) => {
+  const parent = L.lvar("nephew_parent");
+  return L.and(
+    anyParentOf(nephew, parent),
+    siblingOf(person, parent),
+    L.not(L.eq(person, nephew)),
+    distincto_C(nephew),
+  );
+});
+
+// Example: first cousin once removed (a: child, b: cousin's child)
+export const firstCousinOnceRemoved = cousinOfGeneral(1, 2);
 
 

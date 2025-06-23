@@ -88,9 +88,9 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
   u = await walk(u, s);
   v = await walk(v, s);
   if (isVar(u)) {
-    return extendSubst(u, v, s);
+    return await extendSubst(u, v, s);
   } else if (isVar(v)) {
-    return extendSubst(v, u, s);
+    return await extendSubst(v, u, s);
   } else if (Array.isArray(u) && Array.isArray(v) && u.length === v.length) {
     for (let i = 0; i < u.length; i++) {
       const sNext = await unify(u[i], v[i], s);
@@ -119,8 +119,8 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
 /**
  * Extends a substitution with a new variable binding, with occurs check.
  */
-export function extendSubst(v: Var, val: Term, s: Subst): Subst | null {
-  if (occursCheck(v, val, s)) return null;
+export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
+  if (await occursCheck(v, val, s)) return null;
   const s2 = new Map(s);
   s2.set(v.id, val);
   return s2;
@@ -192,10 +192,13 @@ export function logicList<T = unknown>(...items: T[]): Term {
 /**
  * Returns true if variable v occurs anywhere in x (occurs check for unification).
  */
-export function occursCheck(v: Var, x: Term, s: Subst): boolean {
-  x = walk(x, s);
+export async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
+  x = await walk(x, s);
   if (isVar(x)) return v.id === x.id;
-  if (Array.isArray(x)) return x.some(e => occursCheck(v, e, s));
+  if (Array.isArray(x)) {
+    const results = await Promise.all(x.map(e => occursCheck(v, e, s)));
+    return results.some(x => x === true);
+  }
   return false;
 }
 

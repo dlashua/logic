@@ -261,24 +261,7 @@ export const greatuncleAgg = L.Rel((v, s) => {
   );
 });
 
-// Refactored cousin relations using cousinOfGeneral
-export const cousinOf = (a: any, b: any, level = 1) => cousinOfGeneral(level, level)(a, b);
-export const firstcousinOf = (a: any, b: any) => cousinOf(a, b, 1);
-export const secondcousinOf = (a: any, b: any) => cousinOf(a, b, 2);
-export const thirdcousinOf = (a: any, b: any) => cousinOf(a, b, 3);
 
-export const cousinsAgg = L.Rel((v, s, level = 1) => {
-  const in_s = L.lvar("in_s");
-  return L.collecto(
-    in_s,
-    cousinOf(v, in_s, level),
-    s,
-  );
-});
-
-export const firstcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 1);
-export const secondcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 2);
-export const thirdcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 3);
 
 // Generalized ancestor relation: ancestorOf(level)(descendant, ancestor)
 export function ancestorOf(level: number) {
@@ -317,21 +300,71 @@ export function uncleOfLevel(level = 1) {
   });
 }
 
-// Generalized cousin relation with removal: cousinOfGeneral(upA, upB)(a, b)
-export function cousinOfGeneral(upA = 1, upB = 1) {
-  return L.Rel((a, b) => {
-    const ancestorA = L.lvar("cousinGen_ancestorA");
-    const ancestorB = L.lvar("cousinGen_ancestorB");
-    return L.and(
-      ancestorOf(upA)(a, ancestorA),
-      ancestorOf(upB)(b, ancestorB),
-      L.eq(ancestorA, ancestorB),
-      L.not(L.eq(a, b)),
-      L.not(siblingOf(a, b)), // Prevent siblings from being reported as cousins
-      distincto_C(b),
-    );
-  });
+// Exclude if candidate is a sibling of any ancestor of person up to maxLevel
+function isSiblingOfAnyAncestor(person: any, candidate: any, maxLevel: number) {
+  const goals = [];
+  for (let i = 1; i < maxLevel; ++i) {
+    const anc = L.lvar(`anc_${i}`);
+    goals.push(L.and(ancestorOf(i)(person, anc), siblingOf(anc, candidate)));
+  }
+  return L.or(...goals);
 }
+
+// Strict cousin relationship: ensure closest common ancestor is at the correct level
+function cousinOf(a: any, b: any, degree = 1, removal = 0): any {
+  if (degree < 1) return L.eq(0,1);
+  let levelA, levelB;
+  if (removal < 0) {
+    levelA = degree + 1 - removal;
+    levelB = degree + 1;
+  } else {
+    levelA = degree + 1;
+    levelB = degree + 1 + removal;
+  }
+  const ancestorA = L.lvar("cousinGen_ancestorA");
+  const ancestorB = L.lvar("cousinGen_ancestorB");
+  // Constraints to ensure no closer common ancestor
+  const noCloserCommon = [];
+  for (let i = 1; i < levelA; ++i) {
+    const closerA = L.lvar(`closerA_${i}`);
+    for (let j = 1; j < levelB; ++j) {
+      const closerB = L.lvar(`closerB_${j}`);
+      noCloserCommon.push(
+        L.not(L.and(
+          ancestorOf(i)(a, closerA),
+          ancestorOf(j)(b, closerB),
+          L.eq(closerA, closerB),
+        )),
+      );
+    }
+  }
+  return L.and(
+    ancestorOf(levelA)(a, ancestorA),
+    ancestorOf(levelB)(b, ancestorB),
+    L.eq(ancestorA, ancestorB),
+    ...noCloserCommon,
+    // L.not(L.eq(a, b)),
+    // L.not(siblingOf(a, b)),
+    // L.not(anyParentOf(a, b)),
+    // L.not(anyParentOf(b, a)),
+    L.not(isSiblingOfAnyAncestor(a, b, Math.max(levelA, levelB))),
+    L.not(isSiblingOfAnyAncestor(b, a, Math.max(levelA, levelB))),
+    distincto_C(b),
+  );
+}
+
+export const cousinsAgg = L.Rel((v, s, degree = 1, removal = 0) => {
+  const in_s = L.lvar("in_s");
+  return L.collecto(
+    in_s,
+    cousinOf(v, in_s, degree, removal),
+    s,
+  );
+});
+
+export const firstcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 1);
+export const secondcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 2);
+export const thirdcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 3);
 
 // Nephew/Niece relation: nephewOf(person, nephew)
 export const nephewOf = L.Rel((person, nephew) => {
@@ -344,7 +377,5 @@ export const nephewOf = L.Rel((person, nephew) => {
   );
 });
 
-// Example: first cousin once removed (a: child, b: cousin's child)
-export const firstCousinOnceRemoved = cousinOfGeneral(1, 2);
 
 

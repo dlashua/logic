@@ -34,7 +34,7 @@ export async function* formatSubstitutions<Fmt extends Record<string, Term<any>>
 /**
  * Create a Proxy for logic variables, with customizable key type.
  */
-export function createLogicVarProxy<K extends string | symbol = string>(varMap?: Map<K, Var>): Record<K, Var> {
+export function createLogicVarProxy<K extends string | symbol = string>(varMap?: Map<K, Var>, prefix = ""): Record<K, Var> {
   if (!varMap) varMap = new Map<K, Var>();
   return new Proxy({}, {
     get(target, prop: K) {
@@ -45,7 +45,7 @@ export function createLogicVarProxy<K extends string | symbol = string>(varMap?:
         return lvar();
       }
       if (!varMap!.has(prop)) {
-                varMap!.set(prop, lvar(prop));
+                varMap!.set(prop, lvar(`${prefix}${prop}`));
       }
       return varMap!.get(prop);
     },

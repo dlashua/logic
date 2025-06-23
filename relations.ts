@@ -166,8 +166,18 @@ export type TermedArgs<T extends (...args: any) => any> =
 /**
  * Type helper for defining a relation with argument inference.
  */
-export function Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => ReturnType<F> {
+export function Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => Goal {
   return fn;
+}
+
+export function ___Rel<F extends (...args: any) => any>(fn: F): (...args: Parameters<F>) => Goal {
+  const fnName = fn.name;
+  return (...args) => {
+    const start = Date.now();
+    const res = fn(...args);
+    console.log("REL", fnName, Date.now() - start);
+    return res;
+  }
 }
 
 // --- List relations moved to relations-list.ts ---
@@ -205,4 +215,24 @@ export const multo = mapRel((x: number, y: number) => x * y);
  * divo(x, y, z): x / y = z (integer division)
  */
 export const divo = mapRel((x: number, y: number) => Math.floor(x / y));
+
+/**
+ * ifte: logic programming if-then-else (soft cut).
+ * Tries g1; if it succeeds, yields only those results and does NOT try g2.
+ * If g1 fails, tries g2.
+ * Alias: eitherOr
+ */
+export function ifte(g1: Goal, g2: Goal): Goal {
+  return async function* (s: Subst) {
+    let found = false;
+    for await (const s1 of g1(s)) {
+      found = true;
+      yield s1;
+    }
+    if (!found) {
+      for await (const s2 of g2(s)) yield s2;
+    }
+  };
+}
+export const eitherOr = ifte;
 

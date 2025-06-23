@@ -1,5 +1,6 @@
 // Relation helpers for MiniKanren-style logic programming
 import { Subst, Term, Var,  isVar, lvar, unify, walk } from './core.ts';
+import * as L from './logic_lib.ts';
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -235,4 +236,35 @@ export function ifte(g1: Goal, g2: Goal): Goal {
   };
 }
 export const eitherOr = ifte;
+export const neq_C = (x, y) => L.not(L.eq(x, y));
+export const distincto_C = (t) => {
+  const seen = new Set();
+  return async function* (s) {
+    const w_t = await L.walk(t, s);
+    if (L.isVar(w_t)) {
+      yield s;
+      return;
+    }
+    if (seen.has(w_t)) return;
+    seen.add(w_t);
+    yield s;
+  };
+};
+
+export const distincto_G = (t, g) => {
+  return async function* (s) {
+    if (s) {
+      const dfn = distincto_C(t);
+      for await (const s2 of g(s)) {
+        if (s2) {
+          for await (const s3 of dfn(s2)) {
+            if (s3) {
+              yield s3;
+            }
+          }
+        }
+      }
+    }
+  };
+};
 

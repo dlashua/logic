@@ -1,5 +1,5 @@
 import * as L from "./logic_lib.ts";
-import { neq_C, distincto_G, distincto_C } from "./hold/new-lib.ts";
+import { neq_C, distincto_G, distincto_C } from "./relations.ts";
 
 let parent_kid = () => { throw "must set parent_kid"};
 let relationship = () => { throw "must set relationship"};

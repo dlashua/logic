@@ -2,21 +2,37 @@
 
 import * as L from "./logic_lib.ts";
 import type { Subst, Term, Var } from "./core.ts";
-import { isVar, lvar, unify, walk } from "./core.ts"
+import { isVar, lvar, unify, walk } from "./core.ts";
 
-/**
- * A logic goal: a function from a substitution to an async generator of substitutions.
- */
-export type Goal = (s: Subst) => AsyncGenerator<Subst>;
+// --- Goal Metadata and Optimizer ---
+export interface GoalMetadata {
+  name: string;
+  args: any[];
+}
+
+export type GoalFn = (s: Subst) => AsyncGenerator<Subst>;
+export type Goal = GoalFn & { _metadata?: GoalMetadata };
+
+export function toGoal(fn: GoalFn, metadata?: GoalMetadata): Goal {
+  const g = fn as Goal;
+  if (metadata) (g as any)._metadata = metadata;
+  return g;
+}
 
 /**
  * Succeeds if u and v unify.
  */
 export function eq(u: Term, v: Term): Goal {
-  return async function* (s: Subst) {
-    const s2 = await unify(u, v, s);
-    if (s2) yield s2;
-  };
+  return toGoal(
+    async function* (s: Subst) {
+      const s2 = await unify(u, v, s);
+      if (s2) yield s2;
+    },
+    {
+      name: "eq",
+      args: [u, v],
+    },
+  );
 }
 
 /**
@@ -25,34 +41,48 @@ export function eq(u: Term, v: Term): Goal {
  */
 export function fresh(f: (...vars: Var[]) => Goal): Goal {
   const n = f.length;
-  return async function* (s: Subst) {
-    const vars = Array.from({
-      length: n 
-    }, () => lvar());
+  const goalFunc = async function* (s: Subst) {
+    const vars = Array.from({ length: n }, () => lvar());
     const goal = f(...vars);
     for await (const s1 of goal(s)) yield s1;
   };
+  return toGoal(goalFunc, {
+    name: "fresh",
+    args: [f],
+  });
 }
 
 /**
  * Logical OR: succeeds if either g1 or g2 succeeds.
  */
 export function disj(g1: Goal, g2: Goal): Goal {
-  return async function* (s: Subst) {
-    for await (const s2 of g1(s)) yield s2;
-    for await (const s2 of g2(s)) yield s2;
-  };
+  return toGoal(
+    async function* (s: Subst) {
+      for await (const s2 of g1(s)) yield s2;
+      for await (const s2 of g2(s)) yield s2;
+    },
+    {
+      name: "disj",
+      args: [g1, g2],
+    },
+  );
 }
 
 /**
  * Logical AND: succeeds if both g1 and g2 succeed in sequence.
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return async function* (s: Subst) {
-    for await (const s1 of g1(s)) {
-      for await (const s2 of g2(s1)) yield s2;
-    }
-  };
+  return toGoal(
+    async function* (s: Subst) {
+      for await (const s1 of g1(s)) {
+        for await (const s2 of g2(s1)) yield s2;
+      }
+    },
+    {
+      name: "conj",
+      args: [g1, g2],
+    },
+  );
 }
 
 /**
@@ -62,12 +92,16 @@ export function conj(g1: Goal, g2: Goal): Goal {
  * first argument don't succeed, then the second argument is attempted.
  */
 export function conde(...clauses: Goal[][]): Goal {
-  return async function* (s: Subst) {
+  const goalFunc = async function* (s: Subst) {
     for (const clause of clauses) {
       const goal = and(...clause);
       for await (const s1 of goal(s)) yield s1;
     }
   };
+  return toGoal(goalFunc, {
+    name: "conde",
+    args: clauses,
+  });
 }
 
 /**
@@ -75,7 +109,7 @@ export function conde(...clauses: Goal[][]): Goal {
  */
 export const and = (...goals: Goal[]) => {
   if (goals.length === 0) throw new Error("and requires at least one goal");
-  return goals.reduce((a, b) => conj(a, b));
+  return goals.length > 1 ? and_optimized(...goals) : goals[0];
 };
 export const all = and;
 
@@ -95,11 +129,16 @@ export const or = (...goals: Goal[]) => {
 export function filterRel(
   pred: (...args: any[]) => boolean,
 ): (...args: Term[]) => Goal {
-  return (...args: Term[]) =>
-    async function* (s: Subst) {
+  return (...args: Term[]) => {
+    const goalFunc = async function* (s: Subst) {
       const vals = await Promise.all(args.map((arg) => walk(arg, s)));
       if (pred(...vals)) yield s;
     };
+    return toGoal(goalFunc, {
+      name: "filterRel",
+      args: [pred, ...args],
+    });
+  };
 }
 
 export const gtc = filterRel((x, gt) => x > gt);
@@ -108,8 +147,8 @@ export const gtc = filterRel((x, gt) => x > gt);
  * Create a relation from a function mapping input terms to an output term.
  */
 export const mapRel = <F extends (...args: any) => any>(fn: F) => {
-  return (...args: Parameters<TermedArgs<F>>) =>
-    async function* (s: Subst) {
+  return (...args: Parameters<TermedArgs<F>>) => {
+    const goalFunc = async function* (s: Subst) {
       const vals = await Promise.all(
         args.map(async (arg) => await walk(arg, s)),
       );
@@ -121,6 +160,11 @@ export const mapRel = <F extends (...args: any) => any>(fn: F) => {
         if (s2) yield s2;
       }
     };
+    return toGoal(goalFunc, {
+      name: "mapRel",
+      args: [fn, ...args],
+    });
+  };
 };
 
 export const mapInline = <F extends (...args: any) => any>(
@@ -138,7 +182,7 @@ export const mapInlineLazy = <F extends (...args: any) => any>(
   fn: F,
   ...args: Parameters<TermedArgs<F>>
 ) => {
-  return async function* (s: Subst) {
+  const goalFunc = async function* (s: Subst) {
     const inArgs = args.slice(0, -1);
     const outVar = args[args.length - 1];
     if (isVar(outVar)) {
@@ -154,6 +198,10 @@ export const mapInlineLazy = <F extends (...args: any) => any>(
       if (s2) yield s2;
     }
   };
+  return toGoal(goalFunc, {
+    name: "mapInlineLazy",
+    args: [fn, ...args],
+  });
 };
 
 /**
@@ -191,11 +239,8 @@ export function Rel<F extends (...args: any) => any>(
 export function ___Rel<F extends (...args: any) => any>(
   fn: F,
 ): (...args: Parameters<F>) => Goal {
-  const fnName = fn.name;
   return (...args) => {
-    const start = Date.now();
     const res = fn(...args);
-    console.log("REL", fnName, Date.now() - start);
     return res;
   };
 }
@@ -213,10 +258,14 @@ export function ___Rel<F extends (...args: any) => any>(
  * not(goal): Succeeds if the given goal fails (negation as failure).
  */
 export function not(goal: Goal): Goal {
-  return async function* (s: Subst) {
+  const goalFunc = async function* (s: Subst) {
     for await (const _ of goal(s)) return;
     yield s;
   };
+  return toGoal(goalFunc, {
+    name: "not",
+    args: [goal],
+  });
 }
 
 /**
@@ -243,7 +292,7 @@ export const divo = mapRel((x: number, y: number) => Math.floor(x / y));
  * Alias: eitherOr
  */
 export function ifte(g1: Goal, g2: Goal): Goal {
-  return async function* (s: Subst) {
+  const goalFunc = async function* (s: Subst) {
     let found = false;
     for await (const s1 of g1(s)) {
       found = true;
@@ -253,13 +302,17 @@ export function ifte(g1: Goal, g2: Goal): Goal {
       for await (const s2 of g2(s)) yield s2;
     }
   };
+  return toGoal(goalFunc, {
+    name: "ifte",
+    args: [g1, g2],
+  });
 }
 export const eitherOr = ifte;
 export const neq_C = L.Rel((x: Term, y: Term) => L.not(L.eq(x, y)));
 
 export const distincto_G = L.Rel((t: Term, g: Goal) => {
   // Track seen values for t in this execution
-  return async function* (s: Subst) {
+  const goalFunc = async function* (s: Subst) {
     const seen = new Set();
     for await (const s2 of g(s)) {
       const w_t = await L.walk(t, s2);
@@ -273,4 +326,73 @@ export const distincto_G = L.Rel((t: Term, g: Goal) => {
       yield s2;
     }
   };
+  return toGoal(goalFunc, {
+    name: "distincto_G",
+    args: [t, g],
+  });
 });
+
+// --- Optimized AND ---
+export function and_optimized(...goals: Goal[]): Goal {
+  return toGoal(
+    async function* (s: Subst) {
+      const runGoal = async function* (g: Goal, sub: Subst) {
+        for await (const s1 of g(sub)) {
+          yield s1;
+        }
+      };
+
+      const execute = async function* (
+        sub: Subst,
+        goals: Goal[],
+      ): AsyncGenerator<Subst> {
+        if (goals.length === 0) {
+          yield sub;
+          return;
+        }
+
+        const scores = await Promise.all(
+          goals.map(async (goal) => {
+            const meta = goal._metadata;
+            let score = 0;
+            if (meta?.args) {
+              for (const arg of meta.args) {
+                const walkedArg = await walk(arg, sub);
+                if (!isVar(walkedArg)) {
+                  score++;
+                }
+              }
+            }
+            return score;
+          }),
+        );
+
+        let bestIdx = 0;
+        let bestScore = -1;
+        for (let i = 0; i < scores.length; i++) {
+          if (scores[i] > bestScore) {
+            bestScore = scores[i];
+            bestIdx = i;
+          }
+        }
+
+        const bestGoal = goals[bestIdx];
+        const nextGoals = goals
+          .slice(0, bestIdx)
+          .concat(goals.slice(bestIdx + 1));
+
+        for await (const s1 of runGoal(bestGoal, sub)) {
+          for await (const s2 of execute(s1, nextGoals)) {
+            yield s2;
+          }
+        }
+      };
+
+      yield* execute(s, goals);
+    },
+    {
+      name: "and_optimized",
+      args: goals.map((g) => g._metadata),
+    },
+  );
+}

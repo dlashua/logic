@@ -96,42 +96,39 @@ export type AsyncThunk = () => Promise<Term>;
  * Unification: attempts to unify two terms under a substitution.
  */
 export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
-  u = await walk(u, s);
-  v = await walk(v, s);
-  if (isVar(u)) {
-    return await extendSubst(u, v, s);
-  } else if (isVar(v)) {
-    return await extendSubst(v, u, s);
-  } else if (Array.isArray(u) && Array.isArray(v) && u.length === v.length) {
-    for (let i = 0; i < u.length; i++) {
-      const sNext = await unify(u[i], v[i], s);
-      if (!sNext) return null;
-      s = sNext;
-    }
-    return s;
-  } else if (
-    u &&
-    typeof u === "object" &&
-    v &&
-    typeof v === "object" &&
-    "tag" in u &&
-    "tag" in v
-  ) {
-    // Logic list unification
-    if ((u as any).tag === "cons" && (v as any).tag === "cons") {
-      const s1 = await unify((u as any).head, (v as any).head, s);
-      if (!s1) return null;
-      return await unify((u as any).tail, (v as any).tail, s1);
-    }
-    if ((u as any).tag === "nil" && (v as any).tag === "nil") {
-      return s;
-    }
-    return null;
-  } else if (u === v) {
-    return s;
-  } else {
-    return null;
+  const u_walked = await walk(u, s);
+  const v_walked = await walk(v, s);
+  if (u_walked === v_walked) return s;
+  if (isVar(u_walked)) {
+    const newS = new Map(s);
+    newS.set(u_walked.id, v_walked);
+    return newS;
   }
+  if (isVar(v_walked)) {
+    const newS = new Map(s);
+    newS.set(v_walked.id, u_walked);
+    return newS;
+  }
+  if (
+    u_walked &&
+    v_walked &&
+    typeof u_walked === "object" &&
+    typeof v_walked === "object" &&
+    !isVar(u_walked) &&
+    !isVar(v_walked)
+  ) {
+    const u_keys = Object.keys(u_walked);
+    const v_keys = Object.keys(v_walked);
+    if (u_keys.length !== v_keys.length) return null;
+    let s2: Subst | null = s;
+    for (const key of u_keys) {
+      if (!v_keys.includes(key)) return null;
+      s2 = await unify((u_walked as any)[key], (v_walked as any)[key], s2);
+      if (s2 === null) return null;
+    }
+    return s2;
+  }
+  return null;
 }
 
 /**

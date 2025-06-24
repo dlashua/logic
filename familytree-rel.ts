@@ -19,7 +19,7 @@ export function set_relationship(fn: typeof relationship) {
 export const parentOf = L.Rel((v, p) => parent_kid(p, v));
 
 export const person = L.Rel((p) => {
-  const $$ = L.createLogicVarProxy(undefined, "person_");
+  const { proxy: $$ } = L.createLogicVarProxy("person_");
   return L.distincto_G(
     p,
     L.or(parent_kid(p, $$.kid), parent_kid($$.parent, p)),
@@ -74,7 +74,7 @@ export const relationshipEitherWay = L.Rel((a: L.Term, b: L.Term) => {
 });
 
 export const stepParentOf = L.Rel((kid: any, stepparent: any) => {
-  const $$ = L.createLogicVarProxy(undefined, "stepparentof_");
+  const { proxy: $$ } = L.createLogicVarProxy("stepparentof_");
   return L.and(
     parentOf(kid, $$.parent),
     relationshipEitherWay($$.parent, stepparent),
@@ -83,7 +83,7 @@ export const stepParentOf = L.Rel((kid: any, stepparent: any) => {
 });
 
 export const stepKidOf = L.Rel((stepparent: any, kid: any) => {
-  const $$ = L.createLogicVarProxy(undefined, "stepkidof_");
+  const { proxy: $$ } = L.createLogicVarProxy("stepkidof_");
   return L.and(
     relationshipEitherWay(stepparent, $$.parent),
     parentOf(kid, $$.parent),
@@ -152,7 +152,7 @@ export const halfSiblingsAgg = L.Rel((v, s) => {
 });
 
 export const stepSiblingOf = L.Rel((out_v: any, out_s: any) => {
-  const $$ = L.createLogicVarProxy(undefined, "stepsiblingof_");
+  const { proxy: $$ } = L.createLogicVarProxy("stepsiblingof_");
   return L.and(
     parentOf(out_v, $$.vparent),
     relationshipEitherWay($$.vparent, $$.Mstepsibling_parent),

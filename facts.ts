@@ -7,7 +7,7 @@ import {
   unify,
   walk
 } from './core.ts'
-import { Goal } from './relations.ts';
+import { Goal, toGoal } from './relations.ts';
 
 /**
  * A relation for tuple facts (array-based).
@@ -85,7 +85,10 @@ export function makeFacts(): FactRelation {
     };
   }
 
-  const relation = (...query: Term[]): Goal => goalFn(...query);
+  const relation = (...query: Term[]): Goal => toGoal(goalFn(...query), {
+    name: "fact",
+    args: query,
+  });
 
   /**
      * Add a fact (tuple) to the relation.

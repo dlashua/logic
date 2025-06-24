@@ -29,26 +29,29 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
           const selectCols: string[] = [];
 
           // Walk all params to ground them with the current substitution
+          // Always select all columns for ungrounded or variable terms
           for (const col in paramMapping) {
             const walkedVal = await walk(paramMapping[col], s);
             walkedParams[col] = walkedVal;
-            if (isVar(walkedVal)) {
-              selectCols.push(col); // ungrounded: select
+            if (isVar(walkedVal) || typeof walkedVal === "undefined") {
+              selectCols.push(col);
             } else {
               whereClauses.push({
                 col,
-                val: walkedVal 
-              }); // grounded: where
+                val: walkedVal
+              });
             }
           }
 
-          // If all terms are grounded, just select one column (arbitrary) to check for existence
+          // Ensure all columns in paramMapping are selected if not grounded
+          const allSelectCols = Array.from(new Set([...selectCols, ...Object.keys(paramMapping)]));
+
           let query;
-          if (selectCols.length === 0) {
+          if (allSelectCols.length === 0) {
             const anyCol = Object.keys(paramMapping)[0];
             query = db(table).select(anyCol);
           } else {
-            query = db(table).select(selectCols);
+            query = db(table).select(allSelectCols);
           }
           for (const { col, val } of whereClauses) {
             query = query.where(col, val);
@@ -59,16 +62,10 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
 
           for (const row of results) {
             const s_prime = new Map(s);
-            // Only unify ungrounded terms (selectCols)
-            const goalTerms = selectCols.map((col) => paramMapping[col]);
-            const dbValues = selectCols.map((col) => row[col]);
-            let rowSubst;
-            if (selectCols.length === 0) {
-            // All grounded: just check for existence
-              rowSubst = s_prime;
-            } else {
-              rowSubst = await unify(goalTerms, dbValues, s_prime);
-            }
+            // Unify original paramMapping terms (not walked) with row values
+            const goalTerms = Object.values(paramMapping);
+            const dbValues = Object.keys(paramMapping).map((col) => row[col]);
+            const rowSubst = await unify(goalTerms, dbValues, s_prime);
             if (rowSubst) {
               yield rowSubst;
             }
@@ -84,99 +81,111 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
 
   // --- SQL Join Optimizer Registration ---
   function canSqlJoin(goals: Goal[]): boolean {
-    if (goals.length < 2) return false;
-    return goals.every(g => g._metadata && g._metadata.name === "sql");
+    // Allow join optimization for any run of length >= 1
+    return goals.length >= 1 && goals.every(g => g._metadata && g._metadata.name === "sql");
   }
 
   function sql_join_goal(goals: Goal[]): Goal {
+    console.log('[sql_join_goal] called with', goals.length, 'goals');
+    if (goals.length === 1) {
+      // For a single SQL goal, just return it directly (no join needed)
+      return goals[0];
+    }
     return toGoal(
-      async function* (s: Subst) {
-        const tables = goals.map(g => g._metadata!.args[0]);
-        const paramMaps = goals.map(g => g._metadata!.args[1]);
-        const aliases = tables.map((t, i) => `t${i}`);
-        const varToCol: Record<string, { alias: string, col: string }[]> = {};
-        const selectCols: { alias: string, col: string }[] = [];
-        const whereClauses: { alias: string, col: string, val: any }[] = [];
-        for (let i = 0; i < paramMaps.length; ++i) {
-          const alias = aliases[i];
-          const paramMap = paramMaps[i];
-          for (const col in paramMap) {
-            const term = paramMap[col];
-            const walked = await walk(term, s);
-            if (isVar(walked)) {
-              selectCols.push({
-                alias,
-                col 
-              });
-              const id = (walked as any).id;
-              if (!varToCol[id]) varToCol[id] = [];
-              varToCol[id].push({
-                alias,
-                col 
-              });
-            } else {
-              whereClauses.push({
-                alias,
-                col,
-                val: walked 
-              });
-            }
-          }
-        }
-        const db = goals[0]._metadata && (goals[0]._metadata as any).db;
-        const realQueries = goals[0]._metadata && (goals[0]._metadata as any).realQueries;
-        let query = db({
-          [aliases[0]]: tables[0] 
-        });
-        for (let i = 1; i < tables.length; ++i) {
-          let joinOn = null;
-          for (const id in varToCol) {
-            const cols = varToCol[id];
-            if (cols.length > 1) {
-              const t0 = cols.find(c => c.alias === aliases[0]);
-              const ti = cols.find(c => c.alias === aliases[i]);
-              if (t0 && ti) {
-                joinOn = {
-                  t0,
-                  ti 
-                };
-                break;
+      async function* (s0: Subst) {
+        // Instead of running the join once, run it for every input substitution
+        // This is the logic engine's standard AND behavior
+        const subs: AsyncGenerator<Subst> = (async function* () { yield s0; })();
+        for await (const s of subs) {
+          console.log('[sql_join_goal] generator entered', {
+            goals: goals.length,
+            subst: s 
+          });
+          const tables = goals.map(g => g._metadata!.args[0]);
+          const paramMaps = goals.map(g => g._metadata!.args[1]);
+          const aliases = tables.map((t, i) => `t${i}`);
+          const varToCol: Record<string, { alias: string, col: string }[]> = {};
+          // Map variable ID to the alias/col it should be selected from (first occurrence in each goal)
+          const selectCols: { alias: string, col: string, varId: string }[] = [];
+          const whereClauses: { alias: string, col: string, val: any }[] = [];
+          for (let i = 0; i < paramMaps.length; ++i) {
+            const alias = aliases[i];
+            const paramMap = paramMaps[i];
+            for (const col in paramMap) {
+              const term = paramMap[col];
+              const walked = await walk(term, s);
+              if (isVar(walked)) {
+                const id = (walked as any).id;
+                // Only select/join if not already grounded in s
+                if (!s.has(id)) {
+                  selectCols.push({
+                    alias,
+                    col,
+                    varId: id 
+                  });
+                  if (!varToCol[id]) varToCol[id] = [];
+                  varToCol[id].push({
+                    alias,
+                    col 
+                  });
+                } else {
+                  // If grounded, add WHERE clause for this value
+                  whereClauses.push({
+                    alias,
+                    col,
+                    val: s.get(id) 
+                  });
+                }
+              } else {
+                whereClauses.push({
+                  alias,
+                  col,
+                  val: walked 
+                });
               }
             }
           }
-          if (joinOn) {
-            query = query.join(
-              {
-                [aliases[i]]: tables[i] 
-              },
-              `${aliases[0]}.${joinOn.t0.col}`,
-              '=',
-              `${aliases[i]}.${joinOn.ti.col}`
-            );
-          } else {
+          const db = goals[0]._metadata && (goals[0]._metadata as any).db;
+          const realQueries = goals[0]._metadata && (goals[0]._metadata as any).realQueries;
+          let query = db({
+            [aliases[0]]: tables[0] 
+          });
+          for (let i = 1; i < tables.length; ++i) {
             query = query.join({
               [aliases[i]]: tables[i] 
+            }, function() {
+              for (let j = 0; j < i; ++j) {
+                for (const id in varToCol) {
+                  // Only join if this variable ID appears in both tables
+                  const aj = varToCol[id].find(c => c.alias === aliases[j]);
+                  const ai = varToCol[id].find(c => c.alias === aliases[i]);
+                  if (aj && ai) {
+                    this.on(`${aliases[j]}.${aj.col}`, '=', `${aliases[i]}.${ai.col}`);
+                  }
+                }
+              }
             });
           }
-        }
-        for (const w of whereClauses) {
-          query = query.where(`${w.alias}.${w.col}`, w.val);
-        }
-        query = query.select(selectCols.map(sc => `${sc.alias}.${sc.col}`));
-        if (realQueries) realQueries.push(query.toString());
-        const results = await query;
-        for (const row of results) {
-          const s_prime = new Map(s);
-          for (const id in varToCol) {
-            const cols = varToCol[id];
-            for (const { alias, col } of cols) {
-              const value = row[`${alias}.${col}`] ?? row[col];
-              if (isVar(paramMaps[aliases.indexOf(alias)][col])) {
-                s_prime.set(id, value);
-              }
-            }
+          for (const w of whereClauses) {
+            query = query.where(`${w.alias}.${w.col}`, w.val);
           }
-          yield s_prime;
+          query = query.select(selectCols.map(sc => `${sc.alias}.${sc.col}`));
+          if (realQueries) realQueries.push(query.toString());
+          console.log('[sql_join_goal] query:', query.toString());
+          console.log('[sql_join_goal] selectCols:', selectCols);
+          console.log('[sql_join_goal] whereClauses:', whereClauses);
+          const results = await query;
+          console.log('[sql_join_goal] results:', results);
+          for (const row of results) {
+            const s_prime = new Map(s);
+            // Set each variable ID from the correct column in the result row
+            for (const sc of selectCols) {
+              const value = row[sc.col] ?? row[`${sc.alias}.${sc.col}`];
+              s_prime.set(sc.varId, value);
+            }
+            console.log('[sql_join_goal] yield subst:', s_prime);
+            yield s_prime;
+          }
         }
       },
       {
@@ -189,6 +198,7 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
   function registerSqlJoinOptimizer() {
     registerAndOptimizerHook((goals) => {
       if (canSqlJoin(goals)) {
+        // console.log("[SQL JOIN OPTIMIZER] Triggered for goals:", goals.map(g => g._metadata));
         return sql_join_goal(goals);
       }
       return undefined;

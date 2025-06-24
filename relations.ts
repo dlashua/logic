@@ -5,7 +5,7 @@ import type { Subst, Term, Var } from "./core.ts";
 import { isVar, lvar, unify, walk } from "./core.ts";
 
 // --- Goal Metadata and Optimizer ---
-export interface GoalMetadata {
+export interface GoalMetadata extends Record<string, any> {
   name: string;
   args: any[];
 }
@@ -342,63 +342,131 @@ export function registerAndOptimizerHook(hook: (goals: Goal[]) => Goal | undefin
 
 // --- Optimized AND ---
 export function and_optimized(...goals: Goal[]): Goal {
-  for (const hook of andOptimizerHooks) {
-    const result = hook(goals);
-    if (result) return result;
+  console.log('[and_optimized] called with', goals.length, 'goals');
+  console.log('[and_optimized] goal metadatas:', goals.map(g => ({
+    name: g._metadata?.name,
+    args: g._metadata?.args 
+  })));
+  // Partition goals into maximal runs of SQL-backed and non-SQL-backed
+  const optimizedGoals: Goal[] = [];
+  let run: Goal[] = [];
+  let runIsSql: boolean | undefined = undefined;
+  const isSqlGoal = (g: Goal) => g._metadata && g._metadata.name === "sql";
+  const flushRun = () => {
+    console.log('[and_optimized] flushRun', {
+      runLength: run.length,
+      runIsSql 
+    });
+    if (run.length === 0) return;
+    if (runIsSql) {
+      console.log("flushRun says yes sql");
+
+      // Try optimizer hooks for this SQL run
+      let optimized = undefined;
+      for (const hook of andOptimizerHooks) {
+        optimized = hook(run);
+        if (optimized) break;
+      }
+      console.log('[and_optimized] SQL run optimized:', !!optimized);
+      optimizedGoals.push(optimized ?? defaultAnd(...run));
+    } else {
+      console.log("flushRun says no sql");
+      // Use default (non-optimized) AND logic for non-SQL run
+      if (run.length === 1) {
+        optimizedGoals.push(run[0]);
+      } else {
+        optimizedGoals.push(defaultAnd(...run));
+      }
+    }
+    run = [];
+    runIsSql = undefined;
+  };
+
+  // Default AND logic (sequential conjunction, not optimized)
+  function defaultAnd(...gs: Goal[]): Goal {
+    console.log('[and_optimized] defaultAnd', gs.length);
+    // Propagate _metadata: if all are SQL, propagate as SQL; else as and_default
+    let meta: any;
+    if (gs.length > 0 && gs.every(g => g._metadata && g._metadata.name === "sql")) {
+      // Compose SQL metadata for the group
+      meta = {
+        name: "sql",
+        args: gs.map(g => g._metadata.args),
+        kind: "and_default" 
+      };
+    } else {
+      meta = {
+        name: "and_default",
+        args: gs.map((g) => g._metadata) 
+      };
+    }
+    return toGoal(
+      async function* (s: Subst) {
+        // Use the same chainGoals helper as in and_optimized
+        async function* chainGoals(gs: Goal[], input: AsyncGenerator<Subst>): AsyncGenerator<Subst> {
+          if (gs.length === 0) {
+            for await (const sFinal of input) {
+              yield sFinal;
+            }
+            return;
+          }
+          const [first, ...rest] = gs;
+          for await (const s1 of input) {
+            for await (const s2 of first(s1)) {
+              yield* chainGoals(rest, (async function* () { yield s2; })());
+            }
+          }
+        }
+        yield* chainGoals(gs, (async function* () { yield s; })());
+      },
+      meta,
+    );
   }
+
+  function ensureGoal(g: Goal): Goal {
+    return (g && g._metadata) ? g : toGoal(g);
+  }
+
+  for (const g0 of goals) {
+    const g = ensureGoal(g0);
+    const gIsSql = isSqlGoal(g);
+    if (run.length === 0) {
+      run.push(g);
+      runIsSql = gIsSql;
+    } else if (runIsSql === gIsSql) {
+      run.push(g);
+    } else {
+      flushRun();
+      run.push(g);
+      runIsSql = gIsSql;
+    }
+  }
+  flushRun();
   return toGoal(
     async function* (s: Subst) {
-      const runGoal = async function* (g: Goal, sub: Subst) {
-        for await (const s1 of g(sub)) {
-          yield s1;
-        }
-      };
-      const execute = async function* (
-        sub: Subst,
-        goals: Goal[],
-      ): AsyncGenerator<Subst> {
+      // Helper to chain goals recursively
+      async function* chainGoals(goals: Goal[], input: AsyncGenerator<Subst>): AsyncGenerator<Subst> {
         if (goals.length === 0) {
-          yield sub;
+          for await (const sFinal of input) {
+            console.log('[and_optimized] final yield:', sFinal);
+            yield sFinal;
+          }
           return;
         }
-        const scores = await Promise.all(
-          goals.map(async (goal) => {
-            const meta = goal._metadata;
-            let score = 0;
-            if (meta?.args) {
-              for (const arg of meta.args) {
-                const walkedArg = await walk(arg, sub);
-                if (!isVar(walkedArg)) {
-                  score++;
-                }
-              }
-            }
-            return score;
-          }),
-        );
-        let bestIdx = 0;
-        let bestScore = -1;
-        for (let i = 0; i < scores.length; i++) {
-          if (scores[i] > bestScore) {
-            bestScore = scores[i];
-            bestIdx = i;
+        const [first, ...rest] = goals;
+        for await (const s1 of input) {
+          for await (const s2 of first(s1)) {
+            yield* chainGoals(rest, (async function* () { yield s2; })());
           }
         }
-        const bestGoal = goals[bestIdx];
-        const nextGoals = goals
-          .slice(0, bestIdx)
-          .concat(goals.slice(bestIdx + 1));
-        for await (const s1 of runGoal(bestGoal, sub)) {
-          for await (const s2 of execute(s1, nextGoals)) {
-            yield s2;
-          }
-        }
-      };
-      yield* execute(s, goals);
+      }
+
+      // Start the chain with the initial substitution
+      yield* chainGoals(optimizedGoals, (async function* () { yield s; })());
     },
     {
       name: "and_optimized",
-      args: goals.map((g) => g._metadata),
+      args: goals,
     },
   );
 }

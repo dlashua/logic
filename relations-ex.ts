@@ -1,7 +1,8 @@
 // Extended (non-primitive) logic relations for MiniKanren-style logic programming
 // These are not part of the minimal core, but are useful for practical logic programming.
 
-import { isCons, type Subst, type Term, walk } from "./core.ts";
+import type { Subst, Term } from "./core.ts";
+import { isCons, walk } from "./core.ts";
 import type { Goal } from "./relations.ts";
 
 /**

@@ -1,15 +1,8 @@
 // Relation helpers for MiniKanren-style logic programming
 
-import {
-  isVar,
-  lvar,
-  type Subst,
-  type Term,
-  unify,
-  type Var,
-  walk,
-} from "./core.ts";
 import * as L from "./logic_lib.ts";
+import type { Subst, Term, Var } from "./core.ts";
+import { isVar, lvar, unify, walk } from "./core.ts"
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -33,7 +26,9 @@ export function eq(u: Term, v: Term): Goal {
 export function fresh(f: (...vars: Var[]) => Goal): Goal {
   const n = f.length;
   return async function* (s: Subst) {
-    const vars = Array.from({ length: n }, () => lvar());
+    const vars = Array.from({
+      length: n 
+    }, () => lvar());
     const goal = f(...vars);
     for await (const s1 of goal(s)) yield s1;
   };

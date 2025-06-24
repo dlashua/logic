@@ -1,5 +1,7 @@
-import { arrayToLogicList, type Subst, type Term, walk } from "./core.ts";
-import { eq, type Goal } from "./relations.ts";
+import type { Subst, Term } from "./core.ts";
+import { arrayToLogicList, walk } from "./core.ts";
+import type { Goal } from "./relations.ts";
+import { eq } from "./relations.ts";
 
 /**
  * Helper: deduplicate an array of items using JSON.stringify for deep equality.

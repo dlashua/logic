@@ -1,5 +1,7 @@
-import knex, { type Knex } from "knex";
-import { isVar, type Subst, type Term, unify, walk } from "./logic_lib.ts";
+import type { Knex } from "knex";
+import knex from "knex";
+import { isVar, unify, walk } from "./logic_lib.ts";
+import type { Subst, Term } from "./logic_lib.ts";
 
 let runcnt = 0;
 const mutelog = [

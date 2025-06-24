@@ -1,5 +1,12 @@
 // Fact helpers for MiniKanren-style logic programming
-import { Subst, Term, Var, isVar, unify, walk } from './core.ts';
+import {
+  Subst,
+  Term,
+  Var,
+  isVar,
+  unify,
+  walk
+} from './core.ts'
 import { Goal } from './relations.ts';
 
 /**

@@ -1,14 +1,15 @@
+import { and, eq } from "./relations.ts";
 import {
   cons,
   isCons,
   isNil,
   lvar,
   nil,
-  type Term,
   unify,
-  walk,
-} from "./core.ts";
-import { and, eq, type Goal } from "./relations.ts";
+  walk
+} from "./core.ts"
+import type { Goal } from "./relations.ts";
+import type { Term } from "./core.ts";
 
 export function membero(x: Term, list: Term): Goal {
   return async function* (s) {

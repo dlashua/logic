@@ -42,7 +42,9 @@ export function eq(u: Term, v: Term): Goal {
 export function fresh(f: (...vars: Var[]) => Goal): Goal {
   const n = f.length;
   const goalFunc = async function* (s: Subst) {
-    const vars = Array.from({ length: n }, () => lvar());
+    const vars = Array.from({
+      length: n 
+    }, () => lvar());
     const goal = f(...vars);
     for await (const s1 of goal(s)) yield s1;
   };
@@ -332,8 +334,18 @@ export const distincto_G = L.Rel((t: Term, g: Goal) => {
   });
 });
 
+// --- Optimizer Hook System ---
+const andOptimizerHooks: ((goals: Goal[]) => Goal | undefined)[] = [];
+export function registerAndOptimizerHook(hook: (goals: Goal[]) => Goal | undefined) {
+  andOptimizerHooks.push(hook);
+}
+
 // --- Optimized AND ---
 export function and_optimized(...goals: Goal[]): Goal {
+  for (const hook of andOptimizerHooks) {
+    const result = hook(goals);
+    if (result) return result;
+  }
   return toGoal(
     async function* (s: Subst) {
       const runGoal = async function* (g: Goal, sub: Subst) {
@@ -341,7 +353,6 @@ export function and_optimized(...goals: Goal[]): Goal {
           yield s1;
         }
       };
-
       const execute = async function* (
         sub: Subst,
         goals: Goal[],
@@ -350,7 +361,6 @@ export function and_optimized(...goals: Goal[]): Goal {
           yield sub;
           return;
         }
-
         const scores = await Promise.all(
           goals.map(async (goal) => {
             const meta = goal._metadata;
@@ -366,7 +376,6 @@ export function and_optimized(...goals: Goal[]): Goal {
             return score;
           }),
         );
-
         let bestIdx = 0;
         let bestScore = -1;
         for (let i = 0; i < scores.length; i++) {
@@ -375,19 +384,16 @@ export function and_optimized(...goals: Goal[]): Goal {
             bestIdx = i;
           }
         }
-
         const bestGoal = goals[bestIdx];
         const nextGoals = goals
           .slice(0, bestIdx)
           .concat(goals.slice(bestIdx + 1));
-
         for await (const s1 of runGoal(bestGoal, sub)) {
           for await (const s2 of execute(s1, nextGoals)) {
             yield s2;
           }
         }
       };
-
       yield* execute(s, goals);
     },
     {

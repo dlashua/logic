@@ -3,6 +3,7 @@
 import * as L from "./logic_lib.ts";
 import type { Subst, Term, Var } from "./core.ts";
 import { isVar, lvar, unify, walk } from "./core.ts";
+import { Rel as LogicRel, not as LogicNot } from "./logic_lib.ts";
 
 // --- Goal Metadata and Optimizer ---
 export interface GoalMetadata extends Record<string, any> {
@@ -109,9 +110,22 @@ export function conde(...clauses: Goal[][]): Goal {
 /**
  * Logical AND for multiple goals.
  */
-export const and = (...goals: Goal[]) => {
+export function and(...goals: Goal[]): Goal {
   if (goals.length === 0) throw new Error("and requires at least one goal");
-  return goals.length > 1 ? and_optimized(...goals) : goals[0];
+
+  // Determine if optimization is possible based on the goals
+  const canOptimize = goals.every((g) => g._metadata && g._metadata.name === "sql");
+
+  if (canOptimize) {
+    // Use the optimized AND logic if all goals are SQL-backed
+    return and_optimized(...goals);
+  } else if (goals.some((g) => g._metadata && g._metadata.name === "noopt")) {
+    // Use the non-optimized AND logic if any goal explicitly requests no optimization
+    return and_noopt(...goals);
+  } else {
+    // Default to the standard AND logic
+    return defaultAnd(...goals);
+  }
 };
 export const all = and;
 
@@ -310,15 +324,15 @@ export function ifte(g1: Goal, g2: Goal): Goal {
   });
 }
 export const eitherOr = ifte;
-export const neq_C = L.Rel((x: Term, y: Term) => L.not(L.eq(x, y)));
+export const neq_C = LogicRel((x: Term, y: Term) => LogicNot(eq(x, y)));
 
-export const distincto_G = L.Rel((t: Term, g: Goal) => {
+export const distincto_G = LogicRel((t: Term, g: Goal) => {
   // Track seen values for t in this execution
   const goalFunc = async function* (s: Subst) {
     const seen = new Set();
     for await (const s2 of g(s)) {
-      const w_t = await L.walk(t, s2);
-      if (L.isVar(w_t)) {
+      const w_t = await walk(t, s2);
+      if (isVar(w_t)) {
         yield s2;
         continue;
       }
@@ -342,35 +356,22 @@ export function registerAndOptimizerHook(hook: (goals: Goal[]) => Goal | undefin
 
 // --- Optimized AND ---
 export function and_optimized(...goals: Goal[]): Goal {
-  console.log('[and_optimized] called with', goals.length, 'goals');
-  console.log('[and_optimized] goal metadatas:', goals.map(g => ({
-    name: g._metadata?.name,
-    args: g._metadata?.args 
-  })));
   // Partition goals into maximal runs of SQL-backed and non-SQL-backed
   const optimizedGoals: Goal[] = [];
   let run: Goal[] = [];
   let runIsSql: boolean | undefined = undefined;
   const isSqlGoal = (g: Goal) => g._metadata && g._metadata.name === "sql";
   const flushRun = () => {
-    console.log('[and_optimized] flushRun', {
-      runLength: run.length,
-      runIsSql 
-    });
     if (run.length === 0) return;
     if (runIsSql) {
-      console.log("flushRun says yes sql");
-
       // Try optimizer hooks for this SQL run
       let optimized = undefined;
       for (const hook of andOptimizerHooks) {
         optimized = hook(run);
         if (optimized) break;
       }
-      console.log('[and_optimized] SQL run optimized:', !!optimized);
       optimizedGoals.push(optimized ?? defaultAnd(...run));
     } else {
-      console.log("flushRun says no sql");
       // Use default (non-optimized) AND logic for non-SQL run
       if (run.length === 1) {
         optimizedGoals.push(run[0]);
@@ -382,60 +383,24 @@ export function and_optimized(...goals: Goal[]): Goal {
     runIsSql = undefined;
   };
 
-  // Default AND logic (sequential conjunction, not optimized)
-  function defaultAnd(...gs: Goal[]): Goal {
-    console.log('[and_optimized] defaultAnd', gs.length);
-    // Propagate _metadata: if all are SQL, propagate as SQL; else as and_default
-    let meta: any;
-    if (gs.length > 0 && gs.every(g => g._metadata && g._metadata.name === "sql")) {
-      // Compose SQL metadata for the group
-      meta = {
-        name: "sql",
-        args: gs.map(g => g._metadata.args),
-        kind: "and_default" 
-      };
-    } else {
-      meta = {
-        name: "and_default",
-        args: gs.map((g) => g._metadata) 
-      };
-    }
-    return toGoal(
-      async function* (s: Subst) {
-        // Use the same chainGoals helper as in and_optimized
-        async function* chainGoals(gs: Goal[], input: AsyncGenerator<Subst>): AsyncGenerator<Subst> {
-          if (gs.length === 0) {
-            for await (const sFinal of input) {
-              yield sFinal;
-            }
-            return;
-          }
-          const [first, ...rest] = gs;
-          for await (const s1 of input) {
-            for await (const s2 of first(s1)) {
-              yield* chainGoals(rest, (async function* () { yield s2; })());
-            }
-          }
-        }
-        yield* chainGoals(gs, (async function* () { yield s; })());
-      },
-      meta,
-    );
-  }
-
   function ensureGoal(g: Goal): Goal {
     return (g && g._metadata) ? g : toGoal(g);
   }
 
+  // Only treat as SQL if this goal itself is atomic SQL, not a composite
   for (const g0 of goals) {
     const g = ensureGoal(g0);
+    // Only treat as SQL if this goal itself is atomic SQL
     const gIsSql = isSqlGoal(g);
+    // Composite or non-SQL goals always break the run, even if built from SQL goals
     if (run.length === 0) {
       run.push(g);
       runIsSql = gIsSql;
-    } else if (runIsSql === gIsSql) {
+    } else if (runIsSql && gIsSql) {
+      // Continue SQL run only if both current run and g are atomic SQL
       run.push(g);
     } else {
+      // Break run for any non-atomic-SQL goal (composite or otherwise)
       flushRun();
       run.push(g);
       runIsSql = gIsSql;
@@ -448,7 +413,6 @@ export function and_optimized(...goals: Goal[]): Goal {
       async function* chainGoals(goals: Goal[], input: AsyncGenerator<Subst>): AsyncGenerator<Subst> {
         if (goals.length === 0) {
           for await (const sFinal of input) {
-            console.log('[and_optimized] final yield:', sFinal);
             yield sFinal;
           }
           return;
@@ -469,4 +433,49 @@ export function and_optimized(...goals: Goal[]): Goal {
       args: goals,
     },
   );
+}
+
+// --- Default AND logic (sequential conjunction, not optimized) ---
+export function defaultAnd(...gs: Goal[]): Goal {
+  // Propagate _metadata: only mark as SQL if a single atomic SQL goal
+  let meta: any;
+  if (gs.length === 1 && gs[0]._metadata && gs[0]._metadata.name === "sql") {
+    // Single atomic SQL goal: propagate its metadata
+    meta = gs[0]._metadata;
+  } else {
+    meta = {
+      name: "and_default",
+      args: gs.map((g) => g._metadata)
+    };
+  }
+  return toGoal(
+    async function* (s: Subst) {
+      // Use the same chainGoals helper as in and_optimized
+      async function* chainGoals(gs: Goal[], input: AsyncGenerator<Subst>): AsyncGenerator<Subst> {
+        if (gs.length === 0) {
+          for await (const sFinal of input) {
+            yield sFinal;
+          }
+          return;
+        }
+        const [first, ...rest] = gs;
+        for await (const s1 of input) {
+          for await (const s2 of first(s1)) {
+            yield* chainGoals(rest, (async function* () { yield s2; })());
+          }
+        }
+      }
+      yield* chainGoals(gs, (async function* () { yield s; })());
+    },
+    meta,
+  );
+}
+
+/**
+ * Like AND, but never triggers join optimization. Always uses default AND logic.
+ */
+export function and_noopt(...goals: Goal[]): Goal {
+  if (goals.length === 0) throw new Error("and_noopt requires at least one goal");
+  // Always use defaultAnd, never optimize
+  return goals.length > 1 ? defaultAnd(...goals) : goals[0];
 }

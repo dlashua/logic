@@ -126,29 +126,28 @@ export const fullSiblingsAgg = L.Rel((v, s) => {
   return L.collecto(in_s, fullSiblingOf(v, in_s), s);
 });
 
-export const halfSiblingOf = L.Rel((out_v, out_s) => {
-  const nonsharedparent_v = L.lvar("halfsibof_nonsharedparent_v");
-  const sharedparent = L.lvar("halfsibof_sharedparent");
-  const nonsharedparent_s = L.lvar("halfsibof_nonsharedparent_s");
-  return L.and(
-    parentOf(out_v, sharedparent),
-    parentOf(out_s, sharedparent),
-
-    parentOf(out_v, nonsharedparent_v),
-    L.not(L.eq(nonsharedparent_v, sharedparent)),
-
-    parentOf(out_s, nonsharedparent_s),
-    L.not(L.eq(nonsharedparent_s, sharedparent)),
-
-    L.not(L.eq(nonsharedparent_v, nonsharedparent_s)),
-
-    L.not(L.eq(out_v, out_s)),
-  );
-});
-
 export const halfSiblingsAgg = L.Rel((v, s) => {
   const in_s = L.lvar("in_s");
   return L.collecto(in_s, halfSiblingOf(v, in_s), s);
+});
+
+export const halfSiblingOf = L.Rel((out_v, out_s) => {
+  const { proxy: $$ } = L.createLogicVarProxy("stepsiblingof_");
+  // Wrap the conjunction in toGoal with custom metadata to prevent SQL join optimization
+  return L.and(
+    parentOf(out_v, $$.sharedparent),
+    parentOf(out_s, $$.sharedparent),
+
+    parentOf(out_v, $$.nonsharedparent_v),
+    L.not(L.eq($$.nonsharedparent_v, $$.sharedparent)),
+
+    parentOf(out_s, $$.nonsharedparent_s),
+    L.not(L.eq($$.nonsharedparent_s, $$.sharedparent)),
+
+    L.not(L.eq($$.nonsharedparent_v, $$.nonsharedparent_s)),
+
+    L.not(L.eq(out_v, out_s)),
+  )
 });
 
 export const stepSiblingOf = L.Rel((out_v: any, out_s: any) => {
@@ -170,7 +169,11 @@ export const stepSiblingsAgg = L.Rel((v, s) => {
 });
 
 export const siblingOf = L.Rel((v, s) =>
-  L.or(fullSiblingOf(v, s), halfSiblingOf(v, s), stepSiblingOf(v, s)),
+  L.or(
+    // fullSiblingOf(v, s), 
+    // halfSiblingOf(v, s), 
+    stepSiblingOf(v, s)
+  ),
 );
 
 export const siblingsAgg = L.Rel((v, s) => {

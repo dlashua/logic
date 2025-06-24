@@ -1,3 +1,4 @@
+// eslint-disable-next-line import/no-named-as-default
 import knex from "knex";
 import type { Knex as KnexType } from "knex";
 import { isVar, unify, walk } from "./core.ts";
@@ -81,12 +82,15 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
 
   // --- SQL Join Optimizer Registration ---
   function canSqlJoin(goals: Goal[]): boolean {
-    // Allow join optimization for any run of length >= 1
-    return goals.length >= 1 && goals.every(g => g._metadata && g._metadata.name === "sql");
+    // Only allow join optimization for runs of atomic SQL goals (not composite/conjunction)
+    return goals.length >= 1 &&
+      goals.every((g: any) =>
+        g._metadata &&
+        g._metadata.name === "sql"
+      );
   }
 
   function sql_join_goal(goals: Goal[]): Goal {
-    console.log('[sql_join_goal] called with', goals.length, 'goals');
     if (goals.length === 1) {
       // For a single SQL goal, just return it directly (no join needed)
       return goals[0];
@@ -97,10 +101,6 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
         // This is the logic engine's standard AND behavior
         const subs: AsyncGenerator<Subst> = (async function* () { yield s0; })();
         for await (const s of subs) {
-          console.log('[sql_join_goal] generator entered', {
-            goals: goals.length,
-            subst: s 
-          });
           const tables = goals.map(g => g._metadata!.args[0]);
           const paramMaps = goals.map(g => g._metadata!.args[1]);
           const aliases = tables.map((t, i) => `t${i}`);
@@ -153,14 +153,20 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
           for (let i = 1; i < tables.length; ++i) {
             query = query.join({
               [aliases[i]]: tables[i] 
-            }, function() {
+            }, function(this: KnexType.QueryBuilder) { // Explicitly typing 'this'
               for (let j = 0; j < i; ++j) {
                 for (const id in varToCol) {
                   // Only join if this variable ID appears in both tables
                   const aj = varToCol[id].find(c => c.alias === aliases[j]);
                   const ai = varToCol[id].find(c => c.alias === aliases[i]);
                   if (aj && ai) {
-                    this.on(`${aliases[j]}.${aj.col}`, '=', `${aliases[i]}.${ai.col}`);
+                    // Correcting the 'on' method to use a function as the second argument
+                    this.on(
+                      `${aliases[j]}.${aj.col}`,
+                      function(this: KnexType.QueryBuilder) {
+                        this.where(`${aliases[j]}.${aj.col}`, '=', `${aliases[i]}.${ai.col}`);
+                      }
+                    );
                   }
                 }
               }
@@ -171,11 +177,7 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
           }
           query = query.select(selectCols.map(sc => `${sc.alias}.${sc.col}`));
           if (realQueries) realQueries.push(query.toString());
-          console.log('[sql_join_goal] query:', query.toString());
-          console.log('[sql_join_goal] selectCols:', selectCols);
-          console.log('[sql_join_goal] whereClauses:', whereClauses);
           const results = await query;
-          console.log('[sql_join_goal] results:', results);
           for (const row of results) {
             const s_prime = new Map(s);
             // Set each variable ID from the correct column in the result row
@@ -183,7 +185,6 @@ export const makeRelDB = (knex_connect_options: KnexType.Config) => {
               const value = row[sc.col] ?? row[`${sc.alias}.${sc.col}`];
               s_prime.set(sc.varId, value);
             }
-            console.log('[sql_join_goal] yield subst:', s_prime);
             yield s_prime;
           }
         }

@@ -1,4 +1,4 @@
-import { Goal, and_optimized, and } from "./relations.ts";
+import { Goal, and } from "./relations.ts";
 import { Subst, Term, Var } from "./core.ts";
 import { createLogicVarProxy, formatSubstitutions, withFluentAsyncGen, RunResult } from "./run.ts"
 
@@ -60,7 +60,7 @@ class Query<Fmt extends Record<string, Term<any>>> {
     if (this._goals.length === 0) {
       throw new Error("Query must have at least one where clause.");
     }
-    return this._goals.length > 1 ? and_optimized(...this._goals) : this._goals[0];
+    return this._goals.length > 1 ? and(...this._goals) : this._goals[0];
   }
 
   private async *runQuery(): AsyncGenerator<RunResult<Fmt>> {

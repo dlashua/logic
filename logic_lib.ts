@@ -3,6 +3,7 @@
 
 export * from "./core.ts";
 export * from "./facts.ts";
+export * from "./facts-sql.ts";
 export * from "./relations.ts";
 export * from "./relations-agg.ts";
 export * from "./relations-ex.ts";

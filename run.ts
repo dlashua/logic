@@ -1,14 +1,7 @@
 // Run handlers for MiniKanren-style logic programming
-import {
-  isVar,
-  logicListToArray,
-  lvar,
-  type Subst,
-  type Term,
-  type Var,
-  walk,
-} from "./core.ts";
 import type { Goal } from "./relations.ts";
+import { isVar, logicListToArray, lvar, walk } from "./core.ts";
+import type { Subst, Term, Var } from "./core.ts";
 
 /**
  * The output type for formatted substitutions.
@@ -47,11 +40,10 @@ export async function* formatSubstitutions<
  * Create a Proxy for logic variables, with customizable key type.
  */
 export function createLogicVarProxy<K extends string | symbol = string>(
-  varMap?: Map<K, Var>,
   prefix = "",
-): Record<K, Var> {
-  if (!varMap) varMap = new Map<K, Var>();
-  return new Proxy(
+): { proxy: Record<K, Var>; varMap: Map<K, Var> } {
+  const varMap = new Map<K, Var>();
+  const proxy = new Proxy(
     {},
     {
       get(target, prop: K) {
@@ -80,10 +72,15 @@ export function createLogicVarProxy<K extends string | symbol = string>(
       },
     },
   ) as Record<K, Var>;
+  return {
+    proxy,
+    varMap,
+  };
 }
 
 /**
  * Main run function for logic programs. Expects a function returning [formatter, goal].
+ * @deprecated Use the query builder `L.query()` instead.
  */
 export function run<
   Fmt extends Record<string, Term<any>> = Record<string, Term<any>>,
@@ -114,13 +111,14 @@ export function run<
 
 /**
  * Main runEasy function for logic programs using a Proxy for logic variables.
+ * @deprecated Use the query builder `L.query()` instead.
  */
 export function runEasy<
   Fmt extends Record<string, Term<any>> = Record<string, Term<any>>,
 >(f: ($: Record<string, Var>) => [Fmt, Goal], n = Infinity) {
   const s0: Subst = new Map();
-  const $ = createLogicVarProxy();
-  const result = f($);
+  const { proxy } = createLogicVarProxy();
+  const result = f(proxy);
   if (
     !Array.isArray(result) ||
     result.length !== 2 ||

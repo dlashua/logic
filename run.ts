@@ -6,7 +6,7 @@ import type { Subst, Term, Var } from "./core.ts";
 /**
  * The output type for formatted substitutions.
  */
-export type RunResult<Fmt extends Record<string, Term<any>>> = {
+export type RunResult<Fmt> = {
   [K in keyof Fmt]: Term;
 };
 
@@ -14,7 +14,7 @@ export type RunResult<Fmt extends Record<string, Term<any>>> = {
  * Formats substitutions into user-facing objects, converting logic lists to arrays.
  */
 export async function* formatSubstitutions<
-  Fmt extends Record<string, Term<any>>,
+  Fmt,
 >(
   substs: AsyncGenerator<Subst>,
   formatter: Fmt,
@@ -32,7 +32,7 @@ export async function* formatSubstitutions<
         out[key] = v;
       }
     }
-    yield deepWalk(out) as RunResult<Fmt>;
+    yield deepWalk(out);
   }
 }
 

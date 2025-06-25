@@ -6,4 +6,3 @@ hold/**
 *.db
 *.duckdb
 pnpm-workspace.yaml
-

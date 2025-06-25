@@ -1,6 +1,6 @@
 import type { Subst, Term } from "./core.ts";
 import { arrayToLogicList, walk } from "./core.ts";
-import type { Goal } from "./relations.ts";
+import type { Goal, enableLogicProfiling, disableLogicProfiling } from "./relations.ts";
 import { eq } from "./relations.ts";
 
 /**
@@ -60,6 +60,15 @@ export async function* groupByGoal(
   }
 }
 
+// Helper to profile goals if profiling is enabled
+function maybeProfile(goal: Goal): Goal {
+  // Use the global maybeProfile from relations.ts if available
+  // (imported above), otherwise fallback to identity
+  return ((globalThis as any).LOGIC_PROFILING_ENABLED !== undefined)
+    ? (globalThis as any).LOGIC_PROFILING_ENABLED ? (globalThis as any).wrapGoalForProfiling(goal) : goal
+    : goal;
+}
+
 /**
  * aggregateRelFactory: generic helper for collecto, distincto, counto.
  * - x: variable to collect
@@ -73,7 +82,7 @@ export function aggregateRelFactory(
   dedup = false,
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return async function* (s: Subst) {
+    return maybeProfile(async function* aggregateRelFactory (s: Subst) {
       const results: Term[] = [];
       for await (const s1 of goal(s)) {
         const val = await walk(x, s1);
@@ -81,7 +90,7 @@ export function aggregateRelFactory(
       }
       const agg = aggFn(dedup ? deduplicate(results) : results);
       yield* eq(out, agg)(s);
-    };
+    });
   };
 }
 
@@ -99,7 +108,7 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outAgg: Term,
     dedup = false,
   ): Goal =>
-    async function* (s: Subst) {
+    maybeProfile(async function* (s: Subst) {
       yield* groupByGoal(
         keyVar,
         valueVar,
@@ -115,7 +124,7 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
           }
         },
       );
-    };
+    });
 }
 
 export const groupCollecto = groupAggregateRelFactory(arrayToLogicList);

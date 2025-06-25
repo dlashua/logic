@@ -1,7 +1,8 @@
 import type { Knex } from "knex";
+// eslint-disable-next-line import/no-named-as-default
 import knex from "knex";
-import { isVar, unify, walk } from "./logic_lib.ts";
-import type { Subst, Term } from "./logic_lib.ts";
+import type { Subst, Term } from "./core.ts";
+import { isVar, unify, walk } from "./core.ts";
 
 let runcnt = 0;
 const mutelog = [
@@ -72,12 +73,12 @@ export const makeRelDB = async (
   // Record cache for fully grounded queries
   const recordCache = new Map<string, any>();
 
-  const run = async function* (
+  const run = async function* factsSqlRun (
     s: Subst,
     patterns: Pattern[],
     myruncnt: number,
   ) {
-    async function* runPatterns(
+    async function* runPatterns (
       idx: number,
       subst: Subst,
     ): AsyncGenerator<Subst> {
@@ -246,28 +247,28 @@ export const makeRelDB = async (
         let ok = false;
         for (const col of selectCols) {
           const origVal = q.params[col];
-          if (isVar(origVal)) {
-            const unified = await unify(walkedQ[col], row[col], s2);
-            if (unified) {
-              log("UNIFY", {
-                myruncnt,
-                col,
-                left: walkedQ[col] as string | number | object,
-                right: row[col],
-              });
-              s2 = unified;
-              ok = true;
-            } else {
-              log("NO UNIFY", {
-                myruncnt,
-                col,
-                left: walkedQ[col] as string | number | object,
-                right: row[col],
-              });
-            }
+          // if (isVar(origVal)) {
+          const unified = await unify(walkedQ[col], row[col], s2);
+          if (unified) {
+            log("UNIFY", {
+              myruncnt,
+              col,
+              left: walkedQ[col] as string | number | object,
+              right: row[col],
+            });
+            s2 = unified;
+            ok = true;
           } else {
-            break;
+            log("NO UNIFY", {
+              myruncnt,
+              col,
+              left: walkedQ[col] as string | number | object,
+              right: row[col],
+            });
           }
+          // } else {
+          //   break;
+          // }
         }
         if (ok) {
           yield* runPatterns(idx + 1, s2);
@@ -277,7 +278,7 @@ export const makeRelDB = async (
     yield* runPatterns(0, s);
   };
 
-  const makeRel = async (table: string, primaryKey = "id") => {
+  const rel = async (table: string, primaryKey = "id") => {
     await Promise.resolve(null);
     return function goal(queryObj: Record<string, Term>) {
       const myruncnt = runcnt++;
@@ -374,7 +375,7 @@ export const makeRelDB = async (
         }
       };
 
-      return async function* (s: Subst) {
+      return async function* factsSql (s: Subst) {
         await record_queries(queryObj, s);
         if (
           !(
@@ -433,7 +434,7 @@ export const makeRelDB = async (
   };
 
   return {
-    makeRel,
+    rel,
     db,
     run,
     queries,

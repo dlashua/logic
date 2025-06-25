@@ -1,12 +1,9 @@
+// @ts-expect-error
+// eslint-disable-next-line import/no-unresolved
 import { DuckDBInstance } from "@duckdb/node-api";
-import {
-  type Goal,
-  isVar,
-  type Subst,
-  type Term,
-  unify,
-  walk,
-} from "./logic_lib.ts";
+import { isVar, unify, walk } from "./core.ts"
+import type { Subst, Term } from "./core.ts";
+import type { Goal } from "./relations.ts";
 
 export function makeFactsDuckDB(
   table: string,

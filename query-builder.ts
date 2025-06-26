@@ -30,11 +30,20 @@ function getRelationDisplayName(goal: Goal): string {
   return relationDisplayNames.get(goal)!;
 }
 
+type SelectorType<Fmt> = (($: Record<string, Var>) => Fmt) | "*" | any;
+
+type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
+  ? RunResult<Fmt>
+  : Sel extends "*"
+    ? RunResult<Record<string, any>>
+    : any;
+
 /**
  * A builder for creating and running logic queries.
  */
-class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, any> = Fmt | Record<string, any>> {
-  private _formatter: Fmt | null = null;
+class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
+  private _formatter: Fmt | Record<string, Var> | null = null;
+  private _rawSelector: any = null;
   private _goals: Goal[] = [];
   private _limit = Infinity;
   private readonly _logicVarProxy: Record<string, Var>;
@@ -51,27 +60,31 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
 
   /**
    * Specifies the shape of the desired output.
-   * @param selector A function that receives a logic variable proxy and returns a formatter object, or "*" to select all logic vars.
+   * @param selector A function, "*", or any value (string, number, Var, object, array, etc.) referencing logic vars.
    */
-  select(selector: (($: Record<string, Var>) => Fmt) | "*"): Query<Fmt, Record<string, any>> | this {
+  select<NewSel extends SelectorType<Fmt>>(selector: NewSel): Query<Fmt, NewSel> {
     if (selector === "*") {
       this._selectAllVars = true;
       this._formatter = null;
-      // Return a new Query instance with Out = Record<string, any>
-      return (this as unknown) as Query<Fmt, Record<string, any>>;
-    } else {
+      this._rawSelector = null;
+    } else if (typeof selector === "function") {
       this._formatter = selector(this._logicVarProxy);
       this._selectAllVars = false;
-      return this;
+      this._rawSelector = null;
+    } else {
+      this._formatter = null;
+      this._selectAllVars = false;
+      this._rawSelector = selector;
     }
+    return this as unknown as Query<Fmt, NewSel>;
   }
 
   /**
    * Adds conditions to the query. Can be called multiple times.
-   * If an array of goals is returned, they will be implicitly wrapped in an 'and'.
+   * Only accepts a function that receives the logic var proxy and returns a goal or array of goals.
    * @param goalFn A function that receives a logic variable proxy and returns a goal or an array of goals.
    */
-  where(goalFn: ($: Record<string, Var>) => Goal | Goal[]): this {
+  where(goalFn: (proxy: Record<string, Var>) => Goal | Goal[]): this {
     const result = goalFn(this._logicVarProxy);
     const newGoals = Array.isArray(result) ? result : [result];
     if (this._profiling) {
@@ -114,15 +127,24 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
     if (this._goals.length === 0) {
       throw new Error("Query must have at least one where clause.");
     }
+    // Validate all are functions (Goals)
+    for (const g of this._goals) {
+      if (typeof g !== 'function') {
+        throw new Error(`Invalid goal in query: ${g}. All goals must be functions.`);
+      }
+    }
     return this._goals.length > 1 ? and(...this._goals) : this._goals[0];
   }
 
-  private async *runQuery(): AsyncGenerator<RunResult<Fmt>> {
-    let formatter: Fmt | null = this._formatter;
-    if (!formatter || this._selectAllVars) {
+  private async *runQuery(): AsyncGenerator<any> {
+    let formatter: Fmt | Record<string, Var> | any = this._formatter;
+    // If no select() was called, or select('*'), or selectAllVars is set, return all logic vars
+    if (!formatter && (this._selectAllVars || (!this._rawSelector && !this._selectAllVars))) {
       formatter = Object.fromEntries(
         Object.keys(this._logicVarProxy).map(k => [k, this._logicVarProxy[k]])
-      ) as Fmt;
+      ) as Record<string, Var>;
+    } else if (this._rawSelector) {
+      formatter = this._rawSelector;
     }
     const goal = this._getGoal();
     const s0: Subst = new Map();
@@ -135,14 +157,14 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
   /**
    * Makes the Query object itself an async iterable.
    */
-  [Symbol.asyncIterator](): AsyncGenerator<RunResult<Fmt>> {
+  [Symbol.asyncIterator](): AsyncGenerator<QueryOutput<Fmt, Sel>> {
     return this.runQuery();
   }
 
   /**
    * Executes the query and returns all results as an array.
    */
-  public toArray(): Promise<RunResult<Fmt>[]> {
+  public toArray(): Promise<QueryOutput<Fmt, Sel>[]> {
     return withFluentAsyncGen(this.runQuery()).toArray();
   }
 
@@ -150,7 +172,7 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
    * Executes the query and calls a function for each result.
    */
   public forEach(
-    cb: (item: RunResult<Fmt>) => Promise<void> | void,
+    cb: (item: QueryOutput<Fmt, Sel>) => Promise<void> | void,
   ): Promise<void> {
     return withFluentAsyncGen(this.runQuery()).forEach(cb);
   }
@@ -159,7 +181,7 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
    * Maps each result of the query to a new value.
    */
   public map<U>(
-    cb: (item: RunResult<Fmt>) => Promise<U> | U,
+    cb: (item: QueryOutput<Fmt, Sel>) => Promise<U> | U,
   ): FluentAsyncGen<U> {
     return withFluentAsyncGen(this.runQuery()).map(cb);
   }
@@ -168,8 +190,8 @@ class Query<Fmt extends Record<string, Term<any>>, Out extends Record<string, an
    * Groups the results of the query by a key.
    */
   public groupBy<K, V>(
-    keyFn: (item: RunResult<Fmt>) => K,
-    valueFn: (item: RunResult<Fmt>) => V,
+    keyFn: (item: QueryOutput<Fmt, Sel>) => K,
+    valueFn: (item: QueryOutput<Fmt, Sel>) => V,
   ): FluentAsyncGen<[K, V[]]> {
     return withFluentAsyncGen(this.runQuery()).groupBy(keyFn, valueFn);
   }
@@ -220,7 +242,30 @@ function wrapRelationForProfiling(
 
 /**
  * Creates a new logic query builder.
+ * Optionally accepts a function as a shorthand for .where(fn).
  */
-export function query<Fmt extends Record<string, Term<any>>>() {
-  return new Query<Fmt>();
+export function query<Fmt>(whereFn?: (proxy: Record<string, Var>) => Goal | Goal[]) {
+  const q = new Query<Fmt>();
+  if (whereFn) {
+    q.where(whereFn);
+  }
+  return q;
+}
+
+function walkAndReplaceVars(value: any, subst: Subst): any {
+  if (typeof value === "object" && value !== null) {
+    if (typeof value.deref === "function") {
+      // Likely a logic Var
+      return value.deref(subst);
+    }
+    if (Array.isArray(value)) {
+      return value.map(v => walkAndReplaceVars(v, subst));
+    }
+    const result: any = {};
+    for (const k in value) {
+      result[k] = walkAndReplaceVars(value[k], subst);
+    }
+    return result;
+  }
+  return value;
 }

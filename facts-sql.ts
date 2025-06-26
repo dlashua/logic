@@ -28,6 +28,7 @@ const log = (
   msg: string,
   ...args: Record<string, string | number | object>[]
 ) => {
+  // return;
   if (mutelog.includes(msg)) return;
   if (args.length <= 1) {
     console.dir(
@@ -93,7 +94,7 @@ function findSubsumedCacheEntry(
   recordCache: Map<string, any>,
   table: string,
   selectCols: string[],
-  whereClauses: { col: string; val: Term }[]
+  whereClauses: { col: string, val: Term }[]
 ) {
   for (const [otherKey, cachedRows] of recordCache.entries()) {
     const other = JSON.parse(otherKey);
@@ -129,6 +130,54 @@ function findSubsumedCacheEntry(
     };
   }
   return null;
+}
+
+// Helper to merge or add a pattern
+function mergeOrAddPattern(patterns: Pattern[], table: string, walkedQ: Record<string, Term>, queryObj: Record<string, Term>, myruncnt: number) {
+  for (const pat of patterns) {
+    if (pat.table !== table) continue;
+    let compatible = true;
+    for (const col in pat.params) {
+      if (!(col in walkedQ)) continue;
+      const vPat = pat.params[col];
+      const vNew = walkedQ[col];
+      if (isVar(vPat) && isVar(vNew)) {
+        if (vPat.id !== vNew.id) {
+          compatible = false;
+          break;
+        }
+      } else if (isVar(vPat) !== isVar(vNew)) {
+        compatible = false;
+        break;
+      } else if (!isVar(vPat) && vPat !== vNew) {
+        compatible = false;
+        break;
+      }
+    }
+    if (!compatible) continue;
+    for (const col in walkedQ) {
+      if (!(col in pat.params)) pat.params[col] = walkedQ[col];
+    }
+    log("MERGING PATTERN", {
+      myruncnt,
+      table,
+      queryObj 
+    });
+    return true; // merged
+  }
+  patterns.push({
+    table,
+    params: {
+      ...queryObj 
+    },
+    queries: []
+  });
+  log("ADDING PATTERN", {
+    myruncnt,
+    table,
+    queryObj 
+  });
+  return false; // added
 }
 
 export const makeRelDB = async (
@@ -235,31 +284,49 @@ export const makeRelDB = async (
         return;
       }
 
+      // Unify all selectCols (undo optimization)
       for (const row of rows) {
         log("ROW RETURNED", {
           row,
           myruncnt,
         });
         let s2: Subst = new Map(subst);
-        let ok = false;
+        let ok = true;
         for (const col of selectCols) {
-          const unified = await unify(walkedQ[col], row[col], s2);
-          if (unified) {
-            log("UNIFY", {
-              myruncnt,
-              col,
-              left: walkedQ[col] as string | number | object,
-              right: row[col],
-            });
-            s2 = unified;
-            ok = true;
+          if (!isVar(walkedQ[col])) {
+            // If grounded and matches, skip unify
+            if (walkedQ[col] === row[col]) {
+              continue;
+            } else {
+              log("NO UNIFY (grounded mismatch)", {
+                myruncnt,
+                col,
+                left: walkedQ[col] as string | number | object,
+                right: row[col],
+              });
+              ok = false;
+              break;
+            }
           } else {
-            log("NO UNIFY", {
-              myruncnt,
-              col,
-              left: walkedQ[col] as string | number | object,
-              right: row[col],
-            });
+            const unified = await unify(walkedQ[col], row[col], s2);
+            if (unified) {
+              log("UNIFY", {
+                myruncnt,
+                col,
+                left: walkedQ[col] as string | number | object,
+                right: row[col],
+              });
+              s2 = unified;
+            } else {
+              log("NO UNIFY", {
+                myruncnt,
+                col,
+                left: walkedQ[col] as string | number | object,
+                right: row[col],
+              });
+              ok = false;
+              break;
+            }
           }
         }
         if (ok) {
@@ -291,7 +358,6 @@ export const makeRelDB = async (
           if (isVar(v)) logicVars[col] = v.id;
         }
         // Try to find a compatible pattern
-        let merged = false;
         const walkedQ: Record<string, Term> = {};
         for (const col in queryObj) {
           walkedQ[col] = await walk(queryObj[col], subst);
@@ -301,57 +367,7 @@ export const makeRelDB = async (
           queryObj,
           walkedQ,
         });
-        for (const pat of state.patterns) {
-          if (pat.table !== table) continue;
-          // Only check columns that exist in both pat and queryObj
-          let compatible = true;
-
-          for (const col in pat.params) {
-            if (!(col in walkedQ)) continue;
-            const vPat = pat.params[col];
-            const vNew = walkedQ[col];
-            if (isVar(vPat) && isVar(vNew)) {
-              if (vPat.id !== vNew.id) {
-                compatible = false;
-                break;
-              }
-            } else if (isVar(vPat) !== isVar(vNew)) {
-              compatible = false;
-              break;
-            } else if (!isVar(vPat) && vPat !== vNew) {
-              compatible = false;
-              break;
-            }
-          }
-          if (!compatible) {
-            continue;
-          }
-          for (const col in walkedQ) {
-            if (!(col in pat.params)) pat.params[col] = walkedQ[col];
-          }
-          merged = true;
-          break;
-        }
-        if (!merged) {
-          state.patterns.push({
-            table,
-            params: {
-              ...queryObj,
-            },
-            queries: [],
-          });
-          log("ADDING PATTERN", {
-            myruncnt,
-            table,
-            queryObj,
-          });
-        } else {
-          log("MERGING PATTERN", {
-            myruncnt,
-            table,
-            queryObj,
-          });
-        }
+        mergeOrAddPattern(state.patterns, table, walkedQ, queryObj, myruncnt);
       };
 
       return async function* factsSql (s: Subst) {

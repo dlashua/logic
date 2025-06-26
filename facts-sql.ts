@@ -52,26 +52,100 @@ const log = (
   }
 };
 
+// Pattern interface at top-level for clarity
+interface Pattern extends Record<string, string | object> {
+  table: string;
+  params: Record<string, Term>;
+  queries: string[];
+}
+
+// Helper to build selectCols, whereClauses, walkedQ
+async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
+  const selectCols: string[] = [];
+  const whereClauses: { col: string; val: Term }[] = [];
+  const walkedQ: Record<string, Term> = {};
+  for (const col in params) {
+    walkedQ[col] = await walk(params[col], subst);
+    if (isVar(walkedQ[col])) {
+      selectCols.push(col);
+    } else {
+      whereClauses.push({
+        col,
+        val: walkedQ[col] 
+      });
+    }
+  }
+  // Ensure selectCols includes all columns from whereClauses
+  for (const { col } of whereClauses) {
+    if (!selectCols.includes(col)) {
+      selectCols.push(col);
+    }
+  }
+  return {
+    selectCols,
+    whereClauses,
+    walkedQ 
+  };
+}
+
+// Helper to find a subsumed cache entry
+function findSubsumedCacheEntry(
+  recordCache: Map<string, any>,
+  table: string,
+  selectCols: string[],
+  whereClauses: { col: string; val: Term }[]
+) {
+  for (const [otherKey, cachedRows] of recordCache.entries()) {
+    const other = JSON.parse(otherKey);
+    if (other.table !== table) continue;
+    const selectSet = new Set(selectCols);
+    const otherSelectSet = new Set(other.select as string[]);
+    // Check if cached select is a superset of requested select
+    const selectSuperset = [...selectSet].every((col: string) =>
+      otherSelectSet.has(col)
+    );
+    // Map where clauses for both queries
+    const whereMap = new Map(whereClauses.map(({ col, val }) => [col, val]));
+    const otherWhereArr: [string, any][] = other.where as [string, any][];
+    const otherWhereMap = new Map(otherWhereArr);
+    // Only use cache if cached select includes all columns needed for whereClauses
+    const allWhereColsInCache = whereClauses.every(({ col }) =>
+      otherSelectSet.has(col)
+    );
+    if (!allWhereColsInCache) continue;
+    if (!selectSuperset) continue;
+    // Only use cache if cached where is a subset of requested where
+    let cachedWhereIsSubset = true;
+    for (const [col, val] of otherWhereArr) {
+      if (!whereMap.has(col) || whereMap.get(col) !== val) {
+        cachedWhereIsSubset = false;
+        break;
+      }
+    }
+    if (!cachedWhereIsSubset) continue;
+    return {
+      otherKey,
+      cachedRows 
+    };
+  }
+  return null;
+}
+
 export const makeRelDB = async (
   knex_connect_options: Knex.Config,
   opts?: Record<string, string>,
 ) => {
   opts ??= {};
-  opts.queryMode = "each";
 
-  await Promise.resolve(null);
   const db = knex(knex_connect_options);
-  interface Pattern extends Record<string, string | object> {
-    table: string;
-    params: Record<string, Term>;
-    queries: string[];
-  }
-  const patterns: Pattern[] = [];
-  const queries: string[] = [];
-  const realQueries: string[] = [];
-  const cacheQueries: string[] = [];
-  // Record cache for fully grounded queries
-  const recordCache = new Map<string, any>();
+  // Grouped state for patterns and queries
+  const state = {
+    patterns: [] as Pattern[],
+    queries: [] as string[],
+    realQueries: [] as string[],
+    cacheQueries: [] as string[],
+    recordCache: new Map<string, any>(),
+  };
 
   const run = async function* factsSqlRun (
     s: Subst,
@@ -91,32 +165,9 @@ export const makeRelDB = async (
         ...q,
         myruncnt,
       });
-      const selectCols: string[] = [];
-      const whereClauses: { col: string; val: Term }[] = [];
-      const walkedQ: Record<string, Term> = {};
-      for (const col in q.params) {
-        walkedQ[col] = await walk(q.params[col], subst);
-        if (isVar(walkedQ[col])) {
-          selectCols.push(col);
-        } else {
-          whereClauses.push({
-            col,
-            val: walkedQ[col],
-          });
-        }
-      }
+      // Use helper to build query parts
+      const { selectCols, whereClauses, walkedQ } = await buildQueryParts(q.params, subst);
       let rows;
-
-      if (!selectCols.length) {
-        selectCols.push(...Object.keys(walkedQ));
-      }
-
-      // Ensure selectCols includes all columns from whereClauses
-      for (const { col } of whereClauses) {
-        if (!selectCols.includes(col)) {
-          selectCols.push(col);
-        }
-      }
 
       // Filter out undefined values in whereClauses to avoid undefined bindings
       const validWhereClauses = whereClauses.filter(
@@ -142,94 +193,40 @@ export const makeRelDB = async (
       }
       const sqlStr = k.toString();
 
-      if (recordCache.has(cacheKey)) {
-        rows = recordCache.get(cacheKey);
+      if (state.recordCache.has(cacheKey)) {
+        rows = state.recordCache.get(cacheKey);
         const sqlQuery = `CACHE HIT ${sqlStr} ${cacheKey}`;
         q.queries.push(sqlQuery);
-        queries.push(sqlQuery);
-        cacheQueries.push(sqlQuery);
+        state.queries.push(sqlQuery);
+        state.cacheQueries.push(sqlQuery);
       } else {
-        // Subsumption: look for a broader or narrower cache entry
-        let subsumed = false;
-        for (const [otherKey, cachedRows] of recordCache.entries()) {
-          const other = JSON.parse(otherKey);
-          if (other.table !== q.table) continue;
-          const selectColsArr: string[] = selectCols;
-          const otherSelectArr: string[] = other.select as string[];
-          const selectSet = new Set(selectColsArr);
-          const otherSelectSet = new Set(otherSelectArr);
-          // Check if cached select is a superset or subset of requested select
-          const selectSuperset = [...selectSet].every((col: string) =>
-            otherSelectSet.has(col),
-          );
-          const selectSubset = [...otherSelectSet].every((col: string) =>
-            selectSet.has(col),
-          );
-          // Map where clauses for both queries
-          const whereMap = new Map(
-            whereClauses.map(({ col, val }) => [col, val]),
-          );
-          const otherWhereArr: [string, any][] = other.where as [string, any][];
-          const otherWhereMap = new Map(otherWhereArr);
-          // Check if cached where is a subset or superset of requested where
-          let whereSubset = true;
-          for (const [col, val] of otherWhereArr) {
-            if (!whereMap.has(col) || whereMap.get(col) !== val) {
-              whereSubset = false;
-              break;
-            }
-          }
-          let whereSuperset = true;
-          for (const { col, val } of whereClauses) {
-            if (!otherWhereMap.has(col) || otherWhereMap.get(col) !== val) {
-              whereSuperset = false;
-              break;
-            }
-          }
-          // Only use cache if cached select includes all columns needed for whereClauses
-          const allWhereColsInCache = whereClauses.every(({ col }) =>
-            otherSelectSet.has(col),
-          );
-          if (!allWhereColsInCache) continue;
-          // Only use cache if cached select is a superset of requested select
-          if (!selectSuperset) continue;
-          // Only use cache if cached where is a subset of requested where
-          let cachedWhereIsSubset = true;
-          for (const [col, val] of otherWhereArr) {
-            if (!whereMap.has(col) || whereMap.get(col) !== val) {
-              cachedWhereIsSubset = false;
-              break;
-            }
-          }
-          if (!cachedWhereIsSubset) continue;
-          // Use the cache
-          rows = cachedRows
+        // Use helper for cache subsumption
+        const subsumed = findSubsumedCacheEntry(state.recordCache, q.table, selectCols, validWhereClauses);
+        if (subsumed) {
+          rows = subsumed.cachedRows
             .filter((row: any) =>
-              whereClauses.every(({ col, val }) => row[col] === val),
+              validWhereClauses.every(({ col, val }) => row[col] === val),
             )
             .map((row: any) => {
               const filtered: any = {};
               for (const col of selectCols) filtered[col] = row[col];
               return filtered;
             });
-          const sqlQuery = `CACHE SUBSUMED ${sqlStr} ${otherKey}`;
+          const sqlQuery = `CACHE SUBSUMED ${sqlStr} ${subsumed.otherKey}`;
           q.queries.push(sqlQuery);
-          queries.push(sqlQuery);
-          cacheQueries.push(sqlQuery);
-          subsumed = true;
-          break;
-        }
-        if (!subsumed) {
+          state.queries.push(sqlQuery);
+          state.cacheQueries.push(sqlQuery);
+        } else {
           log("QUERY", {
             sql: sqlStr,
             myruncnt,
           });
           q.queries.push(sqlStr);
-          queries.push(sqlStr);
-          realQueries.push(sqlStr);
+          state.queries.push(sqlStr);
+          state.realQueries.push(sqlStr);
           rows = await k;
           // Cache the result (including empty array for no rows)
-          recordCache.set(cacheKey, rows);
+          state.recordCache.set(cacheKey, rows);
         }
       }
 
@@ -246,8 +243,6 @@ export const makeRelDB = async (
         let s2: Subst = new Map(subst);
         let ok = false;
         for (const col of selectCols) {
-          const origVal = q.params[col];
-          // if (isVar(origVal)) {
           const unified = await unify(walkedQ[col], row[col], s2);
           if (unified) {
             log("UNIFY", {
@@ -266,9 +261,6 @@ export const makeRelDB = async (
               right: row[col],
             });
           }
-          // } else {
-          //   break;
-          // }
         }
         if (ok) {
           yield* runPatterns(idx + 1, s2);
@@ -292,19 +284,6 @@ export const makeRelDB = async (
         queryObj: Record<string, Term>,
         subst: Subst,
       ) => {
-        // Check if all values in queryObj are grounded (not variables)
-        // let allGrounded = true;
-        // for (const col in queryObj) {
-        //     if (isVar(queryObj[col])) {
-        //         allGrounded = false;
-        //         break;
-        //     }
-        // }
-        // if (allGrounded) {
-        //     log("ALL TERMS GROUNDED");
-        //     // All terms are grounded, do nothing and yield nothing
-        //     return;
-        // }
         // Find logic variable columns and their var ids
         const logicVars: Record<string, string> = {};
         for (const col in queryObj) {
@@ -322,7 +301,7 @@ export const makeRelDB = async (
           queryObj,
           walkedQ,
         });
-        for (const pat of patterns) {
+        for (const pat of state.patterns) {
           if (pat.table !== table) continue;
           // Only check columns that exist in both pat and queryObj
           let compatible = true;
@@ -354,7 +333,7 @@ export const makeRelDB = async (
           break;
         }
         if (!merged) {
-          patterns.push({
+          state.patterns.push({
             table,
             params: {
               ...queryObj,
@@ -377,31 +356,16 @@ export const makeRelDB = async (
 
       return async function* factsSql (s: Subst) {
         await record_queries(queryObj, s);
-        if (
-          !(
-            opts.queryMode === "each" ||
-            (opts.queryMode === "last" && myruncnt !== runcnt - 1) ||
-            (opts.queryMode === "first" && myruncnt !== 0)
-          )
-        ) {
-          log("YIELD THROUGH", {
-            myruncnt,
-            table,
-            queryObj,
-          });
-          yield s;
-          return;
-        }
 
         log("RUNNING GOAL", {
           myruncnt,
           table,
           queryObj,
-          patterns,
+          patterns: state.patterns,
         });
 
-        const thispatterns = [...patterns];
-        patterns.splice(0, patterns.length);
+        const thispatterns = [...state.patterns];
+        state.patterns.splice(0, state.patterns.length);
 
         let found = false;
         for await (const s3 of run(s, thispatterns, myruncnt)) {
@@ -420,7 +384,6 @@ export const makeRelDB = async (
             thispatterns,
             s,
           });
-          // yield s;
         } else {
           log("GOAL RUN FINISHED", {
             myruncnt,
@@ -437,8 +400,8 @@ export const makeRelDB = async (
     rel,
     db,
     run,
-    queries,
-    realQueries,
-    cacheQueries,
+    queries: state.queries,
+    realQueries: state.realQueries,
+    cacheQueries: state.cacheQueries,
   };
 };

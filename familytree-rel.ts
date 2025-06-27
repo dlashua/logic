@@ -74,17 +74,11 @@ export const parentAgg = Rel(function parentAgg (k, p) {
   return collecto(in_s, parentOf(k, in_s), p);
 });
 
-// Helper: succeeds if a is in a relationship with b or b with a
-export const relationshipEitherWay = Rel((a: Term, b: Term) => {
-  // return or(relationship(a, b), relationship(b, a));
-  return relationship(a,b);
-});
-
 export const stepParentOf = Rel((kid: any, stepparent: any) => {
   const { proxy: $$ } = createLogicVarProxy("stepparentof_");
   return and(
     parentOf(kid, $$.parent),
-    relationshipEitherWay($$.parent, stepparent),
+    relationship($$.parent, stepparent),
     not(parentOf(kid, stepparent)),
   );
 });
@@ -92,7 +86,7 @@ export const stepParentOf = Rel((kid: any, stepparent: any) => {
 export const stepKidOf = Rel((stepparent: any, kid: any) => {
   const { proxy: $$ } = createLogicVarProxy("stepkidof_");
   return and(
-    relationshipEitherWay(stepparent, $$.parent),
+    relationship(stepparent, $$.parent),
     parentOf(kid, $$.parent),
     not(parentOf(kid, stepparent)),
   );
@@ -223,7 +217,7 @@ export function uncleOfLevel(level = 1) {
         ancestorOf(level)(person, ancestor),
         siblingOf(ancestor, sibling),
         // uncle can be sibling or sibling-in-law
-        or(eq(uncle, sibling), relationshipEitherWay(sibling, uncle)),
+        or(eq(uncle, sibling), relationship(sibling, uncle)),
         // Exclude direct ancestors
         not(anyParentOf(person, uncle)),
       ),

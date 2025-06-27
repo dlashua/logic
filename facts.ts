@@ -224,18 +224,25 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
 
 // --- Symmetric tuple-based fact relation (query-time symmetry) ---
 export function makeFactsSym(): FactRelation {
+  const symGoal = makeFacts();
+  const origSet = symGoal.set;
+
+  symGoal.set = (...q) => {
+    origSet(q[0], q[1]);
+    origSet(q[1], q[0]);
+  }
+
+  return symGoal as FactRelation;
+}
+
+export function makeFactsSymSlow(): FactRelation {
   const orig = makeFacts();
-  const symGoal = (...query: Term[]): Goal => {
-    if (query.length === 2) {
-      return or(orig(...query), orig(query[1], query[0]));
-    } else {
-      return orig(...query);
-    }
-  };
+
+  const symGoal = (...q) => or(orig(q[0], q[1]), orig(q[1], q[0]))
   symGoal.set = orig.set;
   symGoal.raw = orig.raw;
   symGoal.indexes = orig.indexes;
-  // Object.assign(symGoal, orig);
+
   return symGoal as FactRelation;
 }
 

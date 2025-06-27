@@ -13,10 +13,10 @@ import {
 import { createLogicVarProxy } from "./run.ts";
 import type { ProfiledGoal, ProfilableGoal } from "./relations.ts";
 
-let parent_kid = (p: Term, k: Term): ProfilableGoal => {
+let parent_kid = (p: Term, k: Term): Goal => {
   throw "must set parent_kid";
 };
-let relationship = (a: Term, b: Term): ProfilableGoal => {
+let relationship = (a: Term<string|number>, b: Term<string|number>): Goal => {
   throw "must set relationship";
 };
 

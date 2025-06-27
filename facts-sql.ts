@@ -5,53 +5,72 @@ import type { Subst, Term } from "./core.ts";
 import { isVar, unify, walk } from "./core.ts";
 
 let runcnt = 0;
-const mutelog = [
-  "PATTERNS BEFORE CHECK",
-  "WORKING PATTERN",
-  "TABLE NOT IN PATTERNS. NEED RUN.",
-  "ADDING PATTERN",
-  "MERGING PATTERN",
-  "TABLE IN PATTERNS. NO RUN.",
-  "SKIPPING QUERY",
-  "ROW RETURNED",
-  "RUNNING GOAL",
-  "GOAL RUN FINISHED",
-  "QUERY",
-  "STARTING GOAL",
-  "YIELD THROUGH",
-  "YIELD",
-  "NO YIELD",
-  "UNIFY",
-  "AFTER WALK",
-];
-const log = (
-  msg: string,
-  ...args: Record<string, string | number | object>[]
-) => {
-  // return;
-  if (mutelog.includes(msg)) return;
-  if (args.length <= 1) {
+
+// --- Logging configuration ---
+const LOG_ENABLED = false; // Set to true to enable logging globally
+const LOG_IDS = new Set<string>([
+  // Add log identifiers here to enable them, e.g.:
+  // "PATTERNS BEFORE CHECK",
+  // "WORKING PATTERN",
+  // "TABLE NOT IN PATTERNS. NEED RUN.",
+  // "ADDING PATTERN",
+  // "MERGING PATTERN",
+  // "TABLE IN PATTERNS. NO RUN.",
+  // "SKIPPING QUERY",
+  // "ROW RETURNED",
+  // "RUNNING GOAL",
+  // "GOAL RUN FINISHED",
+  // "QUERY",
+  // "STARTING GOAL",
+  // "YIELD THROUGH",
+  // "YIELD",
+  // "NO YIELD",
+  // "UNIFY",
+  // "AFTER WALK",
+  // "NO UNIFY (grounded mismatch)",
+]);
+
+/**
+ * Logging function with identifier-based filtering and global enable/disable.
+ * Usage: log("ROW_RETURNED", { ... })
+ */
+function log(
+  id: string,
+  ...args: Record<string, unknown>[]
+) {
+  if (!LOG_ENABLED) return;
+  if (!LOG_IDS.has(id)) return;
+  if (args.length === 0) {
     console.dir(
       {
-        log: msg,
+        log: id,
+      },
+      {
+        depth: null,
+      },
+    );
+  } else if (args.length === 1) {
+    console.dir(
+      {
+        log: id,
         ...args[0],
       },
       {
-        depth: 100,
+        depth: null,
       },
     );
   } else {
     console.dir(
       {
-        log: msg,
+        log: id,
         args,
       },
       {
-        depth: 100,
+        depth: null,
       },
     );
   }
-};
+}
 
 // Pattern interface at top-level for clarity
 interface Pattern extends Record<string, string | object> {
@@ -60,15 +79,17 @@ interface Pattern extends Record<string, string | object> {
   queries: string[];
 }
 
-// Helper to build selectCols, whereClauses, walkedQ
-async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
-  /**
-   * @todo test without sorting
-   */
-  const selectCols = Object.keys(params).sort(); // #9: sort for cache key consistency
-  const whereClauses: { col: string; val: Term }[] = [];
+// Helper: walk all params and collect walkedQ and whereClauses
+async function walkParamsAndCollect(
+  params: Record<string, Term>,
+  subst: Subst
+): Promise<{
+  walkedQ: Record<string, Term>;
+  whereClauses: { col: string; val: Term }[];
+}> {
   const walkedQ: Record<string, Term> = {};
-  for (const col of selectCols) {
+  const whereClauses: { col: string; val: Term }[] = [];
+  for (const col of Object.keys(params)) {
     walkedQ[col] = await walk(params[col], subst);
     if (!isVar(walkedQ[col])) {
       whereClauses.push({
@@ -77,10 +98,21 @@ async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
       });
     }
   }
-  // #9: sort whereClauses for cache key consistency
+  return {
+    walkedQ,
+    whereClauses,
+  };
+}
+
+// Helper to build selectCols, whereClauses, walkedQ
+async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
   /**
    * @todo test without sorting
    */
+  const selectCols = Object.keys(params).sort(); // #9: sort for cache key consistency
+  // Use new helper
+  const { walkedQ, whereClauses } = await walkParamsAndCollect(params, subst);
+  // #9: sort whereClauses for cache key consistency
   whereClauses.sort((a, b) => a.col.localeCompare(b.col));
   return {
     selectCols,
@@ -90,6 +122,7 @@ async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
 }
 
 // Helper to find a subsumed cache entry
+// Use filterValidWhereClauses in findSubsumedCacheEntry for consistency
 function findSubsumedCacheEntry(
   recordCache: Map<string, any>,
   table: string,
@@ -98,30 +131,20 @@ function findSubsumedCacheEntry(
 ) {
   // Precompute sets/maps for the query
   const selectSet = new Set(selectCols);
-  const whereMap = new Map(whereClauses.map(({ col, val }) => [col, val]));
+  // Use filtered whereClauses for consistency
+  const validWhereClauses = filterValidWhereClauses(whereClauses);
+  const whereMap = new Map(validWhereClauses.map(({ col, val }) => [col, val]));
   for (const [otherKey, cachedRows] of recordCache.entries()) {
     const other = JSON.parse(otherKey);
     if (other.table !== table) continue;
     const otherSelectArr = other.select as string[];
     const otherSelectSet = new Set(otherSelectArr);
     // Check if cached select is a superset of requested select
-    let selectSuperset = true;
-    for (const col of selectSet) {
-      if (!otherSelectSet.has(col)) {
-        selectSuperset = false;
-        break;
-      }
-    }
-    if (!selectSuperset) continue;
+    if (!isSuperset(otherSelectSet, selectSet)) continue;
     // Only use cache if cached select includes all columns needed for whereClauses
-    let allWhereColsInCache = true;
-    for (const { col } of whereClauses) {
-      if (!otherSelectSet.has(col)) {
-        allWhereColsInCache = false;
-        break;
-      }
-    }
-    if (!allWhereColsInCache) continue;
+    // Use isSuperset for where columns as well
+    const whereColsSet = new Set(validWhereClauses.map(wc => wc.col));
+    if (!isSuperset(otherSelectSet, whereColsSet)) continue;
     // Only use cache if cached where is a subset of requested where
     const otherWhereArr: [string, any][] = other.where as [string, any][];
     let cachedWhereIsSubset = true;
@@ -148,37 +171,11 @@ function mergeOrAddPattern(
   queryObj: Record<string, Term>,
   myruncnt: number
 ) {
-  // #7: Memoize compatible pattern index for faster repeated lookups
-  // Use a map from table name to array of pattern indices for O(1) table filtering
-  // (If patterns array is large, this can be further optimized with a WeakMap or similar)
-  // For now, keep the logic simple and efficient for small arrays
   for (const pat of patterns) {
     if (pat.table !== table) continue;
-    let compatible = true;
-    for (const col in pat.params) {
-      if (!(col in walkedQ)) continue;
-      const vPat = pat.params[col];
-      const vNew = walkedQ[col];
-      if (isVar(vPat) && isVar(vNew)) {
-        if (vPat.id !== vNew.id) {
-          compatible = false;
-          break;
-        }
-      } else if (isVar(vPat) !== isVar(vNew)) {
-        compatible = false;
-        break;
-      } else if (!isVar(vPat) && vPat !== vNew) {
-        compatible = false;
-        break;
-      }
-    }
-    if (!compatible) continue;
-    // @todo put this back if something breaks
-    // for (const col in walkedQ) {
-    //   if (!(col in pat.params)) pat.params[col] = walkedQ[col];
-    // }
+    if (!arePatternsCompatible(pat.params, walkedQ)) continue;
     log("MERGING PATTERN", {
-      myruncnt,
+      myruncnt: myruncnt ?? 'N/A',
       table,
       queryObj,
     });
@@ -192,7 +189,7 @@ function mergeOrAddPattern(
     queries: [],
   });
   log("ADDING PATTERN", {
-    myruncnt,
+    myruncnt: myruncnt ?? 'N/A',
     table,
     queryObj,
   });
@@ -328,11 +325,7 @@ export const makeRelDB = async (
             .filter((row: any) =>
               validWhereClauses.every(({ col, val }) => row[col] === val),
             )
-            .map((row: any) => {
-              const filtered: any = {};
-              for (const col of selectCols) filtered[col] = row[col];
-              return filtered;
-            });
+            .map((row: any) => pick(row, selectCols));
           return {
             rows: filteredRows,
             otherKey: subsumed.otherKey,
@@ -353,45 +346,14 @@ export const makeRelDB = async (
       for (const row of rows) {
         log("ROW RETURNED", {
           row,
-          myruncnt,
+          myruncnt: myruncnt ?? 'N/A',
         });
-        let s2: Subst = new Map(subst);
-        for (const col of selectCols) {
-          if (!isVar(walkedQ[col])) {
-            // If grounded and matches, skip unify
-            if (walkedQ[col] === row[col]) {
-              continue;
-            } else {
-              log("NO UNIFY (grounded mismatch)", {
-                myruncnt,
-                col,
-                left: walkedQ[col] as string | number | object,
-                right: row[col],
-              });
-              break;
-            }
-          } else {
-            const unified = await unify(walkedQ[col], row[col], s2);
-            if (unified) {
-              log("UNIFY", {
-                myruncnt,
-                col,
-                left: walkedQ[col] as string | number | object,
-                right: row[col],
-              });
-              s2 = unified;
-            } else {
-              log("NO UNIFY", {
-                myruncnt,
-                col,
-                left: walkedQ[col] as string | number | object,
-                right: row[col],
-              });
-              break;
-            }
-          }
+        // Use unifyRowWithWalkedQ helper for unification
+        const unifiedSubst = await unifyRowWithWalkedQ(selectCols, walkedQ, row, subst, myruncnt);
+        if (unifiedSubst) {
+          yield* runPatterns(idx + 1, unifiedSubst);
         }
-        yield* runPatterns(idx + 1, s2);
+        // If unification fails, do not yield
       }
     }
     yield* runPatterns(0, s);
@@ -416,11 +378,8 @@ export const makeRelDB = async (
           const v = queryObj[col];
           if (isVar(v)) logicVars[col] = v.id;
         }
-        // Try to find a compatible pattern
-        const walkedQ: Record<string, Term> = {};
-        for (const col in queryObj) {
-          walkedQ[col] = await walk(queryObj[col], subst);
-        }
+        // Use new helper for walking
+        const { walkedQ } = await walkParamsAndCollect(queryObj, subst);
         log("AFTER WALK", {
           myruncnt,
           queryObj,
@@ -560,4 +519,86 @@ export const makeRelDB = async (
 // Helper to filter out undefined values from whereClauses
 function filterValidWhereClauses(whereClauses: { col: string; val: Term }[]) {
   return whereClauses.filter(({ val }) => val !== undefined);
+}
+
+// Helper: check if all elements of subset are in superset
+function isSuperset(superset: Set<string>, subset: Iterable<string>) {
+  for (const elem of subset) {
+    if (!superset.has(elem)) return false;
+  }
+  return true;
+}
+
+// Helper: pick a subset of keys from an object
+function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
+  const out = {} as Pick<T, K>;
+  for (const k of keys) {
+    if (k in obj) out[k] = obj[k];
+  }
+  return out;
+}
+
+// Helper: unify all selectCols in a row with walkedQ and subst
+async function unifyRowWithWalkedQ(
+  selectCols: string[],
+  walkedQ: Record<string, Term>,
+  row: Record<string, any>,
+  subst: Subst,
+  myruncnt?: number
+): Promise<Subst | null> {
+  let s2: Subst = new Map(subst);
+  for (const col of selectCols) {
+    if (!isVar(walkedQ[col])) {
+      if (walkedQ[col] === row[col]) {
+        continue;
+      } else {
+        log("NO UNIFY (grounded mismatch)", {
+          myruncnt: myruncnt ?? 'N/A',
+          col,
+          left: walkedQ[col] as string | number | object,
+          right: row[col],
+        });
+        return null;
+      }
+    } else {
+      const unified = await unify(walkedQ[col], row[col], s2);
+      if (unified) {
+        log("UNIFY", {
+          myruncnt: myruncnt ?? 'N/A',
+          col,
+          left: walkedQ[col] as string | number | object,
+          right: row[col],
+        });
+        s2 = unified;
+      } else {
+        log("NO UNIFY", {
+          myruncnt: myruncnt ?? 'N/A',
+          col,
+          left: walkedQ[col] as string | number | object,
+          right: row[col],
+        });
+        return null;
+      }
+    }
+  }
+  return s2;
+}
+
+// Helper: check if two pattern param sets are compatible
+function arePatternsCompatible(patParams: Record<string, Term>, walkedQ: Record<string, Term>): boolean {
+  for (const col in patParams) {
+    if (!(col in walkedQ)) continue;
+    const vPat = patParams[col];
+    const vNew = walkedQ[col];
+    if (isVar(vPat) && isVar(vNew)) {
+      if (vPat.id !== vNew.id) {
+        return false;
+      }
+    } else if (isVar(vPat) !== isVar(vNew)) {
+      return false;
+    } else if (!isVar(vPat) && vPat !== vNew) {
+      return false;
+    }
+  }
+  return true;
 }

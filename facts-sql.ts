@@ -62,26 +62,19 @@ interface Pattern extends Record<string, string | object> {
 
 // Helper to build selectCols, whereClauses, walkedQ
 async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
-  const selectCols: string[] = [];
+  const selectCols = Object.keys(params);
   const whereClauses: { col: string; val: Term }[] = [];
   const walkedQ: Record<string, Term> = {};
   for (const col in params) {
     walkedQ[col] = await walk(params[col], subst);
-    if (isVar(walkedQ[col])) {
-      selectCols.push(col);
-    } else {
+    if (!isVar(walkedQ[col])) {
       whereClauses.push({
         col,
         val: walkedQ[col] 
       });
     }
   }
-  // Ensure selectCols includes all columns from whereClauses
-  for (const { col } of whereClauses) {
-    if (!selectCols.includes(col)) {
-      selectCols.push(col);
-    }
-  }
+
   return {
     selectCols,
     whereClauses,
@@ -196,12 +189,72 @@ export const makeRelDB = async (
     recordCache: new Map<string, any>(),
   };
 
+  // Generalized cache/query helper for both rel and relSym
+  const cacheOrQuery = async <T>({
+    cacheKeyObj,
+    getFn,
+    subsumeFn,
+    sym = false,
+  }: {
+    cacheKeyObj: any;
+    getFn: () => Promise<{
+      rows: T[];
+      queryString: string;
+    }>;
+    subsumeFn?: () => { rows: T[]; otherKey: string } | null;
+    sym?: boolean;
+  }): Promise<{
+    rows: T[];
+    cacheType: string;
+    cacheKey: string;
+    queryString: string;
+  }> => {
+    const cacheKey = JSON.stringify(cacheKeyObj);
+    if (state.recordCache.has(cacheKey)) {
+      const sqlQuery = `CACHE HIT ${cacheKey}`;
+      state.queries.push(sqlQuery);
+      state.cacheQueries.push(sqlQuery);
+      return {
+        rows: state.recordCache.get(cacheKey),
+        cacheType: "hit",
+        cacheKey,
+        queryString: sqlQuery,
+      };
+    } else if (subsumeFn) {
+      const subsumed = subsumeFn();
+      if (subsumed) {
+        const sqlQuery = `CACHE SUBSUMED ${cacheKey} ${subsumed.otherKey}`;
+        state.queries.push(sqlQuery);
+        state.cacheQueries.push(sqlQuery);
+        return {
+          rows: subsumed.rows,
+          cacheType: "subsumed",
+          cacheKey,
+          queryString: sqlQuery,
+        };
+      }
+    }
+    const { rows, queryString } = await getFn();
+    log("QUERY", {
+      sql: queryString 
+    });
+    state.queries.push(queryString);
+    state.realQueries.push(queryString);
+    state.recordCache.set(cacheKey, rows);
+    return {
+      rows,
+      cacheType: "miss",
+      cacheKey,
+      queryString,
+    };
+  };
+
   const run = async function* factsSqlRun (
     s: Subst,
     patterns: Pattern[],
     myruncnt: number,
   ) {
-    async function* runPatterns (
+    async function* runPatterns(
       idx: number,
       subst: Subst,
     ): AsyncGenerator<Subst> {
@@ -216,8 +269,6 @@ export const makeRelDB = async (
       });
       // Use helper to build query parts
       const { selectCols, whereClauses, walkedQ } = await buildQueryParts(q.params, subst);
-      let rows;
-
       // Filter out undefined values in whereClauses to avoid undefined bindings
       const validWhereClauses = whereClauses.filter(
         ({ val }) => val !== undefined,
@@ -228,31 +279,28 @@ export const makeRelDB = async (
           validWhereClauses,
         });
       }
-
-      const cacheKey = JSON.stringify({
+      const cacheKeyObj = {
         table: q.table,
         select: selectCols,
         where: validWhereClauses.map(({ col, val }) => [col, val]),
-      });
-
-      let k = db(q.table).select(selectCols);
-      for (const { col, val } of validWhereClauses) {
-        // @ts-expect-error knex types are weird
-        k = k.where(col, "=", val);
-      }
-      const sqlStr = k.toString();
-
-      if (state.recordCache.has(cacheKey)) {
-        rows = state.recordCache.get(cacheKey);
-        const sqlQuery = `CACHE HIT ${sqlStr} ${cacheKey}`;
-        q.queries.push(sqlQuery);
-        state.queries.push(sqlQuery);
-        state.cacheQueries.push(sqlQuery);
-      } else {
-        // Use helper for cache subsumption
+      };
+      const getFn = async () => {
+        let k = db(q.table).select(selectCols);
+        for (const { col, val } of validWhereClauses) {
+          // @ts-expect-error knex types are weird
+          k = k.where(col, "=", val);
+        }
+        const queryString = k.toString();
+        const rows = await k;
+        return {
+          rows,
+          queryString,
+        };
+      };
+      const subsumeFn = () => {
         const subsumed = findSubsumedCacheEntry(state.recordCache, q.table, selectCols, validWhereClauses);
         if (subsumed) {
-          rows = subsumed.cachedRows
+          const filteredRows = subsumed.cachedRows
             .filter((row: any) =>
               validWhereClauses.every(({ col, val }) => row[col] === val),
             )
@@ -261,29 +309,22 @@ export const makeRelDB = async (
               for (const col of selectCols) filtered[col] = row[col];
               return filtered;
             });
-          const sqlQuery = `CACHE SUBSUMED ${sqlStr} ${subsumed.otherKey}`;
-          q.queries.push(sqlQuery);
-          state.queries.push(sqlQuery);
-          state.cacheQueries.push(sqlQuery);
-        } else {
-          log("QUERY", {
-            sql: sqlStr,
-            myruncnt,
-          });
-          q.queries.push(sqlStr);
-          state.queries.push(sqlStr);
-          state.realQueries.push(sqlStr);
-          rows = await k;
-          // Cache the result (including empty array for no rows)
-          state.recordCache.set(cacheKey, rows);
+          return {
+            rows: filteredRows,
+            otherKey: subsumed.otherKey,
+          };
         }
-      }
-
+        return null;
+      };
+      const { rows } = await cacheOrQuery({
+        cacheKeyObj,
+        getFn,
+        subsumeFn,
+      });
       // If no rows, skip yielding
       if (!rows || rows.length === 0) {
         return;
       }
-
       // Unify all selectCols (undo optimization)
       for (const row of rows) {
         log("ROW RETURNED", {
@@ -419,47 +460,18 @@ export const makeRelDB = async (
       return async function* (s: Subst) {
         // sym relationships are only binary
         if (values.length > 2) return;
-
         const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
-
         // sym relationships can't point to themselves
         if(walkedValues[0] === walkedValues[1]) return;
-
         // cheating type because I don't know another way to do this
         const gv = walkedValues.filter(x => !isVar(x)) as (string | number)[];
-
-        async function cacheOrQuery(
-          table: string, 
-          keys: string[], 
-          gv: (string | number)[], 
-          getFn: () => Promise<{rows: Record<string, any>[], queryString: string}>
-        ) {
-          const cacheKeyObj = {
-            table,
-            select: keys,
-            where: gv,
-            sym: true,
-          };
-          const cacheKey = JSON.stringify(cacheKeyObj);
-          if (state.recordCache.has(cacheKey)) {
-            const sqlQuery = `CACHE HIT ${cacheKey}`;
-            state.queries.push(sqlQuery);
-            state.cacheQueries.push(sqlQuery);
-            return state.recordCache.get(cacheKey);
-          } else {
-            const { rows, queryString } = await getFn();
-
-            log("QUERY", {
-              sql: queryString,
-            });
-            state.queries.push(queryString);
-            state.realQueries.push(queryString);
-            state.recordCache.set(cacheKey, rows);
-            return rows;
-          }
-        }
-        
-        const rows = await cacheOrQuery(table, keys, gv, async () =>{
+        const cacheKeyObj = {
+          table,
+          select: keys,
+          where: gv,
+          sym: true,
+        };
+        const getFn = async () => {
           const k = db(table).select(keys).where(
             (q) => gv.map(onegv => q.andWhere(
               (q) => keys.map(onekey => q.orWhere(
@@ -467,36 +479,48 @@ export const makeRelDB = async (
               ))
             ))
           );
-
           const queryString = k.toString();
           const rows = await k;
           return {
             rows,
-            queryString 
+            queryString,
           };
+        };
+        const { rows } = await cacheOrQuery({
+          cacheKeyObj,
+          getFn,
+          sym: true,
         });
         for (const row of rows) {
-          // NOT unifying ground values doesn't increase performance
-          // skip this
-          //
-          // if (gv.length === 2) {
-          //   if (keys.every(k => gv.includes(row[k]))) {
-          //     yield s;
-          //   }
-          //   continue;
-          // }
-          let s2: Subst = new Map(s);
-          let ok = true;
-          for (const col of keys) {
-            const unified = await unify(queryObj[col], row[col], s2);
-            if (unified) {
-              s2 = unified;
-            } else {
-              ok = false;
-              break;
+   
+          if (gv.length === 2) {
+            if (keys.every(k => gv.includes(row[k]))) {
+              yield s;
+            }
+            continue;
+          }
+          
+          // Try both possible assignments for symmetric relation
+          // First assignment: keys[0] <-> queryObj[keys[0]], keys[1] <-> queryObj[keys[1]]
+          let s2 = new Map(s);
+          let unified1 = await unify(queryObj[keys[0]], row[keys[0]], s2);
+          if (unified1) {
+            const unified2 = await unify(queryObj[keys[1]], row[keys[1]], unified1);
+            if (unified2) {
+              yield unified2;
+              continue; // If first assignment works, skip the second
             }
           }
-          if (ok) yield s2;
+          // Second assignment: keys[0] <-> queryObj[keys[1]], keys[1] <-> queryObj[keys[0]]
+          s2 = new Map(s);
+          unified1 = await unify(queryObj[keys[1]], row[keys[0]], s2);
+          if (unified1) {
+            const unified2 = await unify(queryObj[keys[0]], row[keys[1]], unified1);
+            if (unified2) {
+              yield unified2;
+            }
+          }
+          // If neither worked, do not yield
         }
       };
     };

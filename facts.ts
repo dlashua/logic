@@ -43,29 +43,37 @@ export function makeFacts(): FactRelation {
     return async function* (s: Subst) {
       const walkedQuery = await Promise.all(query.map(term => walk(term, s)));
 
-      let intersection: Set<number> = new Set<number>();
-      let found = false;
-      let i = -1;
-      for (const wq of walkedQuery) {
-        i++;
-        if (isVar(wq)) continue;
-        if (!indexes.has(i)) continue;
-        const index = indexes.get(i);
-        if (!index) continue;
-        const factNums = index.get(wq);
-        if (!factNums) continue;
-
-        if (!found) {
-          found = true;
-          intersection = new Set(factNums);
-          continue;
+      // Find all indexable, grounded positions
+      const indexedPositions: number[] = [];
+      walkedQuery.forEach((wq, i) => {
+        if (!isVar(wq) && indexes.has(i)) {
+          indexedPositions.push(i);
         }
+      });
 
-        intersection = intersect(intersection, factNums);
-        if (intersection.size === 0) break;
+      let candidateIndexes: Set<number> | null = null;
+      if (indexedPositions.length > 0) {
+        // Intersect all index hits
+        for (const i of indexedPositions) {
+          const wq = walkedQuery[i];
+          const index = indexes.get(i);
+          if (!index) continue;
+          const factNums = index.get(wq);
+          if (!factNums) {
+            candidateIndexes = new Set();
+            break;
+          }
+          if (candidateIndexes === null) {
+            candidateIndexes = new Set(factNums);
+          } else {
+            candidateIndexes = intersect(candidateIndexes, factNums);
+            if (candidateIndexes.size === 0) break;
+          }
+        }
       }
 
-      if (!found) {
+      if (candidateIndexes === null) {
+        // No grounded values: full scan
         for (const fact of facts) {
           const s1 = await unify(query, fact, s);
           if (s1) {
@@ -75,7 +83,7 @@ export function makeFacts(): FactRelation {
         return;
       }
 
-      for (const factIndex of intersection) {
+      for (const factIndex of candidateIndexes) {
         const fact = facts[factIndex];
         const s1 = await unify(query, fact, s);
         if (s1) {
@@ -123,42 +131,53 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
   const indexes = new Map<string, Map<any, Set<number>>>();
 
   function goalFn(queryObj: Record<string, Term>): Goal {
-    const keys = Object.keys(queryObj);
+    const keysArr = Object.keys(queryObj);
     return async function* (s: Subst) {
       const walkedQuery: Record<string, Term> = {};
-      for (const k of keys) {
+      for (const k of keysArr) {
         walkedQuery[k] = await walk(queryObj[k], s);
       }
 
-      let intersection: Set<number> = new Set<number>();
-      let found = false;
-      for (const k of keys) {
-        const wq = walkedQuery[k];
-        if (isVar(wq)) continue;
-        const index = indexes.get(k);
-        if (!index) continue;
-        const factNums = index.get(wq);
-        if (!factNums) continue;
-        if (!found) {
-          found = true;
-          intersection = new Set(factNums);
-          continue;
+      // Find all indexable, grounded keys
+      const indexedKeys: string[] = [];
+      for (const k of keysArr) {
+        if (!isVar(walkedQuery[k]) && indexes.has(k)) {
+          indexedKeys.push(k);
         }
-        intersection = intersect(intersection, factNums);
-        if (intersection.size === 0) break;
       }
 
-      if (!found) {
+      let candidateIndexes: Set<number> | null = null;
+      if (indexedKeys.length > 0) {
+        for (const k of indexedKeys) {
+          const wq = walkedQuery[k];
+          const index = indexes.get(k);
+          if (!index) continue;
+          const factNums = index.get(wq);
+          if (!factNums) {
+            candidateIndexes = new Set();
+            break;
+          }
+          if (candidateIndexes === null) {
+            candidateIndexes = new Set(factNums);
+          } else {
+            candidateIndexes = intersect(candidateIndexes, factNums);
+            if (candidateIndexes.size === 0) break;
+          }
+        }
+      }
+
+      if (candidateIndexes === null) {
+        // No grounded values: full scan
         for (const fact of facts) {
-          const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+          const s1 = await unify(keysArr.map(k => queryObj[k]), keysArr.map(k => fact[k]), s);
           if (s1) yield s1;
         }
         return;
       }
 
-      for (const factIndex of intersection) {
+      for (const factIndex of candidateIndexes) {
         const fact = facts[factIndex];
-        const s1 = await unify(keys.map(k => queryObj[k]), keys.map(k => fact[k]), s);
+        const s1 = await unify(keysArr.map(k => queryObj[k]), keysArr.map(k => fact[k]), s);
         if (s1) yield s1;
       }
     };

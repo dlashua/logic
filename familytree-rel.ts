@@ -8,7 +8,7 @@ import {
   eq,
   neq_C,
   not,
-  or
+  or,
 } from "./relations.ts";
 import { createLogicVarProxy } from "./run.ts";
 import type { ProfiledGoal, ProfilableGoal } from "./relations.ts";
@@ -209,7 +209,7 @@ export const greatuncleAgg = Rel((v, s) => {
 });
 
 // Generalized ancestor relation: ancestorOf(level)(descendant, ancestor)
-export function ancestorOf(level: number) {
+export const ancestorOf = function ancestorOf(level: number) {
   return Rel((descendant, ancestor) => {
     if (level < 1) return eq(descendant, ancestor);
     const chain = [descendant];
@@ -223,7 +223,8 @@ export function ancestorOf(level: number) {
     goals.push(eq(chain[level], ancestor));
     return and(...goals);
   });
-}
+};
+
 
 // Generalized uncle/aunt relation: uncleOfLevel(level)(person, uncle)
 export function uncleOfLevel(level = 1) {

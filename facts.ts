@@ -238,7 +238,7 @@ export function makeFactsSym(): FactRelation {
 export function makeFactsSymSlow(): FactRelation {
   const orig = makeFacts();
 
-  const symGoal = (...q) => or(orig(q[0], q[1]), orig(q[1], q[0]))
+  const symGoal = (...q: Term[]) => or(orig(q[0], q[1]), orig(q[1], q[0]))
   symGoal.set = orig.set;
   symGoal.raw = orig.raw;
   symGoal.indexes = orig.indexes;

@@ -2,7 +2,7 @@ import type { Knex } from "knex";
 // eslint-disable-next-line import/no-named-as-default
 import knex from "knex";
 import type { Subst, Term } from "./core.ts";
-import { isNotVar, isVar, unify, walk } from "./core.ts";
+import { isVar, unify, walk } from "./core.ts";
 
 let runcnt = 0;
 const mutelog = [

@@ -6,8 +6,13 @@ import { isVar, unify, walk } from "./core.ts";
 
 let runcnt = 0;
 
+const DISABLE_CACHE = false;
+const DISABLE_SUBSUME = false;
+const DISABLE_PATTERN_MERGE = false;
+const AUTO_RUN = true;
+
 // --- Logging configuration ---
-const LOG_ENABLED = true; // Set to true to enable logging globally
+const LOG_ENABLED = false; // Set to true to enable logging globally
 const LOG_IDS = new Set<string>([
   // Add log identifiers here to disable them, e.g.:
   "PATTERNS BEFORE CHECK",
@@ -28,6 +33,7 @@ const LOG_IDS = new Set<string>([
   "UNIFY",
   "AFTER WALK",
   "NO UNIFY (grounded mismatch)",
+  "PATTERNS_BEFORE_RUN",
 ]);
 
 /**
@@ -164,36 +170,56 @@ function findSubsumedCacheEntry(
 }
 
 // Helper to merge or add a pattern
-function mergeOrAddPattern(
+async function mergeOrAddPattern(
   patterns: Pattern[],
   table: string,
-  walkedQ: Record<string, Term>,
   queryObj: Record<string, Term>,
-  myruncnt: number
+  subst: Subst,
 ) {
-  for (const pat of patterns) {
-    if (pat.table !== table) continue;
-    if (!arePatternsCompatible(pat.params, walkedQ)) continue;
-    log("MERGING PATTERN", {
-      myruncnt: myruncnt ?? 'N/A',
-      table,
-      queryObj,
-    });
-    return true; // merged
+  const walkedQ = await walkAllKeys(queryObj, subst);
+  if(!DISABLE_PATTERN_MERGE) {
+    pattern_loop: for (const pat of patterns) {
+      if (pat.table !== table) continue;
+  
+      if(!allParamsGrounded(pat.params)) {
+        pat.params = await walkAllKeys(pat.params, subst);
+      }
+  
+      // arePatternsCompatible FN
+      for (const col in pat.params) {
+        if (!(col in walkedQ)) continue;
+        const vPat = pat.params[col];
+        const vNew = walkedQ[col];
+        if (isVar(vPat) && isVar(vNew)) {
+          if (vPat.id !== vNew.id) {
+            continue pattern_loop;
+          }
+        } else if (isVar(vPat) !== isVar(vNew)) {
+          continue pattern_loop;
+        } else if (!isVar(vPat) && vPat !== vNew) {
+          continue pattern_loop;
+        }
+      }
+      
+      // Merge walkedQ into pat.params, preferring existing non-variable values
+      for (const col in walkedQ) {
+        if (!(col in pat.params) || isVar(pat.params[col])) {
+          pat.params[col] = walkedQ[col];
+        }
+      }
+      // Optionally, merge queries if needed (not shown here)
+      return true; 
+    }
   }
   patterns.push({
     table,
     params: {
-      ...queryObj,
+      ...walkedQ,
     },
     queries: [],
   });
-  log("ADDING PATTERN", {
-    myruncnt: myruncnt ?? 'N/A',
-    table,
-    queryObj,
-  });
-  return false; // added
+
+  return false;
 }
 
 export const makeRelDB = async (
@@ -233,7 +259,7 @@ export const makeRelDB = async (
     queryString: string;
   }> => {
     const cacheKey = JSON.stringify(cacheKeyObj);
-    if (state.recordCache.has(cacheKey)) {
+    if (!DISABLE_CACHE && state.recordCache.has(cacheKey)) {
       const sqlQuery = `CACHE HIT ${cacheKey}`;
       state.queries.push(sqlQuery);
       state.cacheQueries.push(sqlQuery);
@@ -243,7 +269,7 @@ export const makeRelDB = async (
         cacheKey,
         queryString: sqlQuery,
       };
-    } else if (subsumeFn) {
+    } else if (!DISABLE_SUBSUME && subsumeFn) {
       const subsumed = subsumeFn();
       if (subsumed) {
         const sqlQuery = `CACHE SUBSUMED ${cacheKey} ${subsumed.otherKey}`;
@@ -272,7 +298,7 @@ export const makeRelDB = async (
     };
   };
 
-  const run = async function* factsSqlRun (
+  const inner_run = async function* factsSqlRun (
     s: Subst,
     patterns: Pattern[],
     myruncnt: number,
@@ -368,69 +394,23 @@ export const makeRelDB = async (
   const rel = async (table: string) => {
     return function goal(queryObj: Record<string, Term>) {
       const myruncnt = runcnt++;
-      log("STARTING GOAL", {
-        myruncnt,
-        table,
-        queryObj,
-      });
-
-      const record_queries = async (
-        queryObj: Record<string, Term>,
-        subst: Subst,
-      ) => {
-        // Find logic variable columns and their var ids
-        const logicVars: Record<string, string> = {};
-        for (const col in queryObj) {
-          const v = queryObj[col];
-          if (isVar(v)) logicVars[col] = v.id;
-        }
-        // Use new helper for walking
-        const { walkedQ } = await walkParamsAndCollect(queryObj, subst);
-        log("AFTER WALK", {
-          myruncnt,
-          queryObj,
-          walkedQ,
-        });
-        mergeOrAddPattern(state.patterns, table, walkedQ, queryObj, myruncnt);
-      };
 
       return async function* factsSql (s: Subst) {
-        await record_queries(queryObj, s);
-
-        log("RUNNING GOAL", {
-          myruncnt,
+        await mergeOrAddPattern(state.patterns, table, queryObj, s);
+        log("PATTERNS_BEFORE_RUN", {
           table,
-          queryObj,
-          patterns: state.patterns,
-        });
+          p: state.patterns 
+        })
 
-        const thispatterns = [...state.patterns];
-        state.patterns.splice(0, state.patterns.length);
+        if (AUTO_RUN) {
+          const thispatterns = [...state.patterns];
+          state.patterns.splice(0, state.patterns.length);
 
-        let found = false;
-        for await (const s3 of run(s, thispatterns, myruncnt)) {
-          found = true;
-          log("YIELD", {
-            myruncnt,
-            s3,
-          });
-          yield s3;
-        }
-        if (!found) {
-          log("NO YIELD", {
-            myruncnt,
-            table,
-            queryObj,
-            thispatterns,
-            s,
-          });
+          for await (const s3 of inner_run(s, thispatterns, myruncnt)) {
+            yield s3;
+          }
         } else {
-          log("GOAL RUN FINISHED", {
-            myruncnt,
-            table,
-            queryObj,
-            thispatterns,
-          });
+          yield s;
         }
       };
     };
@@ -511,6 +491,10 @@ export const makeRelDB = async (
     };
   };
 
+  const run = () => (s: Subst) => {
+    return inner_run(s, state.patterns,-1)
+  };
+
   return {
     rel,
     relSym,
@@ -542,6 +526,18 @@ function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K
     if (k in obj) out[k] = obj[k];
   }
   return out;
+}
+
+// Helper: walk all keys of an object with a subst and return a new object
+async function walkAllKeys<T extends Record<string, Term>>(
+  obj: T,
+  subst: Subst
+): Promise<Record<string, Term>> {
+  const result: Record<string, Term> = {};
+  for (const key of Object.keys(obj)) {
+    result[key] = await walk(obj[key], subst);
+  }
+  return result;
 }
 
 // Helper: unify all selectCols in a row with walkedQ and subst
@@ -587,27 +583,15 @@ async function unifyRowWithWalkedQ(
       }
     }
   }
+  // Use walkAllKeys to check if all selectCols are grounded after unification
+  // const selectColsGrounded = await walkAllKeys(walkedQ, s2);
+  // if (allParamsGrounded(selectColsGrounded)) {
+  // Could be used for further optimizations or logging
+  // log("ALL SELECT COLS GROUNDED", { myruncnt, selectColsGrounded });
+  // }
   return s2;
 }
 
-// Helper: check if two pattern param sets are compatible
-function arePatternsCompatible(patParams: Record<string, Term>, walkedQ: Record<string, Term>): boolean {
-  for (const col in patParams) {
-    if (!(col in walkedQ)) continue;
-    const vPat = patParams[col];
-    const vNew = walkedQ[col];
-    if (isVar(vPat) && isVar(vNew)) {
-      if (vPat.id !== vNew.id) {
-        return false;
-      }
-    } else if (isVar(vPat) !== isVar(vNew)) {
-      return false;
-    } else if (!isVar(vPat) && vPat !== vNew) {
-      return false;
-    }
-  }
-  return true;
-}
 
 // Helper: check if all query parameters are grounded (no variables)
 function allParamsGrounded(params: Record<string, Term>): boolean {

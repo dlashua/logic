@@ -7,7 +7,7 @@ import {
   unify,
   walk
 } from './core.ts'
-import { Goal } from './relations.ts';
+import { Goal, or } from './relations.ts';
 
 /**
  * A relation for tuple facts (array-based).
@@ -93,12 +93,12 @@ export function makeFacts(): FactRelation {
     };
   }
 
-  const relation = (...query: Term[]): Goal => goalFn(...query);
+  // const relation = (...query: Term[]): Goal => goalFn(...query);
 
   /**
      * Add a fact (tuple) to the relation.
      */
-  relation.set = (...fact: Term[]) => {
+  goalFn.set = (...fact: Term[]) => {
     const factIndex = facts.length;
     facts.push(fact);
     fact.forEach((term, i) => {
@@ -118,9 +118,9 @@ export function makeFacts(): FactRelation {
     });
   };
 
-  relation.raw = facts;
-  relation.indexes = indexes;
-  return relation;
+  goalFn.raw = facts;
+  goalFn.indexes = indexes;
+  return goalFn;
 }
 
 /**
@@ -220,6 +220,41 @@ export function makeFactsObj(keys: string[]): FactObjRelation {
   relation.indexes = indexes;
   relation.keys = keys;
   return relation;
+}
+
+// --- Symmetric tuple-based fact relation (query-time symmetry) ---
+export function makeFactsSym(): FactRelation {
+  const orig = makeFacts();
+  const symGoal = (...query: Term[]): Goal => {
+    if (query.length === 2) {
+      return or(orig(...query), orig(query[1], query[0]));
+    } else {
+      return orig(...query);
+    }
+  };
+  symGoal.set = orig.set;
+  symGoal.raw = orig.raw;
+  symGoal.indexes = orig.indexes;
+  // Object.assign(symGoal, orig);
+  return symGoal as FactRelation;
+}
+
+// --- Symmetric object-based fact relation (query-time symmetry) ---
+export function makeFactsObjSym(keys: string[]): FactObjRelation {
+  const orig = makeFactsObj(keys);
+  const symGoal = (queryObj: Record<string, Term>): Goal => {
+    if (keys.length === 2) {
+      const [k1, k2] = keys;
+      const swapped: Record<string, Term> = {};
+      swapped[k1] = queryObj[k2];
+      swapped[k2] = queryObj[k1];
+      return or(orig(queryObj), orig(swapped));
+    } else {
+      return orig(queryObj);
+    }
+  };
+  Object.assign(symGoal, orig);
+  return symGoal as FactObjRelation;
 }
 
 // --- Helpers ---

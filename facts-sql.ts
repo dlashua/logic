@@ -2,7 +2,7 @@ import type { Knex } from "knex";
 // eslint-disable-next-line import/no-named-as-default
 import knex from "knex";
 import type { Subst, Term } from "./core.ts";
-import { isVar, unify, walk } from "./core.ts";
+import { isNotVar, isVar, unify, walk } from "./core.ts";
 
 let runcnt = 0;
 const mutelog = [
@@ -337,8 +337,7 @@ export const makeRelDB = async (
     yield* runPatterns(0, s);
   };
 
-  const rel = async (table: string, primaryKey = "id") => {
-    await Promise.resolve(null);
+  const rel = async (table: string) => {
     return function goal(queryObj: Record<string, Term>) {
       const myruncnt = runcnt++;
       log("STARTING GOAL", {
@@ -412,8 +411,100 @@ export const makeRelDB = async (
     };
   };
 
+  // --- Symmetric SQL relation ---
+  // relSym: requires explicit [key1, key2] argument for symmetric keys
+  const relSym = async (table: string, keys: [string, string]) => {
+    return function goal(queryObj: Record<string, Term<string | number>>) {
+      const values = Object.values(queryObj);
+      return async function* (s: Subst) {
+        // sym relationships are only binary
+        if (values.length > 2) return;
+
+        const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
+
+        // sym relationships can't point to themselves
+        if(walkedValues[0] === walkedValues[1]) return;
+
+        // cheating type because I don't know another way to do this
+        const gv = walkedValues.filter(x => !isVar(x)) as (string | number)[];
+
+        async function cacheOrQuery(
+          table: string, 
+          keys: string[], 
+          gv: (string | number)[], 
+          getFn: () => Promise<{rows: Record<string, any>[], queryString: string}>
+        ) {
+          const cacheKeyObj = {
+            table,
+            select: keys,
+            where: gv,
+            sym: true,
+          };
+          const cacheKey = JSON.stringify(cacheKeyObj);
+          if (state.recordCache.has(cacheKey)) {
+            const sqlQuery = `CACHE HIT ${cacheKey}`;
+            state.queries.push(sqlQuery);
+            state.cacheQueries.push(sqlQuery);
+            return state.recordCache.get(cacheKey);
+          } else {
+            const { rows, queryString } = await getFn();
+
+            log("QUERY", {
+              sql: queryString,
+            });
+            state.queries.push(queryString);
+            state.realQueries.push(queryString);
+            state.recordCache.set(cacheKey, rows);
+            return rows;
+          }
+        }
+        
+        const rows = await cacheOrQuery(table, keys, gv, async () =>{
+          const k = db(table).select(keys).where(
+            (q) => gv.map(onegv => q.andWhere(
+              (q) => keys.map(onekey => q.orWhere(
+                (q) => q.where(onekey, onegv)
+              ))
+            ))
+          );
+
+          const queryString = k.toString();
+          const rows = await k;
+          return {
+            rows,
+            queryString 
+          };
+        });
+        for (const row of rows) {
+          // NOT unifying ground values doesn't increase performance
+          // skip this
+          //
+          // if (gv.length === 2) {
+          //   if (keys.every(k => gv.includes(row[k]))) {
+          //     yield s;
+          //   }
+          //   continue;
+          // }
+          let s2: Subst = new Map(s);
+          let ok = true;
+          for (const col of keys) {
+            const unified = await unify(queryObj[col], row[col], s2);
+            if (unified) {
+              s2 = unified;
+            } else {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) yield s2;
+        }
+      };
+    };
+  };
+
   return {
     rel,
+    relSym,
     db,
     run,
     queries: state.queries,

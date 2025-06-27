@@ -76,7 +76,8 @@ export const parentAgg = Rel(function parentAgg (k, p) {
 
 // Helper: succeeds if a is in a relationship with b or b with a
 export const relationshipEitherWay = Rel((a: Term, b: Term) => {
-  return or(relationship(a, b), relationship(b, a));
+  // return or(relationship(a, b), relationship(b, a));
+  return relationship(a,b);
 });
 
 export const stepParentOf = Rel((kid: any, stepparent: any) => {

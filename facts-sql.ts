@@ -7,27 +7,27 @@ import { isVar, unify, walk } from "./core.ts";
 let runcnt = 0;
 
 // --- Logging configuration ---
-const LOG_ENABLED = false; // Set to true to enable logging globally
+const LOG_ENABLED = true; // Set to true to enable logging globally
 const LOG_IDS = new Set<string>([
-  // Add log identifiers here to enable them, e.g.:
-  // "PATTERNS BEFORE CHECK",
-  // "WORKING PATTERN",
-  // "TABLE NOT IN PATTERNS. NEED RUN.",
-  // "ADDING PATTERN",
-  // "MERGING PATTERN",
-  // "TABLE IN PATTERNS. NO RUN.",
-  // "SKIPPING QUERY",
-  // "ROW RETURNED",
-  // "RUNNING GOAL",
-  // "GOAL RUN FINISHED",
-  // "QUERY",
-  // "STARTING GOAL",
-  // "YIELD THROUGH",
-  // "YIELD",
-  // "NO YIELD",
-  // "UNIFY",
-  // "AFTER WALK",
-  // "NO UNIFY (grounded mismatch)",
+  // Add log identifiers here to disable them, e.g.:
+  "PATTERNS BEFORE CHECK",
+  "WORKING PATTERN",
+  "TABLE NOT IN PATTERNS. NEED RUN.",
+  "ADDING PATTERN",
+  "MERGING PATTERN",
+  "TABLE IN PATTERNS. NO RUN.",
+  "SKIPPING QUERY",
+  "ROW RETURNED",
+  "RUNNING GOAL",
+  "GOAL RUN FINISHED",
+  "QUERY",
+  "STARTING GOAL",
+  "YIELD THROUGH",
+  "YIELD",
+  "NO YIELD",
+  "UNIFY",
+  "AFTER WALK",
+  "NO UNIFY (grounded mismatch)",
 ]);
 
 /**
@@ -39,7 +39,7 @@ function log(
   ...args: Record<string, unknown>[]
 ) {
   if (!LOG_ENABLED) return;
-  if (!LOG_IDS.has(id)) return;
+  if (LOG_IDS.has(id)) return;
   if (args.length === 0) {
     console.dir(
       {
@@ -348,8 +348,14 @@ export const makeRelDB = async (
           row,
           myruncnt: myruncnt ?? 'N/A',
         });
-        // Use unifyRowWithWalkedQ helper for unification
-        const unifiedSubst = await unifyRowWithWalkedQ(selectCols, walkedQ, row, subst, myruncnt);
+        // Use unifyRowWithWalkedQ helper for unification and memoization
+        const unifiedSubst = await unifyRowWithWalkedQ(
+          selectCols,
+          walkedQ,
+          row,
+          subst,
+          myruncnt,
+        );
         if (unifiedSubst) {
           yield* runPatterns(idx + 1, unifiedSubst);
         }
@@ -544,7 +550,7 @@ async function unifyRowWithWalkedQ(
   walkedQ: Record<string, Term>,
   row: Record<string, any>,
   subst: Subst,
-  myruncnt?: number
+  myruncnt?: number,
 ): Promise<Subst | null> {
   let s2: Subst = new Map(subst);
   for (const col of selectCols) {
@@ -599,6 +605,14 @@ function arePatternsCompatible(patParams: Record<string, Term>, walkedQ: Record<
     } else if (!isVar(vPat) && vPat !== vNew) {
       return false;
     }
+  }
+  return true;
+}
+
+// Helper: check if all query parameters are grounded (no variables)
+function allParamsGrounded(params: Record<string, Term>): boolean {
+  for (const key in params) {
+    if (isVar(params[key])) return false;
   }
   return true;
 }

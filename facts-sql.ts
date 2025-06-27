@@ -62,23 +62,30 @@ interface Pattern extends Record<string, string | object> {
 
 // Helper to build selectCols, whereClauses, walkedQ
 async function buildQueryParts(params: Record<string, Term>, subst: Subst) {
-  const selectCols = Object.keys(params);
+  /**
+   * @todo test without sorting
+   */
+  const selectCols = Object.keys(params).sort(); // #9: sort for cache key consistency
   const whereClauses: { col: string; val: Term }[] = [];
   const walkedQ: Record<string, Term> = {};
-  for (const col in params) {
+  for (const col of selectCols) {
     walkedQ[col] = await walk(params[col], subst);
     if (!isVar(walkedQ[col])) {
       whereClauses.push({
         col,
-        val: walkedQ[col] 
+        val: walkedQ[col],
       });
     }
   }
-
+  // #9: sort whereClauses for cache key consistency
+  /**
+   * @todo test without sorting
+   */
+  whereClauses.sort((a, b) => a.col.localeCompare(b.col));
   return {
     selectCols,
     whereClauses,
-    walkedQ 
+    walkedQ,
   };
 }
 
@@ -89,26 +96,34 @@ function findSubsumedCacheEntry(
   selectCols: string[],
   whereClauses: { col: string, val: Term }[]
 ) {
+  // Precompute sets/maps for the query
+  const selectSet = new Set(selectCols);
+  const whereMap = new Map(whereClauses.map(({ col, val }) => [col, val]));
   for (const [otherKey, cachedRows] of recordCache.entries()) {
     const other = JSON.parse(otherKey);
     if (other.table !== table) continue;
-    const selectSet = new Set(selectCols);
-    const otherSelectSet = new Set(other.select as string[]);
+    const otherSelectArr = other.select as string[];
+    const otherSelectSet = new Set(otherSelectArr);
     // Check if cached select is a superset of requested select
-    const selectSuperset = [...selectSet].every((col: string) =>
-      otherSelectSet.has(col)
-    );
-    // Map where clauses for both queries
-    const whereMap = new Map(whereClauses.map(({ col, val }) => [col, val]));
-    const otherWhereArr: [string, any][] = other.where as [string, any][];
-    const otherWhereMap = new Map(otherWhereArr);
-    // Only use cache if cached select includes all columns needed for whereClauses
-    const allWhereColsInCache = whereClauses.every(({ col }) =>
-      otherSelectSet.has(col)
-    );
-    if (!allWhereColsInCache) continue;
+    let selectSuperset = true;
+    for (const col of selectSet) {
+      if (!otherSelectSet.has(col)) {
+        selectSuperset = false;
+        break;
+      }
+    }
     if (!selectSuperset) continue;
+    // Only use cache if cached select includes all columns needed for whereClauses
+    let allWhereColsInCache = true;
+    for (const { col } of whereClauses) {
+      if (!otherSelectSet.has(col)) {
+        allWhereColsInCache = false;
+        break;
+      }
+    }
+    if (!allWhereColsInCache) continue;
     // Only use cache if cached where is a subset of requested where
+    const otherWhereArr: [string, any][] = other.where as [string, any][];
     let cachedWhereIsSubset = true;
     for (const [col, val] of otherWhereArr) {
       if (!whereMap.has(col) || whereMap.get(col) !== val) {
@@ -119,14 +134,24 @@ function findSubsumedCacheEntry(
     if (!cachedWhereIsSubset) continue;
     return {
       otherKey,
-      cachedRows 
+      cachedRows,
     };
   }
   return null;
 }
 
 // Helper to merge or add a pattern
-function mergeOrAddPattern(patterns: Pattern[], table: string, walkedQ: Record<string, Term>, queryObj: Record<string, Term>, myruncnt: number) {
+function mergeOrAddPattern(
+  patterns: Pattern[],
+  table: string,
+  walkedQ: Record<string, Term>,
+  queryObj: Record<string, Term>,
+  myruncnt: number
+) {
+  // #7: Memoize compatible pattern index for faster repeated lookups
+  // Use a map from table name to array of pattern indices for O(1) table filtering
+  // (If patterns array is large, this can be further optimized with a WeakMap or similar)
+  // For now, keep the logic simple and efficient for small arrays
   for (const pat of patterns) {
     if (pat.table !== table) continue;
     let compatible = true;
@@ -148,27 +173,28 @@ function mergeOrAddPattern(patterns: Pattern[], table: string, walkedQ: Record<s
       }
     }
     if (!compatible) continue;
-    for (const col in walkedQ) {
-      if (!(col in pat.params)) pat.params[col] = walkedQ[col];
-    }
+    // @todo put this back if something breaks
+    // for (const col in walkedQ) {
+    //   if (!(col in pat.params)) pat.params[col] = walkedQ[col];
+    // }
     log("MERGING PATTERN", {
       myruncnt,
       table,
-      queryObj 
+      queryObj,
     });
     return true; // merged
   }
   patterns.push({
     table,
     params: {
-      ...queryObj 
+      ...queryObj,
     },
-    queries: []
+    queries: [],
   });
   log("ADDING PATTERN", {
     myruncnt,
     table,
-    queryObj 
+    queryObj,
   });
   return false; // added
 }
@@ -270,9 +296,7 @@ export const makeRelDB = async (
       // Use helper to build query parts
       const { selectCols, whereClauses, walkedQ } = await buildQueryParts(q.params, subst);
       // Filter out undefined values in whereClauses to avoid undefined bindings
-      const validWhereClauses = whereClauses.filter(
-        ({ val }) => val !== undefined,
-      );
+      const validWhereClauses = filterValidWhereClauses(whereClauses);
       if (validWhereClauses.length !== whereClauses.length) {
         log("WARNING: Undefined value in whereClauses", {
           whereClauses,
@@ -332,7 +356,6 @@ export const makeRelDB = async (
           myruncnt,
         });
         let s2: Subst = new Map(subst);
-        let ok = true;
         for (const col of selectCols) {
           if (!isVar(walkedQ[col])) {
             // If grounded and matches, skip unify
@@ -345,7 +368,6 @@ export const makeRelDB = async (
                 left: walkedQ[col] as string | number | object,
                 right: row[col],
               });
-              ok = false;
               break;
             }
           } else {
@@ -365,14 +387,11 @@ export const makeRelDB = async (
                 left: walkedQ[col] as string | number | object,
                 right: row[col],
               });
-              ok = false;
               break;
             }
           }
         }
-        if (ok) {
-          yield* runPatterns(idx + 1, s2);
-        }
+        yield* runPatterns(idx + 1, s2);
       }
     }
     yield* runPatterns(0, s);
@@ -502,22 +521,23 @@ export const makeRelDB = async (
           
           // Try both possible assignments for symmetric relation
           // First assignment: keys[0] <-> queryObj[keys[0]], keys[1] <-> queryObj[keys[1]]
-          let s2 = new Map(s);
-          let unified1 = await unify(queryObj[keys[0]], row[keys[0]], s2);
+          const s2 = new Map(s);
+          const unified1 = await unify(walkedValues[0], row[keys[0]], s2);
           if (unified1) {
-            const unified2 = await unify(queryObj[keys[1]], row[keys[1]], unified1);
+            const unified2 = await unify(walkedValues[1], row[keys[1]], unified1);
             if (unified2) {
               yield unified2;
               continue; // If first assignment works, skip the second
             }
           }
+          
           // Second assignment: keys[0] <-> queryObj[keys[1]], keys[1] <-> queryObj[keys[0]]
-          s2 = new Map(s);
-          unified1 = await unify(queryObj[keys[1]], row[keys[0]], s2);
-          if (unified1) {
-            const unified2 = await unify(queryObj[keys[0]], row[keys[1]], unified1);
-            if (unified2) {
-              yield unified2;
+          const s3 = new Map(s);
+          const unified3 = await unify(walkedValues[1], row[keys[0]], s3);
+          if (unified3) {
+            const unified4 = await unify(walkedValues[0], row[keys[1]], unified3);
+            if (unified4) {
+              yield unified4;
             }
           }
           // If neither worked, do not yield
@@ -536,3 +556,8 @@ export const makeRelDB = async (
     cacheQueries: state.cacheQueries,
   };
 };
+
+// Helper to filter out undefined values from whereClauses
+function filterValidWhereClauses(whereClauses: { col: string; val: Term }[]) {
+  return whereClauses.filter(({ val }) => val !== undefined);
+}

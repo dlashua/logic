@@ -217,6 +217,25 @@ export function Rel<F extends (...args: any) => any>(
   fn: F,
 ): (...args: Parameters<F>) => ProfilableGoal {
   return (...args: Parameters<F>) => {
+    const goal = async function* relGoal(s: Subst) {
+      // Walk all arguments with the current substitution
+      const walkedArgs = await Promise.all(args.map(arg => walk(arg, s)));
+      // Call the underlying relation function with grounded arguments
+      const subgoal = fn(...walkedArgs);
+      for await (const s1 of subgoal(s)) yield s1;
+    };
+    // Always set a custom property for the logical name
+    if (typeof goal === "function" && fn.name) {
+      (goal as any).__logicName = fn.name;
+    }
+    return maybeProfile(goal);
+  };
+}
+
+export function OldRel<F extends (...args: any) => any>(
+  fn: F,
+): (...args: Parameters<F>) => ProfilableGoal {
+  return (...args: Parameters<F>) => {
     const goal = fn(...args);
     // Always set a custom property for the logical name
     if (typeof goal === "function" && fn.name) {

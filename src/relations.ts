@@ -19,13 +19,8 @@ export type Goal = (s: Subst) => AsyncGenerator<Subst>;
  */
 export function eq(u: Term, v: Term) {
   const goal = async function* eq (s: Subst) {
-    const ctx = s.get(CTX_SYM);
-    const s2 = await unify(u, v, s);
-    if (ctx?.mode === "collect") {
-      // In collect mode, always yield (even if s2 is null) to ensure subgoals fire
-      yield s2 ?? s;
-    } else {
-      if (s2) yield s2;
+    for await (const s2 of unifyGenerator(u, v, s)) {
+      yield s2;
     }
   };
   return maybeProfile(goal);
@@ -52,16 +47,11 @@ export function fresh(f: (...vars: Var[]) => Goal) {
  */
 export function disj(g1: Goal, g2: Goal) {
   const goal = async function* disj (s: Subst) {
-    const ctx = s.get(CTX_SYM);
-    if (ctx?.mode === "collect") {
-      // In collect mode, always run both subgoals
-      for await (const _ of g1(s)) {/* ignore */}
-      for await (const _ of g2(s)) {/* ignore */}
-      yield s;
-    } else {
-      for await (const s2 of g1(s)) yield s2;
-      for await (const s2 of g2(s)) yield s2;
-    }
+    yield* g1(s);
+      
+    yield* g2(s);
+  
+    
   };
   return maybeProfile(goal);
 }
@@ -71,18 +61,10 @@ export function disj(g1: Goal, g2: Goal) {
  */
 export function conj(g1: Goal, g2: Goal) {
   const goal = async function* conj (s: Subst) {
-    const ctx = s.get(CTX_SYM);
-    if (ctx?.mode === "collect") {
-      // In collect mode, always run both subgoals for all possible paths
-      for await (const s1 of g1(s)) {
-        for await (const _ of g2(s1)) {/* ignore */}
-      }
-      yield s;
-    } else {
-      for await (const s1 of g1(s)) {
-        for await (const s2 of g2(s1)) yield s2;
-      }
+    for await (const s1 of g1(s)) {
+      yield* g2(s1);
     }
+    
   };
   return maybeProfile(goal);
 }
@@ -148,8 +130,7 @@ export const mapRel = <F extends (...args: any) => any>(fn: F) => {
     const outVal = vals[vals.length - 1];
     if (inVals.every((v) => typeof v !== "undefined" && !isVar(v))) {
       const result = fn(...(inVals as Parameters<F>));
-      const s2 = await unify(outVal, result, s);
-      if (s2) yield s2;
+      yield* unifyGenerator(outVal, result, s);
     }
   });
 };
@@ -181,8 +162,7 @@ export const mapInlineLazy = <F extends (...args: any) => any>(
       const result = fn(
         ...(await Promise.all(inArgs.map((arg) => walk(arg, s)))),
       );
-      const s2 = await unify(outVar, result, s);
-      if (s2) yield s2;
+      yield* unifyGenerator(outVar, result, s);
     }
   });
 };
@@ -429,4 +409,9 @@ export function maybeProfile(goal: Goal | ProfilableGoal): ProfilableGoal {
   if (LOGIC_PROFILING_ENABLED) return wrapGoalForProfiling(goal);
   (goal as ProfilableGoal).__isProfilable = true;
   return goal as ProfilableGoal;
+}
+
+async function* unifyGenerator(u: Term, v: Term, s: Subst) {
+  const result = await unify(u, v, s);
+  if (result !== null) yield result;
 }

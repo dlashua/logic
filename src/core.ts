@@ -30,7 +30,20 @@ export function resetVarCounter() {
  * Now supports thunks for lazy evaluation.
  */
 export type Thunk = () => Term;
-export type Term<T = unknown> = Var | T | Term<T>[] | Thunk | null | undefined;
+
+/**
+ * A goal is a function that takes a substitution and returns a stream of substitutions.
+ */
+export type Goal = (s: Subst) => AsyncGenerator<Subst, void, unknown>;
+
+
+export type Term<T = unknown> =
+  | Var
+  | T
+  | Term<T>[]
+  | Thunk
+  | null
+  | undefined;
 
 /**
  * Substitution: mapping from variable id or symbol to value
@@ -55,11 +68,7 @@ export function isVar(x: Term): x is Var {
  */
 export async function walk(u: Term, s: Subst): Promise<Term> {
   if (isVar(u) && s.has(u.id)) {
-    let v = s.get(u.id)!;
-    // Evaluate thunks until we get a non-thunk
-    while (typeof v === "function") {
-      v = await (v as Thunk | AsyncThunk)();
-    }
+    const v = s.get(u.id)!;
     return walk(v, s);
   }
   // Handle logic lists
@@ -78,7 +87,6 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
     return Promise.all(u.map((x) => walk(x, s)));
   }
   if (u && typeof u === "object" && !isVar(u)) {
-    // Recursively walk object properties (but not null)
     const out: Record<string, Term> = {};
     for (const k in u) {
       if (Object.hasOwn(u, k)) {
@@ -90,8 +98,6 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
   return u;
 }
 
-export type AsyncThunk = () => Promise<Term>;
-
 /**
  * Unification: attempts to unify two terms under a substitution.
  */
@@ -99,6 +105,7 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
   const ctx = s.get(CTX_SYM);
   u = await walk(u, s);
   v = await walk(v, s);
+
   if (isVar(u)) {
     return await extendSubst(u, v, s);
   } else if (isVar(v)) {
@@ -107,7 +114,6 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
     for (let i = 0; i < u.length; i++) {
       const sNext = await unify(u[i], v[i], s);
       if (!sNext) {
-        if (ctx?.mode === "collect") continue; // In collect mode, keep going
         return null;
       }
       s = sNext;
@@ -125,7 +131,6 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
     if ((u as any).tag === "cons" && (v as any).tag === "cons") {
       const s1 = await unify((u as any).head, (v as any).head, s);
       if (!s1) {
-        if (ctx?.mode === "collect") return s; // In collect mode, keep going
         return null;
       }
       return await unify((u as any).tail, (v as any).tail, s1);

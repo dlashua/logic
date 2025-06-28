@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx --watch ./src/test/quick-test.ts"
   },
   "keywords": [],
   "author": "",

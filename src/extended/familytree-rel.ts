@@ -10,8 +10,8 @@ import {
   neq_C,
   not,
   or,
-} from "./relations.ts";
-import type { ProfiledGoal, ProfilableGoal } from "./relations.ts";
+} from "../relations.ts";
+import type { ProfiledGoal, ProfilableGoal } from "../relations.ts";
 
 let parent_kid = (p: Term, k: Term): Goal => {
   throw "must set parent_kid";

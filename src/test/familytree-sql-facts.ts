@@ -1,16 +1,16 @@
+import { resolve } from "path";
+import { fileURLToPath } from 'url';
 import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
-// import { makeRelDB } from "../facts-sql-optimized.ts";
 import { makeRelDB } from "../facts-sql.ts";
-
 import { Term } from "../core.ts"
 import { maybeProfile, Rel } from "../relations.ts";
 
-
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export const relDB = await makeRelDB({
   client: "better-sqlite3",
   connection: {
-    filename: "./family.db",
+    filename: resolve(__dirname, "../../data/family.db"),
   },
   useNullAsDefault: true,
 }, { 

@@ -1,13 +1,7 @@
 // Relation helpers for MiniKanren-style logic programming
 
 import type { Subst, Term, Var } from "./core.ts";
-import {
-  isVar,
-  lvar,
-  unify,
-  walk,
-  CTX_SYM
-} from "./core.ts"
+import { isVar, lvar, unify, walk } from "./core.ts"
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -19,9 +13,7 @@ export type Goal = (s: Subst) => AsyncGenerator<Subst>;
  */
 export function eq(u: Term, v: Term) {
   const goal = async function* eq (s: Subst) {
-    for await (const s2 of unifyGenerator(u, v, s)) {
-      yield s2;
-    }
+    yield* unifyGenerator(u,v,s);
   };
   return maybeProfile(goal);
 }
@@ -130,6 +122,7 @@ export const mapRel = <F extends (...args: any) => any>(fn: F) => {
     const outVal = vals[vals.length - 1];
     if (inVals.every((v) => typeof v !== "undefined" && !isVar(v))) {
       const result = fn(...(inVals as Parameters<F>));
+      // yield* unifyGenerator(outVal, result, s);
       yield* unifyGenerator(outVal, result, s);
     }
   });
@@ -162,6 +155,7 @@ export const mapInlineLazy = <F extends (...args: any) => any>(
       const result = fn(
         ...(await Promise.all(inArgs.map((arg) => walk(arg, s)))),
       );
+      // yield* unifyGenerator(outVar, result, s);
       yield* unifyGenerator(outVar, result, s);
     }
   });
@@ -251,14 +245,6 @@ export function ___Rel<F extends (...args: any) => any>(
  */
 export function not(goal: Goal): Goal {
   const g = async function* not (s: Subst) {
-    const ctx = s.get(CTX_SYM);
-    if (ctx?.mode === "collect") {
-      // In collect mode, always run both subgoals
-      for await (const _ of goal(s)) {/* ignore */}
-      yield s;
-      return
-    } 
-
     for await (const _ of goal(s)) return;
     yield s;
   };

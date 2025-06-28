@@ -102,7 +102,6 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
  * Unification: attempts to unify two terms under a substitution.
  */
 export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
-  const ctx = s.get(CTX_SYM);
   u = await walk(u, s);
   v = await walk(v, s);
 

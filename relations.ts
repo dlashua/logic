@@ -1,7 +1,13 @@
 // Relation helpers for MiniKanren-style logic programming
 
 import type { Subst, Term, Var } from "./core.ts";
-import { isVar, lvar, unify, walk } from "./core.ts"
+import {
+  isVar,
+  lvar,
+  unify,
+  walk,
+  CTX_SYM
+} from "./core.ts"
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -13,8 +19,14 @@ export type Goal = (s: Subst) => AsyncGenerator<Subst>;
  */
 export function eq(u: Term, v: Term) {
   const goal = async function* eq (s: Subst) {
+    const ctx = s.get(CTX_SYM);
     const s2 = await unify(u, v, s);
-    if (s2) yield s2;
+    if (ctx?.mode === "collect") {
+      // In collect mode, always yield (even if s2 is null) to ensure subgoals fire
+      yield s2 ?? s;
+    } else {
+      if (s2) yield s2;
+    }
   };
   return maybeProfile(goal);
 }
@@ -40,8 +52,16 @@ export function fresh(f: (...vars: Var[]) => Goal) {
  */
 export function disj(g1: Goal, g2: Goal) {
   const goal = async function* disj (s: Subst) {
-    for await (const s2 of g1(s)) yield s2;
-    for await (const s2 of g2(s)) yield s2;
+    const ctx = s.get(CTX_SYM);
+    if (ctx?.mode === "collect") {
+      // In collect mode, always run both subgoals
+      for await (const _ of g1(s)) {/* ignore */}
+      for await (const _ of g2(s)) {/* ignore */}
+      yield s;
+    } else {
+      for await (const s2 of g1(s)) yield s2;
+      for await (const s2 of g2(s)) yield s2;
+    }
   };
   return maybeProfile(goal);
 }
@@ -51,8 +71,17 @@ export function disj(g1: Goal, g2: Goal) {
  */
 export function conj(g1: Goal, g2: Goal) {
   const goal = async function* conj (s: Subst) {
-    for await (const s1 of g1(s)) {
-      for await (const s2 of g2(s1)) yield s2;
+    const ctx = s.get(CTX_SYM);
+    if (ctx?.mode === "collect") {
+      // In collect mode, always run both subgoals for all possible paths
+      for await (const s1 of g1(s)) {
+        for await (const _ of g2(s1)) {/* ignore */}
+      }
+      yield s;
+    } else {
+      for await (const s1 of g1(s)) {
+        for await (const s2 of g2(s1)) yield s2;
+      }
     }
   };
   return maybeProfile(goal);
@@ -223,6 +252,14 @@ export function ___Rel<F extends (...args: any) => any>(
  */
 export function not(goal: Goal): Goal {
   const g = async function* not (s: Subst) {
+    const ctx = s.get(CTX_SYM);
+    if (ctx?.mode === "collect") {
+      // In collect mode, always run both subgoals
+      for await (const _ of goal(s)) {/* ignore */}
+      yield s;
+      return
+    } 
+
     for await (const _ of goal(s)) return;
     yield s;
   };

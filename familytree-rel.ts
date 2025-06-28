@@ -63,6 +63,8 @@ export const anyParentOf = Rel((v, p) => {
 
 export const anyKidOf = Rel((p, v) => {
   return or(stepKidOf(p, v), parentOf(v, p));
+  // return or(parentOf(v, p), parentOf(v, p));
+
 });
 
 export const kidOf = Rel((p, v) => {

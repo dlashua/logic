@@ -32,7 +32,9 @@ export async function* formatSubstitutions<
         out[key] = v;
       }
     }
-    yield deepWalk(out);
+    const res = deepWalk(out);
+    // res.__s__ = s;
+    yield res;
   }
 }
 

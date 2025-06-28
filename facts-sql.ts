@@ -1,39 +1,51 @@
 import type { Knex } from "knex";
 // eslint-disable-next-line import/no-named-as-default
 import knex from "knex";
-import type { Subst, Term } from "./core.ts";
-import { isVar, unify, walk } from "./core.ts";
+import {
+  Subst,
+  Term,
+  CTX_SYM,
+  isVar,
+  unify,
+  walk
+} from "./core.ts";
 
 let runcnt = 0;
 
 const DISABLE_CACHE = false;
-const DISABLE_SUBSUME = false;
+const DISABLE_SUBSUME = true;
 const DISABLE_PATTERN_MERGE = false;
 const AUTO_RUN = true;
 
 // --- Logging configuration ---
-const LOG_ENABLED = false; // Set to true to enable logging globally
+const LOG_ENABLED = true; // Set to true to enable logging globally
 const LOG_IDS = new Set<string>([
   // Add log identifiers here to disable them, e.g.:
-  "PATTERNS BEFORE CHECK",
+  // "PATTERNS BEFORE CHECK",
   "WORKING PATTERN",
-  "TABLE NOT IN PATTERNS. NEED RUN.",
-  "ADDING PATTERN",
-  "MERGING PATTERN",
-  "TABLE IN PATTERNS. NO RUN.",
-  "SKIPPING QUERY",
+  "NO PATTERNS",
+  // "TABLE NOT IN PATTERNS. NEED RUN.",
+  // "ADDING PATTERN",
+  // "MERGING PATTERN",
+  // "TABLE IN PATTERNS. NO RUN.",
+  // "SKIPPING QUERY",
   "ROW RETURNED",
+  "NO ROWS",
   "RUNNING GOAL",
-  "GOAL RUN FINISHED",
+  // "GOAL RUN FINISHED",
   "QUERY",
-  "STARTING GOAL",
-  "YIELD THROUGH",
+  // "STARTING GOAL",
+  "YIELD PATTERN",
+  // "GHOST PATTERNS",
+  // "YIELD THROUGH",
   "YIELD",
   "NO YIELD",
   "UNIFY",
-  "AFTER WALK",
-  "NO UNIFY (grounded mismatch)",
-  "PATTERNS_BEFORE_RUN",
+  "START RUN",
+  "FIRST RUN",
+  // "AFTER WALK",
+  // "NO UNIFY (grounded mismatch)",
+  // "PATTERNS_BEFORE_RUN",
 ]);
 
 /**
@@ -79,10 +91,19 @@ function log(
 }
 
 // Pattern interface at top-level for clarity
-interface Pattern extends Record<string, string | object> {
+interface Pattern {
   table: string;
   params: Record<string, Term>;
   queries: string[];
+  myruncnt: number;
+  mergedRunCnts: number[];
+  [key: string]: any; // allow extra properties
+}
+
+function hideCtx(s) {
+  const w = new Map(s);
+  w.delete(CTX_SYM);
+  return w;
 }
 
 // Helper: walk all params and collect walkedQ and whereClauses
@@ -175,40 +196,46 @@ async function mergeOrAddPattern(
   table: string,
   queryObj: Record<string, Term>,
   subst: Subst,
+  myruncnt: number
 ) {
   const walkedQ = await walkAllKeys(queryObj, subst);
-  if(!DISABLE_PATTERN_MERGE) {
-    pattern_loop: for (const pat of patterns) {
-      if (pat.table !== table) continue;
-  
-      if(!allParamsGrounded(pat.params)) {
-        pat.params = await walkAllKeys(pat.params, subst);
-      }
-  
-      // arePatternsCompatible FN
+  if (!DISABLE_PATTERN_MERGE) {
+    for (const pat of patterns) {
+      if (pat.table !== table) continue; // next pattern
+      // Check compatibility: for all overlapping columns, values must match (including var identity)
+      let compatible = true;
       for (const col in pat.params) {
-        if (!(col in walkedQ)) continue;
-        const vPat = pat.params[col];
-        const vNew = walkedQ[col];
-        if (isVar(vPat) && isVar(vNew)) {
-          if (vPat.id !== vNew.id) {
-            continue pattern_loop;
+        if (col in walkedQ) {
+          const vPat = pat.params[col];
+          const vNew = walkedQ[col];
+          if (isVar(vPat) && isVar(vNew)) {
+            if (vPat.id !== vNew.id) {
+              compatible = false;
+              break; // next column
+            }
+          } else if (isVar(vPat) !== isVar(vNew)) {
+            compatible = false;
+            break; // next column
+          } else if (!isVar(vPat) && vPat !== vNew) {
+            compatible = false;
+            break; // next column
           }
-        } else if (isVar(vPat) !== isVar(vNew)) {
-          continue pattern_loop;
-        } else if (!isVar(vPat) && vPat !== vNew) {
-          continue pattern_loop;
         }
       }
-      
-      // Merge walkedQ into pat.params, preferring existing non-variable values
+      if (!compatible) continue; // next pattern
+      // Merge: for each col in walkedQ, if pat.params[col] is a var and walkedQ[col] is grounded, replace
       for (const col in walkedQ) {
-        if (!(col in pat.params) || isVar(pat.params[col])) {
+        if (!(col in pat.params) || (isVar(pat.params[col]) && !isVar(walkedQ[col]))) {
           pat.params[col] = walkedQ[col];
         }
       }
-      // Optionally, merge queries if needed (not shown here)
-      return true; 
+      // Merge myruncnt and mergedRunCnts
+      pat.mergedRunCnts = pat.mergedRunCnts || [pat.myruncnt];
+      if (!pat.mergedRunCnts.includes(myruncnt)) {
+        pat.mergedRunCnts.push(myruncnt);
+      }
+      pat.myruncnt = Math.min(pat.myruncnt, myruncnt);
+      return true;
     }
   }
   patterns.push({
@@ -217,8 +244,9 @@ async function mergeOrAddPattern(
       ...walkedQ,
     },
     queries: [],
+    myruncnt,
+    mergedRunCnts: [myruncnt],
   });
-
   return false;
 }
 
@@ -312,6 +340,26 @@ export const makeRelDB = async (
         return;
       }
       const q = patterns[idx];
+      if(q.myruncnt !== myruncnt) {
+        const X = await walkAllKeys(q.params, subst)
+        if(allParamsGrounded(X)) {
+          const XY = await unifyRowWithWalkedQ(
+            Object.keys(q.params),
+            q.params,
+            X,
+            subst,
+            myruncnt,
+          )
+          if(XY) {
+            yield* runPatterns(idx + 1, subst);
+            return
+          }
+          // yield subst
+          return;
+        }
+        return;
+      }
+      
       log("WORKING PATTERN", {
         ...q,
         myruncnt,
@@ -337,7 +385,7 @@ export const makeRelDB = async (
           // @ts-expect-error knex types are weird
           k = k.where(col, "=", val);
         }
-        const queryString = k.toString();
+        const queryString = `${myruncnt} ` + k.toString();
         const rows = await k;
         return {
           rows,
@@ -359,13 +407,21 @@ export const makeRelDB = async (
         }
         return null;
       };
-      const { rows } = await cacheOrQuery({
+      const { rows, queryString } = await cacheOrQuery({
         cacheKeyObj,
         getFn,
         subsumeFn,
       });
       // If no rows, skip yielding
       if (!rows || rows.length === 0) {
+        // const w = new Map(subst);
+        // w.delete(CTX_SYM);
+        log("NO ROWS", {
+          myruncnt,
+          queryString,
+          // s: w,
+          q,
+        });
         return;
       }
       // Unify all selectCols (undo optimization)
@@ -383,6 +439,10 @@ export const makeRelDB = async (
           myruncnt,
         );
         if (unifiedSubst) {
+          log("YIELD PATTERN", {
+            s: hideCtx(unifiedSubst),
+            myruncnt, 
+          })
           yield* runPatterns(idx + 1, unifiedSubst);
         }
         // If unification fails, do not yield
@@ -391,27 +451,105 @@ export const makeRelDB = async (
     yield* runPatterns(0, s);
   };
 
+  // Use a symbol key for Subst context object
+  const PATTERNS_SYM = Symbol.for("facts-sql:patterns");
+
   const rel = async (table: string) => {
     return function goal(queryObj: Record<string, Term>) {
       const myruncnt = runcnt++;
 
       return async function* factsSql (s: Subst) {
-        await mergeOrAddPattern(state.patterns, table, queryObj, s);
-        log("PATTERNS_BEFORE_RUN", {
-          table,
-          p: state.patterns 
-        })
+        // --- Two-pass context awareness ---
+        const ctx = s.get(CTX_SYM);
+        if (ctx && ctx.mode === "collect") {
+          ctx[PATTERNS_SYM] ??= [];
+          // Use mergeOrAddPattern to merge into ctx[PATTERNS_SYM] in collect phase
+          await mergeOrAddPattern(ctx[PATTERNS_SYM], table, queryObj, s, myruncnt);
+          // console.dir(s,{
+          //   depth: null 
+          // });
+          return;
+        }
+        // console.dir(s,{
+        //   depth: null 
+        // });
+        // In run phase, execute only the pattern(s) for this goal
+        const patterns = ctx?.[PATTERNS_SYM] ?? [];
 
-        if (AUTO_RUN) {
-          const thispatterns = [...state.patterns];
-          state.patterns.splice(0, state.patterns.length);
+        if (myruncnt === 0) {
+          log("FIRST RUN", {
+            patterns 
+          });
+        }
 
-          for await (const s3 of inner_run(s, thispatterns, myruncnt)) {
+        // Only run patterns with myruncnt <= this goal's myruncnt and not already run by this goal
+        // const relevantPatterns = patterns.filter((p: Pattern) => p.table === table && p.myruncnt === myruncnt);
+        const relevantPatterns = patterns.filter((p: Pattern) => p.table === table && p.mergedRunCnts.includes(myruncnt));
+
+        if (relevantPatterns.length > 0) {
+          log("START RUN", {
+            myruncnt,
+            // s 
+          });
+
+          let yielded = false;
+          for await (const s3 of inner_run(s, relevantPatterns, myruncnt)) {
+            yielded = true;
+            const w = new Map(s3);
+            w.delete(CTX_SYM);
+            log("YIELD", {
+              myruncnt,
+              // s: w, 
+            });
             yield s3;
           }
-        } else {
-          yield s;
+          if(!yielded) {
+            log("NO YIELD", {
+              myruncnt,
+              // s3 
+            });
+          }
+          return;;
         }
+
+
+
+        // If no relevant patterns, check if myruncnt is present in any mergedRunCnts
+        // if (patterns.some((p: Pattern) => p.table === table && p.mergedRunCnts?.includes(myruncnt))) {
+        //   // This goal's run count is already merged into another pattern, so just yield (no-op)
+        //   const walked = await walkAllKeys(queryObj, s);
+        //   unifyRowWithWalkedQ(Object.keys(queryObj), walked, row, s, myruncnt);
+        //   log("GHOST PATTERNS", {
+        //     myruncnt 
+        //   });
+        //   yield s;
+        //   return;
+        // }
+
+        log("NO PATTERNS", {
+          myruncnt 
+        });
+
+        return;
+
+
+
+
+        // fallback: merge into state.patterns and run as before
+        // await mergeOrAddPattern(state.patterns, table, queryObj, s);
+        // log("PATTERNS_BEFORE_RUN", {
+        //   table,
+        //   p: state.patterns 
+        // })
+        // if (AUTO_RUN) {
+        //   const thispatterns = [...state.patterns];
+        //   state.patterns.splice(0, state.patterns.length);
+        //   for await (const s3 of inner_run(s, thispatterns, myruncnt)) {
+        //     yield s3;
+        //   }
+        // } else {
+        //   yield s;
+        // }
       };
     };
   };
@@ -420,8 +558,28 @@ export const makeRelDB = async (
   // relSym: requires explicit [key1, key2] argument for symmetric keys
   const relSym = async (table: string, keys: [string, string]) => {
     return function goal(queryObj: Record<string, Term<string | number>>) {
+      const myruncnt = runcnt++;
       const values = Object.values(queryObj);
       return async function* (s: Subst) {
+        const ctx = s.get(CTX_SYM);
+        if (ctx && ctx.mode === "collect") {
+          return;
+        }
+
+        // --- Two-pass context awareness ---
+        // const ctx = s.get(CTX_SYM);
+        // if (ctx && ctx.mode === "collect") {
+        //   ctx[PATTERNS_SYM] ??= [];
+        //   await mergeOrAddPattern(ctx[PATTERNS_SYM], table, queryObj, s, myruncnt);
+        //   return;
+        // }
+        // const relevantPatterns = Array.from(getRelevantPatterns(ctx, table, myruncnt));
+        // if (relevantPatterns.length > 0) {
+        //   for await (const s3 of inner_run(s, relevantPatterns, myruncnt)) {
+        //     yield s3;
+        //   }
+        //   return;
+        // }
         // sym relationships are only binary
         if (values.length > 2) return;
         const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
@@ -443,7 +601,7 @@ export const makeRelDB = async (
               ))
             ))
           );
-          const queryString = k.toString();
+          const queryString = `S${myruncnt} ` + k.toString();
           const rows = await k;
           return {
             rows,
@@ -583,12 +741,7 @@ async function unifyRowWithWalkedQ(
       }
     }
   }
-  // Use walkAllKeys to check if all selectCols are grounded after unification
-  // const selectColsGrounded = await walkAllKeys(walkedQ, s2);
-  // if (allParamsGrounded(selectColsGrounded)) {
-  // Could be used for further optimizations or logging
-  // log("ALL SELECT COLS GROUNDED", { myruncnt, selectColsGrounded });
-  // }
+
   return s2;
 }
 

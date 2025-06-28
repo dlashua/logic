@@ -33,9 +33,9 @@ export type Thunk = () => Term;
 export type Term<T = unknown> = Var | T | Term<T>[] | Thunk | null | undefined;
 
 /**
- * Substitution: mapping from variable id to value
+ * Substitution: mapping from variable id or symbol to value
  */
-export type Subst = Map<string, Term<any>>;
+export type Subst = Map<string | symbol, Term<any>>;
 
 /**
  * Returns true if the value is a logic variable.
@@ -96,6 +96,7 @@ export type AsyncThunk = () => Promise<Term>;
  * Unification: attempts to unify two terms under a substitution.
  */
 export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
+  const ctx = s.get(CTX_SYM);
   u = await walk(u, s);
   v = await walk(v, s);
   if (isVar(u)) {
@@ -105,7 +106,10 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
   } else if (Array.isArray(u) && Array.isArray(v) && u.length === v.length) {
     for (let i = 0; i < u.length; i++) {
       const sNext = await unify(u[i], v[i], s);
-      if (!sNext) return null;
+      if (!sNext) {
+        if (ctx?.mode === "collect") continue; // In collect mode, keep going
+        return null;
+      }
       s = sNext;
     }
     return s;
@@ -120,7 +124,10 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
     // Logic list unification
     if ((u as any).tag === "cons" && (v as any).tag === "cons") {
       const s1 = await unify((u as any).head, (v as any).head, s);
-      if (!s1) return null;
+      if (!s1) {
+        if (ctx?.mode === "collect") return s; // In collect mode, keep going
+        return null;
+      }
       return await unify((u as any).tail, (v as any).tail, s1);
     }
     if ((u as any).tag === "nil" && (v as any).tag === "nil") {
@@ -248,3 +255,6 @@ export function isCons(x: any): x is { tag: "cons"; head: Term; tail: Term } {
 export function isNil(x: any): x is { tag: "nil" } {
   return x && typeof x === "object" && "tag" in x && x.tag === "nil";
 }
+
+// Symbol for context propagation in logic engine
+export const CTX_SYM = Symbol.for("logic-engine:context");

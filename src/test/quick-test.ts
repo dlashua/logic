@@ -27,10 +27,10 @@ import {
   set_relationship,
   kidOf,
   anyKidOf
-} from "../src/extended/familytree-rel.ts"
-import { membero } from "../src/relations-list.ts";
+} from "../extended/familytree-rel.ts"
+import { membero } from "../relations-list.ts";
 import { and, eq, fresh } from "../relations.ts";
-import { lvar } from "../src/core.ts";
+import { lvar } from "../core.ts";
 
 console.log("START quick-test");
 

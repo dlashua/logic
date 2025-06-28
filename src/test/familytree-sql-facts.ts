@@ -1,8 +1,8 @@
-import { set_parent_kid, set_relationship } from "../src/extended/familytree-rel.ts";
+import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
 // import { makeRelDB } from "../facts-sql-optimized.ts";
-import { makeRelDB } from "../src/facts-sql.ts";
+import { makeRelDB } from "../facts-sql.ts";
 
-import { Term } from "../src/core.ts"
+import { Term } from "../core.ts"
 import { maybeProfile, Rel } from "../relations.ts";
 
 

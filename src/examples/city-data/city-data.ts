@@ -1,5 +1,5 @@
 import fs from "fs/promises";
-import { makeFacts } from "../../src/facts.ts";
+import { makeFacts } from "../../facts.ts";
 
 const MORE_URI =
   "https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/exports/json?lang=en&timezone=America%2FChicago";

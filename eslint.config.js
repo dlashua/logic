@@ -4,21 +4,17 @@ import importPlugin from 'eslint-plugin-import';
 import js from '@eslint/js';
 import stylistic from '@stylistic/eslint-plugin'
 import tseslint from "typescript-eslint";
+import { defineConfig } from "eslint/config";
 
-export default tseslint.config(
+export default defineConfig(
   js.configs.recommended,
-  // tseslint.configs.stylistic,
-  // tseslint.configs.strictTypeChecked,
-  tseslint.configs.stylisticTypeChecked,
+  //@ts-expect-error
+  tseslint.configs.stylistic,
   importPlugin.flatConfigs.recommended,
   {
-    files: ['**/*.{js, ts,tsx}'],
+    basePath: "./",
+    files: ['./**/*.{js,ts,tsx}'],
     extends: [importPlugin.flatConfigs.recommended, importPlugin.flatConfigs.typescript],
-    rules: {
-      "import/no-unresolved": ["off"],
-    },
-  },
-  {
     settings: {
       "import/parsers": {
         "@typescript-eslint/parser": [".ts", ".tsx"],
@@ -28,6 +24,8 @@ export default tseslint.config(
       parserOptions: {
         project: true,
         sourceType: "module",
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     "plugins": {
@@ -36,6 +34,7 @@ export default tseslint.config(
 
     },
     rules: {
+      "import/no-unresolved": ["off"],
       "computed-property-spacing": ["error", "never"],
       "comma-dangle": ["error", {
         "arrays": "only-multiline",

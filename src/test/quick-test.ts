@@ -39,9 +39,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-const BACKEND = "sql";
-// const BACKEND = "mem";
-// const BACKEND = "combo";
+// const BACKEND = "sql";
+const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -50,41 +49,20 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        // console.log("queries performed", module.relDB.realQueries);
-        const real = module.relDB.realQueries.length;
-        const cache = module.relDB.cacheQueries.length;
-        const total = real + cache;
-        const efficiency = ((cache / total) * 100).toFixed(1);
-        const saved = total - real;
-        
-        console.log("🚀 SQL Optimization Results:");
-        console.log(`   Real SQL queries: ${real}`);
-        console.log(`   Cache hits: ${cache}`);
-        console.log(`   Cache hit rate: ${efficiency}%`);
-        console.log(`   Queries saved: ${saved} (${((saved/total)*100).toFixed(1)}% reduction)`);
-        await module.relDB.db.destroy();
-      }
+        console.log("queries performed", module.relDB.realQueries, module.relDB.realQueries.length);
+      },
+      () => module.relDB.db.destroy(),
     );
     return module;
   } else if (backend === "mem") {
     const module = await import("./familytree-mem-facts.ts");
     return module;
-  } else if (backend === "combo") {
-    const sModule = await loadBackend("sql");
-    const mModule = await loadBackend("mem");
-    set_parent_kid(sModule?.parent_kid);
-    set_relationship(mModule?.relationship);
-    return {
-      parent_kid: sModule.parent_kid,
-      relationship: mModule.relationship,
-    }
-
   } else {
     throw Error("Unknown backend");
   }
 }
 
-const { parent_kid, relationship, relDB } = await loadBackend(BACKEND);
+const { parent_kid, relationship } = await loadBackend(BACKEND);
 
 const start = Date.now();
 const q = query()

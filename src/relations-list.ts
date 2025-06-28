@@ -1,11 +1,4 @@
 import {
-  and,
-  eq,
-  Goal,
-  maybeProfile,
-  ProfilableGoal
-} from "./relations.ts"
-import {
   cons,
   isCons,
   isNil,
@@ -15,6 +8,13 @@ import {
   walk
 } from "./core.ts"
 import type { Term } from "./core.ts";
+import {
+  and,
+  eq,
+  Goal,
+  maybeProfile,
+  ProfilableGoal
+} from "./relations.ts"
 
 export function membero(x: Term, list: Term): ProfilableGoal {
   return maybeProfile(async function* (s) {

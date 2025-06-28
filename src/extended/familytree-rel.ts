@@ -1,5 +1,6 @@
-import { Term, lvar } from "./core.ts";
-import { collecto } from "./relations-agg.ts";
+import { Term, lvar } from "../core.ts";
+import { collecto } from "../relations-agg.ts";
+import { createLogicVarProxy } from "../run.ts";
 import {
   Goal,
   Rel,
@@ -10,7 +11,6 @@ import {
   not,
   or,
 } from "./relations.ts";
-import { createLogicVarProxy } from "./run.ts";
 import type { ProfiledGoal, ProfilableGoal } from "./relations.ts";
 
 let parent_kid = (p: Term, k: Term): Goal => {

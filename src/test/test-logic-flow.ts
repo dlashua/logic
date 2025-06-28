@@ -1,20 +1,5 @@
-import {
-  unify,
-  lvar,
-  Subst,
-  Term,
-  walk,
-  isVar,
-  Var,
-  Goal,
-} from "../core.ts"
-import {
-  eq,
-  disj,
-  conj,
-  and,
-  or
-} from "../relations.ts"
+import { Subst, Term, walk } from "../core.ts"
+import { eq, and, or } from "../relations.ts"
 import { createLogicVarProxy } from "../run.ts";
 
 const log = console.log;
@@ -27,7 +12,7 @@ const forceVar = (id: string) => ({
 });
 
 let outcnt = 0;
-const outAll = async (format: Record<string, Term>, s: AsyncGenerator) => {
+const outAll = async (format: Record<string, Term>, s: AsyncGenerator<Subst>) => {
   const myOutCnt = ++outcnt;
   let cnt = 0;
   for await (const one of s) {
@@ -42,46 +27,6 @@ const outAll = async (format: Record<string, Term>, s: AsyncGenerator) => {
   }
 }
 
-const add12 = (x) => x + 12;
-
-const add12goal = (input, output) => {
-  return async function* inner (s: Subst) {
-    const fn = async () => {
-      console.log("GOOO");
-      const w = await walk(input, s);
-      return add12(w);
-    }
-    const s2 = await unify(output, fn, s)
-    if(s2) yield s2;
-  }
-}
-
-const simple_eq = (t: Term, v: Term) => {
-  return async function* inner (s: Subst) {
-    const s2 = await unify(t, v, s);
-    if(s2) yield s2;
-  }
-}
-
-async function walkAllKeys<T extends Record<string, Term>>(
-  obj: T,
-  subst: Subst,
-  vars = true,
-): Promise<Record<string, Term>> {
-  const result: Record<string, Term> = {};
-  for (const key of Object.keys(obj)) {
-    const v = await walk(obj[key], subst);
-    if(vars || !isVar(v)) {
-      result[key] = v;
-    }
-  }
-  return result;
-}
-
-
-
-const xxx = lvar("xxx");
-
 const goal = and(
   or(
     eq($.x, 20),
@@ -94,8 +39,6 @@ const goal = and(
     eq($.y, 20),
   ),
   eq($.x,$.y),
-  // natStream($.y),
-  // eq($.x, $.y),
 );
 
 

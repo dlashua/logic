@@ -3,6 +3,6 @@ node_modules
 .github
 data.json
 hold/**
-*.db
-*.duckdb
+extra/**
+data/**
 pnpm-workspace.yaml

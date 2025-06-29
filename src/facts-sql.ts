@@ -378,73 +378,75 @@ export const makeRelDB = async (
       
       function gatherAndMerge(queryObj: Record<string, Term>) {
         // Find patterns that match the current queryObj
-        const matches = patterns.filter(pattern => {
-          // Check if all keys and values in queryObj match the pattern's selectCols
-          for (const [key, value] of Object.entries(queryObj)) {
-            const patternValue = pattern.selectCols?.[key];
+        // const matches = patterns.filter(pattern => {
+        //   // Check if all keys and values in queryObj match the pattern's selectCols
+        //   for (const [key, value] of Object.entries(queryObj)) {
+        //     const patternValue = pattern.selectCols?.[key];
 
-            // If both are logic variables, check if their IDs match
-            if (isVar(value) && isVar(patternValue)) {
-              if (value.id !== patternValue.id) {
-                return false;
-              }
-            } else if (value !== patternValue) {
-              // Otherwise, check for direct equality
-              return false;
-            }
-          }
-          return true;
+        //     // If both are logic variables, check if their IDs match
+        //     if (isVar(value) && isVar(patternValue)) {
+        //       if (value.id !== patternValue.id) {
+        //         return false;
+        //       }
+        //     } else if (value !== patternValue) {
+        //       // Otherwise, check for direct equality
+        //       return false;
+        //     }
+        //   }
+        //   return true;
+        // });
+
+        // if (matches.length > 0) {
+        //   // Log matched patterns for debugging
+        //   log("MATCHED_PATTERNS", {
+        //     matches,
+        //   });
+
+        //   // Merge the current goalId into the matching patterns
+        //   for (const match of matches) {
+        //     if (!match.goalIds.includes(goalId)) {
+        //       log("MERGING_PATTERNS", {
+        //         match,
+        //         goalId 
+        //       });
+        //       match.goalIds.push(goalId);
+        //     }
+        //   }
+        // } else {
+        // Log unmatched queryObj for debugging
+        log("UNMATCHED_QUERYOBJ", {
+          queryObj,
         });
 
-        if (matches.length > 0) {
-          // Log matched patterns for debugging
-          log("MATCHED_PATTERNS", {
-            matches,
-          });
+        // Separate queryObj into selectCols and whereCols
+        const selectCols: Record<string, Term> = {};
+        const whereCols: Record<string, Term> = {};
 
-          // Merge the current goalId into the matching patterns
-          for (const match of matches) {
-            if (!match.goalIds.includes(goalId)) {
-              log("MERGING_PATTERNS", {
-                match,
-                goalId 
-              });
-              match.goalIds.push(goalId);
-            }
+        for (const [key, value] of Object.entries(queryObj)) {
+          if (isVar(value)) {
+            selectCols[key] = value;
+          } else {
+            whereCols[key] = value;
           }
-        } else {
-          // Log unmatched queryObj for debugging
-          log("UNMATCHED_QUERYOBJ", {
-            queryObj,
-          });
-
-          // Separate queryObj into selectCols and whereCols
-          const selectCols: Record<string, Term> = {};
-          const whereCols: Record<string, Term> = {};
-
-          for (const [key, value] of Object.entries(queryObj)) {
-            if (isVar(value)) {
-              selectCols[key] = value;
-            } else {
-              whereCols[key] = value;
-            }
-          }
-
-          // Add `last` property to patterns during initialization with proper formatting
-          patterns.push({
-            table,
-            selectCols,
-            whereCols,
-            goalIds: [goalId],
-            rows: [],
-            ran: false,
-            last: {
-              selectCols: [],
-              whereCols: [],
-            },
-            queries: [],
-          });
         }
+
+        // Add `last` property to patterns during initialization with proper formatting
+        patterns.push({
+          table,
+          selectCols,
+          whereCols,
+          goalIds: [goalId],
+          rows: [],
+          ran: false,
+          last: {
+            selectCols: [],
+            whereCols: [],
+          },
+          queries: [],
+        });
+        
+        // }
+        
       };
 
       async function mergePatterns(queryObj: Record<string, Term>, walkedQ: Record<string, Term>, goalId: number) {

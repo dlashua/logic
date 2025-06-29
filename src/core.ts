@@ -1,33 +1,81 @@
-// Core logic functions for MiniKanren-style logic programming
+// -----------------------------------------------------------------------------
+//
+//                          Refactored Logic Engine
+//
+// -----------------------------------------------------------------------------
+// This file contains a complete, refactored implementation of a MiniKanren-style
+// logic programming engine in TypeScript. The original four files (core.ts,
+// relations.ts, run.ts, query-builder.ts) have been consolidated and improved
+// for clarity, performance, and developer experience.
+//
+// Key Improvements:
+// - **Unified Structure:** All core components are now in a single file.
+// - **List Relations:** Added full support for `cons`/`nil` logic lists and
+//   the relations that operate on them (membero, appendo, etc.).
+// - **Enhanced Readability:** Added extensive TSDoc comments and consistent style.
+// - **Improved Type Safety:** Strengthened type definitions throughout.
+// - **Simplified API:** The `query` builder is the primary, streamlined way
+//   to interact with the engine.
+// -----------------------------------------------------------------------------
 
-const EOS_LOG = false;
-export function EOSseen(name: string, details = {}) {
-  if(!EOS_LOG) return;
-  console.log("EOS seen", name);
-}
+// Section 1: Core Data Structures and Types
+// -----------------------------------------------------------------------------
 
-export function EOSsent(name: string, details = {}) {
-  if(!EOS_LOG) return;
-  console.log("EOS sent", name);
-}
-
-export async function wasteGen(g) {
-  for await(const _ of g){
-    // pass
-  }
-  return;
-}
 /**
- * Logic variable representation
+ * Represents a logic variable, a placeholder for a value.
  */
 export interface Var {
-  tag: "var";
-  id: string;
+  readonly tag: "var";
+  readonly id: string;
 }
+
+/**
+ * A `cons` cell, the building block of a logic list.
+ */
+export interface ConsNode {
+    readonly tag: "cons";
+    readonly head: Term;
+    readonly tail: Term;
+    readonly id?: string;
+}
+
+/**
+ * The end of a logic list.
+ */
+export interface NilNode {
+    readonly tag: "nil";
+}
+
+/**
+ * A logic list is either a `cons` cell or `nil`.
+ */
+export type LogicList = ConsNode | NilNode;
+
+/**
+ * A substitution map, holding variable bindings.
+ */
+export type Subst = Map<string | symbol, Term>;
+
+/**
+ * Represents any term in the logic system.
+ */
+export type Term<T = unknown> = Var | LogicList | T | Term<T>[] | null | undefined;
+
+/**
+ * A Goal is a function that takes a substitution and returns a stream of
+ * possible resulting substitutions.
+ */
+export type Goal = (s: Subst) => AsyncGenerator<Subst>;
+
+
+// Section 2: Core Engine Functions & List Utilities
+// -----------------------------------------------------------------------------
+
 let varCounter = 0;
 
 /**
- * Create a new logic variable.
+ * Creates a new, unique logic variable.
+ * @param name An optional prefix for debugging.
  */
 export function lvar(name = ""): Var {
   return {
@@ -35,75 +83,98 @@ export function lvar(name = ""): Var {
     id: `${name}_${varCounter++}`,
   };
 }
+
 /**
- * Reset the logic variable counter (useful for tests/determinism).
+ * Resets the global variable counter for deterministic tests.
  */
-export function resetVarCounter() {
+export function resetVarCounter(): void {
   varCounter = 0;
 }
 
 /**
- * Term type with generics for better type hinting
- * Now supports thunks for lazy evaluation.
+ * The canonical `nil` value, representing an empty logic list.
  */
-export type Thunk = () => Term;
+export const nil: NilNode = {
+  tag: "nil" 
+};
 
 /**
- * A goal is a function that takes a substitution and returns a stream of substitutions.
+ * Creates a `cons` cell (a node in a logic list).
+ * @param head The value of the node.
+ * @param tail The rest of the list.
  */
-export type Goal = (s: Subst) => AsyncGenerator<Subst, void, unknown>;
-
-
-export type Term<T = unknown> =
-  | Var
-  | T
-  | Term<T>[]
-  | Thunk
-  | null
-  | undefined;
-
-/**
- * Substitution: mapping from variable id or symbol to value
- */
-export type Subst = Map<string | symbol, Term<any>>;
-
-/**
- * Returns true if the value is a logic variable.
- */
-export function isVar(x: Term): x is Var {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    "tag" in x &&
-    (x as Var).tag === "var"
-  );
+export function cons(head: Term, tail: Term): ConsNode {
+  return {
+    tag: "cons",
+    head,
+    tail 
+  };
 }
 
 /**
- * Walk: find the value a variable is bound to, recursively.
- * If the value is a thunk, evaluate it (await if async) and cache the result.
+ * Converts a JavaScript array into a logic list.
+ * @param arr The array to convert.
+ * @returns A logic list (`cons` cells ending in `nil`).
+ */
+export function arrayToLogicList(arr: Term[]): LogicList {
+  return arr.reduceRight<LogicList>((tail, head) => cons(head, tail), nil);
+}
+
+/**
+ * A convenience function to create a logic list from arguments.
+ * @param items The items to include in the list.
+ * @example logicList(1, 2, 3) // equivalent to cons(1, cons(2, cons(3, nil)))
+ */
+export function logicList<T = unknown>(...items: T[]): LogicList {
+  return arrayToLogicList(items);
+}
+
+/**
+ * Type guard to check if a term is a logic variable.
+ */
+export function isVar(x: Term): x is Var {
+  return typeof x === "object" && x !== null && (x as Var).tag === "var";
+}
+
+/**
+ * Type guard to check if a term is a `cons` cell.
+ */
+export function isCons(x: Term): x is ConsNode {
+  return typeof x === "object" && x !== null && (x as ConsNode).tag === "cons";
+}
+
+/**
+ * Type guard to check if a term is `nil`.
+ */
+export function isNil(x: Term): x is NilNode {
+  return typeof x === "object" && x !== null && (x as NilNode).tag === "nil";
+}
+
+/**
+ * Type guard to check if a term is a logic list.
+ */
+export function isLogicList(x: Term): x is LogicList {
+  return isCons(x) || isNil(x);
+}
+
+
+/**
+ * Recursively finds the ultimate binding of a term in a given substitution.
+ * @param u The term to resolve.
+ * @param s The substitution map.
  */
 export async function walk(u: Term, s: Subst): Promise<Term> {
   if (isVar(u) && s.has(u.id)) {
-    const v = s.get(u.id)!;
-    return walk(v, s);
+    return walk(s.get(u.id)!, s);
   }
-  // Handle logic lists
-  if (u && typeof u === "object" && "tag" in u) {
-    if ((u as any).tag === "cons") {
-      return cons(
-        await walk((u as any).head, s),
-        await walk((u as any).tail, s),
-      );
-    }
-    if ((u as any).tag === "nil") {
-      return nil;
-    }
+  if (isCons(u)) {
+    // Walk both parts of the cons cell
+    return cons(await walk(u.head, s), await walk(u.tail, s));
   }
   if (Array.isArray(u)) {
     return Promise.all(u.map((x) => walk(x, s)));
   }
-  if (u && typeof u === "object" && !isVar(u)) {
+  if (u && typeof u === "object" && !isVar(u) && !isLogicList(u)) {
     const out: Record<string, Term> = {};
     for (const k in u) {
       if (Object.hasOwn(u, k)) {
@@ -116,172 +187,418 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
 }
 
 /**
- * Unification: attempts to unify two terms under a substitution.
+ * Extends a substitution by binding a variable to a value, with an occurs check.
  */
-export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
-  u = await walk(u, s);
-  v = await walk(v, s);
-
-  if (isVar(u)) {
-    return await extendSubst(u, v, s);
-  } else if (isVar(v)) {
-    return await extendSubst(v, u, s);
-  } else if (Array.isArray(u) && Array.isArray(v) && u.length === v.length) {
-    for (let i = 0; i < u.length; i++) {
-      const sNext = await unify(u[i], v[i], s);
-      if (!sNext) {
-        return null;
-      }
-      s = sNext;
-    }
-    return s;
-  } else if (
-    u &&
-    typeof u === "object" &&
-    v &&
-    typeof v === "object" &&
-    "tag" in u &&
-    "tag" in v
-  ) {
-    // Logic list unification
-    if ((u as any).tag === "cons" && (v as any).tag === "cons") {
-      const s1 = await unify((u as any).head, (v as any).head, s);
-      if (!s1) {
-        return null;
-      }
-      return await unify((u as any).tail, (v as any).tail, s1);
-    }
-    if ((u as any).tag === "nil" && (v as any).tag === "nil") {
-      return s;
-    }
-    return null;
-  } else if (u === v) {
-    return s;
-  } else {
-    return null;
+async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
+  if (await occursCheck(v, val, s)) {
+    return null; // Occurs check failed
   }
-}
-
-/**
- * Extends a substitution with a new variable binding, with occurs check.
- * Ensures `null` is not processed.
- */
-export async function extendSubst(
-  v: Var,
-  val: Term,
-  s: Subst,
-): Promise<Subst | null> {
-  if (await occursCheck(v, val, s)) return null;
   const s2 = new Map(s);
   s2.set(v.id, val);
   return s2;
 }
 
-// --- Logic List Utilities ---
-
 /**
- * A cons cell node for logic lists.
+ * Checks if a variable `v` occurs within a term `x` to prevent infinite loops.
  */
-export interface ConsNode {
-  tag: "cons";
-  head: Term;
-  tail: Term;
-}
-/**
- * A nil node for logic lists.
- */
-export interface NilNode {
-  tag: "nil";
-}
-/**
- * Logic list canonical representation.
- */
-export type LogicList = ConsNode | NilNode;
-
-/**
- * The canonical nil value for logic lists.
- */
-export const nil: NilNode = {
-  tag: "nil",
-};
-/**
- * Create a cons cell for a logic list.
- */
-export function cons(head: Term, tail: Term): ConsNode {
-  return {
-    tag: "cons",
-    head,
-    tail,
-  };
-}
-/**
- * Convert a JS array to a logic list.
- */
-export function arrayToLogicList(arr: Term[]): LogicList {
-  return arr.reduceRight<LogicList>((tail, head) => cons(head, tail), nil);
-}
-/**
- * Convert a logic list to a JS array (grounded).
- */
-export function logicListToArray(list: Term): Term[] {
-  const out = [];
-  let cur = list;
-  while (
-    cur &&
-    typeof cur === "object" &&
-    "tag" in cur &&
-    (cur as any).tag === "cons"
-  ) {
-    out.push((cur as any).head);
-    cur = (cur as any).tail;
+async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
+  const resolvedX = await walk(x, s);
+  if (isVar(resolvedX)) {
+    return v.id === resolvedX.id;
   }
-  return out;
-}
-
-/**
- * logicList(...items): Shorthand for cons(1, cons(2, ... nil))
- */
-export function logicList<T = unknown>(...items: T[]): Term {
-  let list: Term = nil;
-  for (let i = items.length - 1; i >= 0; --i) {
-    list = cons(items[i], list);
+  if (isCons(resolvedX)) {
+    return await occursCheck(v, resolvedX.head, s) || await occursCheck(v, resolvedX.tail, s);
   }
-  return list;
-}
-
-// --- Helpers ---
-
-/**
- * Returns true if variable v occurs anywhere in x (occurs check for unification).
- * Handles `null` gracefully.
- */
-export async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
-  if (x === null) {
-    return false; // `null` cannot contain variables
-  }
-
-  x = await walk(x, s);
-  if (isVar(x)) return v.id === x.id;
-  if (Array.isArray(x)) {
-    const results = await Promise.all(x.map((e) => occursCheck(v, e, s)));
-    return results.some((x) => x === true);
+  if (Array.isArray(resolvedX)) {
+    for (const item of resolvedX) {
+      if (await occursCheck(v, item, s)) {
+        return true;
+      }
+    }
   }
   return false;
 }
 
 /**
- * Returns true if the value is a cons cell (logic list node).
+ * The core unification algorithm. It attempts to make two terms structurally equivalent.
  */
-export function isCons(x: any): x is { tag: "cons"; head: Term; tail: Term } {
-  return x && typeof x === "object" && "tag" in x && x.tag === "cons";
+export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | null> {
+  if(s===null) {
+    return null;
+  }
+
+  const uWalked = await walk(u, s);
+  const vWalked = await walk(v, s);
+
+  if (isVar(uWalked)) return extendSubst(uWalked, vWalked, s);
+  if (isVar(vWalked)) return extendSubst(vWalked, uWalked, s);
+
+  if (isNil(uWalked) && isNil(vWalked)) return s;
+  if (isCons(uWalked) && isCons(vWalked)) {
+    const s1 = await unify(uWalked.head, vWalked.head, s);
+    if (s1 === null) return null;
+    return unify(uWalked.tail, vWalked.tail, s1);
+  }
+
+  if (
+    Array.isArray(uWalked) &&
+    Array.isArray(vWalked) &&
+    uWalked.length === vWalked.length
+  ) {
+    let currentSubst: Subst | null = s;
+    for (let i = 0; i < uWalked.length; i++) {
+      currentSubst = await unify(uWalked[i], vWalked[i], currentSubst);
+      if (currentSubst === null) return null;
+    }
+    return currentSubst;
+  }
+
+  if (JSON.stringify(uWalked) === JSON.stringify(vWalked)) {
+    return s;
+  }
+
+  return null;
+}
+
+// Section 3: Relational Operators (Goals)
+// -----------------------------------------------------------------------------
+
+/**
+ * A goal that succeeds if two terms can be unified.
+ */
+export function eq(u: Term, v: Term): Goal {
+  return async function* eqGoal(s: Subst | null) {
+    const s_unified = await unify(u, v, s);
+    if (s_unified !== null) {
+      yield s_unified;
+    }
+  };
 }
 
 /**
- * Returns true if the value is a nil node (logic list end).
+ * Introduces new (fresh) logic variables into a sub-goal.
  */
-export function isNil(x: any): x is { tag: "nil" } {
-  return x && typeof x === "object" && "tag" in x && x.tag === "nil";
+export function fresh(f: (...vars: Var[]) => Goal): Goal {
+  return async function* freshGoal(s: Subst) {
+    const freshVars = Array.from({
+      length: f.length 
+    }, () => lvar());
+    const subGoal = f(...freshVars);
+    yield* subGoal(s);
+  };
 }
 
-// Symbol for context propagation in logic engine
-export const CTX_SYM = Symbol.for("logic-engine:context");
+/**
+ * Logical disjunction (OR).
+ */
+export function disj(g1: Goal, g2: Goal): Goal {
+  return async function* disjGoal(s: Subst) {
+    yield* g1(s);
+    yield* g2(s);
+  };
+}
+
+/**
+ * Logical conjunction (AND).
+ */
+export function conj(g1: Goal, g2: Goal): Goal {
+  return async function* conjGoal(s: Subst) {
+    for await (const s1 of g1(s)) {
+      yield* g2(s1);
+    }
+  };
+}
+
+/**
+ * Helper for combining multiple goals with logical AND.
+ */
+export const and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) return (s) => (async function*() { yield s; })();
+  return goals.reduce(conj);
+};
+
+/**
+ * Helper for combining multiple goals with logical OR.
+ */
+export const or = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) return (s) => (async function*() { /* pass */ })();
+  return goals.reduce(disj);
+};
+
+/**
+ * Multi-clause disjunction (OR).
+ */
+export function conde(...clauses: Goal[][]): Goal {
+  const clauseGoals = clauses.map(clause => and(...clause));
+  return or(...clauseGoals);
+}
+
+
+// Section 4: Query Execution and Result Formatting
+// -----------------------------------------------------------------------------
+
+/**
+ * The shape of a single result from a query.
+ */
+export type RunResult<Fmt> = {
+  [K in keyof Fmt]: Term;
+};
+
+/**
+ * Converts a logic list to a JavaScript array.
+ * @param list The logic list to convert.
+ */
+function logicListToArray(list: Term): Term[] {
+  const out = [];
+  let cur = list;
+  while (isCons(cur)) {
+    out.push(cur.head);
+    cur = cur.tail;
+  }
+  return out;
+}
+
+/**
+ * Recursively walks a result object, converting any logic lists into JS arrays.
+ */
+function deepListWalk(val: any): any {
+  if (isLogicList(val)) {
+    return logicListToArray(val).map(deepListWalk);
+  } else if (Array.isArray(val)) {
+    return val.map(deepListWalk);
+  } else if (val && typeof val === "object" && !isVar(val)) {
+    const out: any = {};
+    for (const k in val) {
+      if (Object.hasOwn(val, k)) {
+        out[k] = deepListWalk(val[k]);
+      }
+    }
+    return out;
+  }
+  return val;
+}
+
+
+/**
+ * Creates a proxy object that automatically creates logic variables on access.
+ */
+function createLogicVarProxy<K extends string | symbol = string>(
+  prefix = ""
+): { proxy: Record<K, Var>; varMap: Map<K, Var> } {
+  const varMap = new Map<K, Var>();
+  const proxy = new Proxy({} as Record<K, Var>, {
+    get(target, prop: K) {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "_") return lvar();
+      if (!varMap.has(prop)) {
+        varMap.set(prop, lvar(`${prefix}${String(prop)}`));
+      }
+      return varMap.get(prop)!;
+    },
+    has: () => true,
+    ownKeys: () => Array.from(varMap.keys()),
+    getOwnPropertyDescriptor: () => ({
+      enumerable: true,
+      configurable: true 
+    }),
+  });
+  return {
+    proxy,
+    varMap 
+  };
+}
+
+/**
+ * Formats the raw substitution streams into user-friendly result objects.
+ */
+async function* formatSubstitutions<Fmt>(
+  substs: AsyncGenerator<Subst | null>,
+  formatter: Fmt,
+  limit: number
+): AsyncGenerator<RunResult<Fmt>> {
+  let count = 0;
+  for await (const s of substs) {
+    if (s === null) {
+      continue;
+    }
+    if (count++ >= limit) break;
+    const result: Partial<RunResult<Fmt>> = {};
+    for (const key in formatter) {
+      const term = formatter[key];
+      result[key] = await walk(term, s);
+    }
+    // Convert logic lists to arrays before yielding the final result
+    yield deepListWalk(result) as RunResult<Fmt>;
+  }
+}
+
+// Section 5: The Fluent Query Builder
+// -----------------------------------------------------------------------------
+
+type Selector<Fmt> = (($: Record<string, Var>) => Fmt) | "*" | any;
+
+type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
+  ? RunResult<Fmt>
+  : Sel extends "*"
+    ? RunResult<Record<string, any>>
+    : any;
+
+/**
+ * A fluent interface for building and executing logic queries.
+ */
+class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
+  private _formatter: Fmt | Record<string, Var> | null = null;
+  private _rawSelector: any = null;
+  private _goals: Goal[] = [];
+  private _limit = Infinity;
+  private readonly _logicVarProxy: Record<string, Var>;
+  private _selectAllVars = false;
+
+  constructor() {
+    const { proxy } = createLogicVarProxy("q");
+    this._logicVarProxy = proxy;
+  }
+
+  /**
+   * Specifies the shape of the desired output.
+   */
+  select<NewSel extends Selector<Fmt>>(selector: NewSel): Query<Fmt, NewSel> {
+    if (selector === "*") {
+      this._selectAllVars = true;
+    } else if (typeof selector === "function") {
+      this._formatter = selector(this._logicVarProxy);
+    } else {
+      this._rawSelector = selector;
+    }
+    return this as unknown as Query<Fmt, NewSel>;
+  }
+
+  /**
+   * Adds constraints (goals) to the query.
+   */
+  where(goalFn: (proxy: Record<string, Var>) => Goal | Goal[]): this {
+    const result = goalFn(this._logicVarProxy);
+    this._goals.push(...(Array.isArray(result) ? result : [result]));
+    return this;
+  }
+
+  /**
+   * Sets the maximum number of results.
+   */
+  limit(n: number): this {
+    this._limit = n;
+    return this;
+  }
+
+  private async *runQuery(): AsyncGenerator<any> {
+    if (this._goals.length === 0) {
+      throw new Error("Query must have at least one .where() clause.");
+    }
+
+    let formatter: Fmt | Record<string, Var> | any = this._formatter;
+    if (this._selectAllVars) {
+      formatter = {
+        ...this._logicVarProxy 
+      };
+    } else if (this._rawSelector) {
+      formatter = {
+        result: this._rawSelector 
+      };
+    } else if (!formatter) {
+      formatter = {
+        ...this._logicVarProxy 
+      };
+    }
+
+    const initialSubst: Subst = new Map();
+    const combinedGoal = and(...this._goals);
+    const substStream = combinedGoal(initialSubst);
+    const results = formatSubstitutions(substStream, formatter, this._limit);
+
+    for await (const result of results) {
+      if (this._rawSelector) {
+        yield result.result;
+      } else {
+        yield result;
+      }
+    }
+  }
+
+  /**
+   * Makes the Query object itself an async iterable.
+   */
+  [Symbol.asyncIterator](): AsyncGenerator<QueryOutput<Fmt, Sel>> {
+    return this.runQuery();
+  }
+
+  /**
+   * Executes the query and returns all results as an array.
+   */
+  async toArray(): Promise<QueryOutput<Fmt, Sel>[]> {
+    const results: QueryOutput<Fmt, Sel>[] = [];
+    for await (const result of this.runQuery()) {
+      results.push(result);
+    }
+    return results;
+  }
+}
+
+/**
+ * The main entry point for creating a new logic query.
+ */
+export function query<Fmt>(): Query<Fmt> {
+  return new Query<Fmt>();
+}
+
+// Section 6: List Relations
+// -----------------------------------------------------------------------------
+
+/**
+ * A goal that succeeds if `x` is a member of the logic `list`.
+ */
+export function membero(x: Term, list: Term): Goal {
+  return fresh(head =>
+    fresh(tail =>
+      and(
+        eq(list, cons(head, tail)),
+        or(
+          eq(x, head),
+          membero(x, tail)
+        )
+      )
+    )
+  );
+}
+
+/**
+ * A goal that succeeds if `h` is the head of the logic list `l`.
+ */
+export function firsto(h: Term, l: Term): Goal {
+  return fresh(tail => eq(l, cons(h, tail)));
+}
+
+/**
+ * A goal that succeeds if `t` is the tail of the logic list `l`.
+ */
+export function resto(l: Term, t: Term): Goal {
+  return fresh(head => eq(l, cons(head, t)));
+}
+
+/**
+ * A goal that succeeds if logic list `zs` is the result of appending
+ * logic list `ys` to `xs`.
+ */
+export function appendo(xs: Term, ys: Term, zs: Term): Goal {
+  return conde(
+    [eq(xs, nil), eq(ys, zs)],
+    [fresh(head =>
+      fresh(tail =>
+        fresh(rest => and(
+          eq(xs, cons(head, tail)),
+          eq(zs, cons(head, rest)),
+          appendo(tail, ys, rest)
+        ))
+      )
+    )]
+  );
+}

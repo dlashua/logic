@@ -1,4 +1,4 @@
-import { query } from "../query-builder.ts";
+import { query } from "../old_query-builder.ts";
 import { cousinsAgg, set_parent_kid, set_relationship } from "../extended/familytree-rel.ts"
 import { parent_kid, relationship, relDB } from "./familytree-sql-facts.ts";
 // import { parent_kid, relationship } from "./familytree-mem-facts.ts";

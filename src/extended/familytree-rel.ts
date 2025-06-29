@@ -5,9 +5,9 @@ import {
   isVar,
   lvar,
   walk
-} from "../core.ts"
+} from "../old_core.ts"
 import { collecto } from "../relations-agg.ts";
-import { createLogicVarProxy } from "../run.ts";
+import { createLogicVarProxy } from "../old_run.ts";
 import {
   Goal,
   Rel,
@@ -17,8 +17,8 @@ import {
   neq_C,
   not,
   or,
-} from "../relations.ts";
-import type { ProfiledGoal, ProfilableGoal } from "../relations.ts";
+} from "../old_relations.ts";
+import type { ProfiledGoal, ProfilableGoal } from "../old_relations.ts";
 import { getCousinsOf } from "../test/direct-sql.ts";
 
 let parent_kid = (p: Term, k: Term): Goal => {

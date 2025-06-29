@@ -4,10 +4,11 @@ import {
   Term,
   Var,
   isVar,
+  Goal,
+  or,
   unify,
   walk
 } from './core.ts'
-import { Goal, or } from './relations.ts';
 
 /**
  * A relation for tuple facts (array-based).

@@ -1,7 +1,5 @@
-import type { Subst, Term } from "./core.ts";
-import { arrayToLogicList, walk, EOSseen, EOSsent } from "./core.ts";
-import type { Goal, enableLogicProfiling, disableLogicProfiling } from "./relations.ts";
-import { eq } from "./relations.ts";
+import type { Subst, Term, Goal } from "./core.ts"
+import { arrayToLogicList, walk , eq } from "./core.ts";
 
 /**
  * Helper: deduplicate an array of items using JSON.stringify for deep equality.
@@ -83,18 +81,8 @@ export function aggregateRelFactory(
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
     return maybeProfile(async function* aggregateRelFactory (s: Subst) {
-      if (s === null) {
-        EOSseen("aggregateRelFactory");
-        yield* goal(null);
-        yield null; 
-        return;
-      }
       const results: Term[] = [];
       for await (const s1 of goal(s)) {
-        if(s1 === null) {
-          yield null;
-          return;
-        }
         const val = await walk(x, s1);
         results.push(val);
       }
@@ -118,7 +106,7 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outAgg: Term,
     dedup = false,
   ): Goal =>
-    maybeProfile(async function* (s: Subst) {
+    async function* (s: Subst) {
       yield* groupByGoal(
         keyVar,
         valueVar,
@@ -134,7 +122,7 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
           }
         },
       );
-    });
+    };
 }
 
 export const groupCollecto = groupAggregateRelFactory(arrayToLogicList);

@@ -1,9 +1,8 @@
 // Extended (non-primitive) logic relations for MiniKanren-style logic programming
 // These are not part of the minimal core, but are useful for practical logic programming.
 
-import type { Subst, Term } from "./core.ts";
+import type { Subst, Term , Goal } from "./core.ts";
 import { isCons, walk } from "./core.ts";
-import type { Goal } from "./relations.ts";
 
 /**
  * alldistincto(xs): true if all elements of xs are distinct.

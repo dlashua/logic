@@ -1,7 +1,7 @@
 // import R from 'rubico/index.js';
 // import { pipe } from 'rubico/dist/rubico.mjs';
 import assert, { deepEqual, deepStrictEqual } from "node:assert";
-import { query } from "../query-builder.ts";
+import { query } from "../old_query-builder.ts";
 import {
   cousinOf,
   cousinsAgg,
@@ -29,8 +29,8 @@ import {
   anyKidOf
 } from "../extended/familytree-rel.ts"
 import { membero } from "../relations-list.ts";
-import { and, eq, fresh } from "../relations.ts";
-import { lvar } from "../core.ts";
+import { and, eq, fresh } from "../old_relations.ts";
+import { lvar } from "../old_core.ts";
 import { QUERIES } from "./direct-sql.ts";
 
 console.log("START quick-test");
@@ -85,9 +85,9 @@ const q = query()
   .where($ => [
 
     // DO NOT DELETE THIS TEST CASE COMMENT
-    membero($.person, ["celeste", "daniel"]),
+    membero($.person, ["celeste", "daniel", "jackson"]),
 
-    // person($.person),
+    person($.person),
     parentAgg($.person, $.parents),
     stepParentAgg($.person, $.step_parents),
     grandparentAgg($.person, $.grand_parents),

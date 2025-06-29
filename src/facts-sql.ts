@@ -2,8 +2,6 @@ import type { Knex } from "knex";
  
 import knex from "knex";
 import {
-  EOSseen,
-  EOSsent,
   Subst,
   Term,
   isVar,
@@ -192,6 +190,9 @@ export const makeRelDB = async (
       gatherAndMerge(queryObj);
 
       async function* run(s: Subst, queryObj: Record<string, Term>, pattern: Pattern, walkedQ: Record<string, Term>) {
+        if (pattern.ran && pattern.rows.length === 0) {
+          return;
+        }
         const { whereCols, selectCols } = pattern;
         const { whereClauses } = await buildQueryParts(queryObj, s);
         const cacheKey = makeCacheKey(pattern.table, Object.keys(selectCols || {}), whereClauses);
@@ -377,47 +378,6 @@ export const makeRelDB = async (
       };
       
       function gatherAndMerge(queryObj: Record<string, Term>) {
-        // Find patterns that match the current queryObj
-        // const matches = patterns.filter(pattern => {
-        //   // Check if all keys and values in queryObj match the pattern's selectCols
-        //   for (const [key, value] of Object.entries(queryObj)) {
-        //     const patternValue = pattern.selectCols?.[key];
-
-        //     // If both are logic variables, check if their IDs match
-        //     if (isVar(value) && isVar(patternValue)) {
-        //       if (value.id !== patternValue.id) {
-        //         return false;
-        //       }
-        //     } else if (value !== patternValue) {
-        //       // Otherwise, check for direct equality
-        //       return false;
-        //     }
-        //   }
-        //   return true;
-        // });
-
-        // if (matches.length > 0) {
-        //   // Log matched patterns for debugging
-        //   log("MATCHED_PATTERNS", {
-        //     matches,
-        //   });
-
-        //   // Merge the current goalId into the matching patterns
-        //   for (const match of matches) {
-        //     if (!match.goalIds.includes(goalId)) {
-        //       log("MERGING_PATTERNS", {
-        //         match,
-        //         goalId 
-        //       });
-        //       match.goalIds.push(goalId);
-        //     }
-        //   }
-        // } else {
-        // Log unmatched queryObj for debugging
-        log("UNMATCHED_QUERYOBJ", {
-          queryObj,
-        });
-
         // Separate queryObj into selectCols and whereCols
         const selectCols: Record<string, Term> = {};
         const whereCols: Record<string, Term> = {};
@@ -444,9 +404,6 @@ export const makeRelDB = async (
           },
           queries: [],
         });
-        
-        // }
-        
       };
 
       async function mergePatterns(queryObj: Record<string, Term>, walkedQ: Record<string, Term>, goalId: number) {
@@ -539,13 +496,6 @@ export const makeRelDB = async (
       }
 
       return async function* factsSql(s: Subst) {
-        // console.log("IN GOAL", goalId, queryObj);
-        if (s === null) {
-          EOSseen(`facts-sql rel ${goalId}`);
-          yield null;
-          return;
-        }
-
         if (patterns.length === 0) {
           console.log("NO PATTERNS");
           return;
@@ -617,7 +567,12 @@ export const makeRelDB = async (
       goalIds: number[];
       rows: any[];
       ran: boolean;
-      queryObj: Record<string, Term<string | number>>;
+      selectCols: Term[];
+      whereCols: Term[];
+      last: {
+        selectCols: Term[][];
+        whereCols: Term[][];
+      };
       queries: string[];
     }
     const patterns: Pattern[] = [];
@@ -627,12 +582,11 @@ export const makeRelDB = async (
       gatherAndMerge(queryObj);
 
       async function* run(s: Subst, queryObj: Record<string, Term<string | number>>, pattern: Pattern) {
-        const values = Object.values(queryObj);
-        if (s === null) {
-          EOSseen("facts-sql relSym");
-          yield null;
+        if (pattern.ran && pattern.rows.length === 0) {
           return;
         }
+        const values = Object.values(queryObj);
+
         if (values.length > 2) return;
 
         const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
@@ -760,11 +714,15 @@ export const makeRelDB = async (
       }
 
       function gatherAndMerge(queryObj: Record<string, Term<string | number>>) {
-        // Normalize queryObj to account for symmetric keys
-        const normalizedQueryObj = Object.values(queryObj);
-        const whereCols = normalizedQueryObj.filter(x => !isVar(x));
-        const selectCols = normalizedQueryObj.filter(x => isVar(x));
-
+        const selectCols: Term[] = [];
+        const whereCols: Term[] = [];
+        for (const value of Object.values(queryObj)) {
+          if (isVar(value)) {
+            selectCols.push(value);
+          } else {
+            whereCols.push(value);
+          }
+        }
 
         patterns.push({
           table,
@@ -779,38 +737,23 @@ export const makeRelDB = async (
           },
           queries: [],
         });
-        
       }
 
       return async function* factsSqlSym(s: Subst) {
-        if (s === null) {
-          EOSseen(`facts-sql relSym ${goalId}`);
-          yield null;
-          return;
-        }
-
         if (patterns.length === 0) {
-          console.log("NO PATTERNS");
           return;
         }
-
-        log("PATTERNS BEFORE", {
-          patterns,
-        });
 
         for (const pattern of patterns) {
           if (!pattern.goalIds.includes(goalId)) continue;
-          let s2 = s;
+          const s2 = s;
           for await (const result of run(s2, queryObj, pattern)) {
-            if (result === null) continue;
-            s2 = result;
-            yield s2;
+            if (result !== null) {
+              yield result;
+            }
           }
         }
-
-        log("PATTERNS AFTER", {
-          patterns,
-        });
+   
 
         setTimeout(() => {
           if (goalId === nextGoalId - 1) {

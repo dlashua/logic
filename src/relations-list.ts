@@ -6,24 +6,14 @@ import {
   nil,
   unify,
   walk,
-  EOSseen
-} from "./core.ts"
-import type { Term } from "./core.ts";
-import {
   and,
   eq,
   Goal,
-  maybeProfile,
-  ProfilableGoal
-} from "./relations.ts"
+} from "./core.ts"
+import type { Term } from "./core.ts";
 
-export function membero(x: Term, list: Term): ProfilableGoal {
-  return maybeProfile(async function* (s) {
-    if(s === null) {
-      EOSseen("membero");
-      yield null;
-      return;
-    }
+export function membero(x: Term, list: Term): Goal {
+  return async function* (s) {
     const l = await walk(list, s);
     if (l && typeof l === "object" && "tag" in l) {
       if ((l as any).tag === "cons") {
@@ -38,7 +28,7 @@ export function membero(x: Term, list: Term): ProfilableGoal {
         if (s2) yield s2;
       }
     }
-  });
+  };
 }
 
 export function firsto(x: Term, xs: Term): Goal {

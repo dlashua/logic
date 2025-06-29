@@ -1,5 +1,5 @@
 import { aggregateVarMulti } from "../../facts.ts";
-import { run } from "../../run.ts";
+import { run } from "../../old_run.ts";
 import {
   loadData,
   acquireData,

@@ -1,7 +1,5 @@
-// import R from 'rubico/index.js';
-// import { pipe } from 'rubico/dist/rubico.mjs';
 import assert, { deepEqual, deepStrictEqual } from "node:assert";
-import { query } from "../old_query-builder.ts";
+import { query } from "../core.ts";
 import {
   cousinOf,
   cousinsAgg,
@@ -29,8 +27,6 @@ import {
   anyKidOf
 } from "../extended/familytree-rel.ts"
 import { membero } from "../relations-list.ts";
-import { and, eq, fresh } from "../old_relations.ts";
-import { lvar } from "../old_core.ts";
 import { QUERIES } from "./direct-sql.ts";
 
 console.log("START quick-test");
@@ -109,7 +105,6 @@ const q = query()
     kidsAgg($.person, $.kids),
 
   ])
-// .enableProfiling()
 // .limit(10)
 
 const results = [];
@@ -129,7 +124,6 @@ console.dir({
 }, {
   depth: 100 
 });
-q.printProfileRecap();
 await Promise.all(closeFns.map(x => x()));
 console.log("FINISHED", BACKEND, Date.now() - start);
 console.log("END quick-test");

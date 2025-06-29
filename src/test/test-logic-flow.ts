@@ -1,6 +1,12 @@
-import { Subst, Term, walk } from "../old_core.ts"
-import { eq, and, or } from "../old_relations.ts"
-import { createLogicVarProxy } from "../old_run.ts";
+import {
+  Subst,
+  Term,
+  walk,
+  eq,
+  and,
+  or,
+  createLogicVarProxy
+} from "../core.ts"
 
 const log = console.log;
 const { proxy: $ } = createLogicVarProxy("test_");

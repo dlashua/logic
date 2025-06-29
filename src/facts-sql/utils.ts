@@ -4,7 +4,7 @@ import {
   isVar,
   walk,
   unify
-} from '../old_core.ts'
+} from '../core.ts'
 import { WhereClause } from './types.ts';
 
 export const queryUtils = {

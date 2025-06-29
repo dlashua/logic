@@ -1,25 +1,17 @@
 import {
-  Subst,
   Term,
-  extendSubst,
-  isVar,
   lvar,
-  walk
-} from "../old_core.ts"
-import { collecto } from "../relations-agg.ts";
-import { createLogicVarProxy } from "../old_run.ts";
-import {
+  createLogicVarProxy ,
   Goal,
   Rel,
   and,
   distincto_G,
   eq,
-  neq_C,
   not,
   or,
-} from "../old_relations.ts";
-import type { ProfiledGoal, ProfilableGoal } from "../old_relations.ts";
-import { getCousinsOf } from "../test/direct-sql.ts";
+} from "../core.ts"
+import { collecto } from "../relations-agg.ts";
+// import { getCousinsOf } from "../test/direct-sql.ts";
 
 let parent_kid = (p: Term, k: Term): Goal => {
   throw "must set parent_kid";
@@ -284,27 +276,27 @@ export function cousinOf(a: any, b: any, degree = 1, removal = 0): any {
 
 
 // This is cousinOf via direct-sql
-export function xxcousinOf(a: any, b: any, degree = 1, removal = 0): any {
-  const goal = async function* cousinOf (s: Subst) {
-    const a_w = await walk(a, s);
-    const degree_w = await walk(degree, s);
-    const removal_w = await walk(removal, s);
-    const b_w = await walk(b, s);
-    if(isVar(a_w)) return;
-    if(isVar(degree_w)) return;
-    if(isVar(removal_w)) return;
-    const cousins = await getCousinsOf(a_w, degree_w, removal_w);
-    if(!isVar(b_w)) {
-      if(cousins.includes(b_w)) yield s;
-      return;
-    }
-    for(const cousin of cousins) {
-      yield extendSubst(b, cousin, s);
-    }
-    return;
-  };
-  return goal;
-}
+// export function xxcousinOf(a: any, b: any, degree = 1, removal = 0): any {
+//   const goal = async function* cousinOf (s: Subst) {
+//     const a_w = await walk(a, s);
+//     const degree_w = await walk(degree, s);
+//     const removal_w = await walk(removal, s);
+//     const b_w = await walk(b, s);
+//     if(isVar(a_w)) return;
+//     if(isVar(degree_w)) return;
+//     if(isVar(removal_w)) return;
+//     const cousins = await getCousinsOf(a_w, degree_w, removal_w);
+//     if(!isVar(b_w)) {
+//       if(cousins.includes(b_w)) yield s;
+//       return;
+//     }
+//     for(const cousin of cousins) {
+//       yield extendSubst(b, cousin, s);
+//     }
+//     return;
+//   };
+//   return goal;
+// }
 
 export const cousinsAgg = Rel((v, s, degree = 1, removal = 0) => {
   const in_s = lvar("in_s");

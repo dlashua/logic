@@ -1,5 +1,5 @@
 import { aggregateVarMulti } from "../../facts.ts";
-import { run } from "../../old_run.ts";
+import { run , and, gtc } from "../../core.ts";
 import {
   loadData,
   acquireData,
@@ -8,7 +8,6 @@ import {
   countrycode,
   population
 } from "./city-data.ts"
-import { and, gtc } from "./relations.ts";
 
 
 await acquireData();

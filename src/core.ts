@@ -189,7 +189,7 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
 /**
  * Extends a substitution by binding a variable to a value, with an occurs check.
  */
-async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
+export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
   if (await occursCheck(v, val, s)) {
     return null; // Occurs check failed
   }
@@ -382,7 +382,7 @@ function deepListWalk(val: any): any {
 /**
  * Creates a proxy object that automatically creates logic variables on access.
  */
-function createLogicVarProxy<K extends string | symbol = string>(
+export function createLogicVarProxy<K extends string | symbol = string>(
   prefix = ""
 ): { proxy: Record<K, Var>; varMap: Map<K, Var> } {
   const varMap = new Map<K, Var>();
@@ -602,3 +602,63 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
     )]
   );
 }
+
+/** Forgotten Items **/
+
+export function Rel<F extends (...args: any) => any>(
+  fn: F,
+): (...args: Parameters<F>) => Goal {
+  return (...args: Parameters<F>) => {
+    const goal = async function* relGoal(s: Subst) {
+      // Walk all arguments with the current substitution
+      const walkedArgs = await Promise.all(args.map(arg => walk(arg, s)));
+      // Call the underlying relation function with grounded arguments
+      const subgoal = fn(...walkedArgs);
+      for await (const s1 of subgoal(s)) {
+        yield s1;
+      }
+    };
+    // Always set a custom property for the logical name
+    if (typeof goal === "function" && fn.name) {
+      (goal as any).__logicName = fn.name;
+    }
+    return goal;
+  };
+}
+
+export const distincto_G = Rel((t: Term, g: Goal) => 
+  async function* distincto_G (s: Subst) {
+    const seen = new Set();
+    for await (const s2 of g(s)) {
+      const w_t = await walk(t, s2);
+      if (isVar(w_t)) {
+        yield s2;
+        continue;
+      }
+      const key = JSON.stringify(w_t);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      yield s2;
+    }
+  }
+);
+
+export function not(goal: Goal): Goal {
+  const g = async function* not(s: Subst) {
+    let found = false;
+    for await (const _ of goal(s)) {
+      found = true;
+      break;
+    }
+    if (!found) yield s;
+  };
+  return g;
+}
+
+export const neq_C = Rel((x: Term, y: Term) => not(eq(x, y)));
+
+export type TermedArgs<T extends (...args: any) => any> = T extends (
+  ...args: infer A
+) => infer R
+  ? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<R>]) => Goal
+  : never;

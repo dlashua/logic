@@ -4,7 +4,8 @@ import {
   and,
   enableLogicProfiling,
   disableLogicProfiling,
-  printLogicProfileRecap
+  printLogicProfileRecap,
+  conj
 } from "./relations.ts"
 import {
   Subst,
@@ -12,7 +13,8 @@ import {
   Var,
   CTX_SYM,
   EOSseen,
-  EOSsent
+  EOSsent,
+  wasteGen
 } from "./core.ts"
 import { createLogicVarProxy, formatSubstitutions, withFluentAsyncGen, RunResult } from "./run.ts"
 
@@ -153,22 +155,22 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
     } else if (this._rawSelector) {
       formatter = this._rawSelector;
     }
-    const goal = this._getGoal();
+
 
     const Ctx = {
-      mode: "collect",
+      mode: "run",
       patterns: []
     };
-
-    Ctx.mode = "run";
     const s0Run: Subst = new Map();
     s0Run.set(CTX_SYM, Ctx);
+
+    const goal = this._getGoal();
+    
+    await wasteGen(goal(null));
     const gen = formatSubstitutions(goal(s0Run), formatter, this._limit);
     for await (const result of gen) {
       yield result;
     }
-    EOSsent("runQuery");
-    yield* goal(null);
   }
 
   /**

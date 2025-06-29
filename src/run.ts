@@ -28,10 +28,8 @@ export async function* formatSubstitutions<
 ): AsyncGenerator<RunResult<Fmt>> {
   let count = 0;
   for await (const s of substs) {
-    if (s === null) {
-      EOSseen("formatSubstitutions");
-      yield null;
-      return;
+    if( s === null) {
+      continue;
     }
     if (count++ >= n) break;
     const out: Partial<RunResult<Fmt>> = {};

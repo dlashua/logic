@@ -3,6 +3,7 @@ import type { Knex } from "knex";
 import knex from "knex";
 import {
   EOSseen,
+  EOSsent,
   Subst,
   Term,
   isVar,
@@ -153,20 +154,21 @@ export const makeRelDB = async (
 
   // Main relation generator: exact query and row cache, with logging
   const rel = async (table: string) => {
+    let nextGoalId = 1;
+    const patterns = [];
     return function goal(queryObj: Record<string, Term>) {
-      return async function* factsSql(s: Subst) {
-        if (s === null) {
-          EOSseen("facts-sql rel");
-          yield null;
-          return;
-        }
+      const goalId = nextGoalId++;
+      console.log("MADE GOAL", goalId, queryObj);
+      gatherAndMerge(queryObj);
+
+      async function* run(s: Subst, queryObj: Record<string, Term>) {
         const { selectCols, whereClauses, walkedQ } = await buildQueryParts(queryObj, s);
         const cacheKey = makeCacheKey(table, selectCols, whereClauses);
+        const rowKey = allParamsGrounded(walkedQ) ? makeRowCacheKey(table, walkedQ) : null;
         let rows;
         let cacheType = null;
         // If all params are grounded, try row cache first
-        if (allParamsGrounded(walkedQ)) {
-          const rowKey = makeRowCacheKey(table, walkedQ);
+        if (rowKey) {
           if (rowCache.has(rowKey)) {
             rows = [rowCache.get(rowKey)];
             cacheType = 'row';
@@ -217,6 +219,86 @@ export const makeRelDB = async (
           }
         }
       };
+      
+      function gatherAndMerge(queryObj: Record<string, Term>) {
+        const matches = patterns.filter(x => {
+          
+        })
+        
+        patterns.push({
+          table,
+          goalIds: [goalId],
+          queryObj,
+          rows: [],
+          ran: false,
+        });
+      };
+
+      // return async function* factsSql(s: Subst) {
+      //   console.log("IN GOAL", goalId, queryObj);
+      //   if (s === null) {
+      //     if(EOS) {
+      //       console.log("null after EOS!");
+      //     }
+
+      //     EOSseen(`facts-sql rel ${goalId}`);
+      //     EOS = true;          
+
+      //     // const thisGoalPatterns = patterns.filter(x => x.goalId === goalId);
+      //     // console.log("thisGoalPatterns", thisGoalPatterns);
+      //     // if(thisGoalPatterns.length === 0) {
+      //     //   console.log("allPatterns", patterns);
+      //     // }
+      //     console.log("PATTERNS", patterns);
+      //     let s2 = patterns.find(x => x.goalId === 1)?.s;
+      //     if(!s2) return;
+      //     while (patterns.length > 0) {
+      //       const pattern = patterns.shift();
+      //       for await (s2 of run(s2, pattern.queryObj)) {
+      //         console.log("YIELD", s2);
+      //         yield s2;
+      //       }
+      //     }
+          
+      //     EOSsent(`facts-sql rel ${goalId}`);
+      //     yield null;
+      //     return;
+      //   }
+      //   if(EOS) {
+      //     console.log(`record after EOS ${goalId}`);
+      //   }
+
+      //   gather(queryObj, s);
+      //   yield s;
+      // }
+
+      return async function* factsSql(s: Subst) {
+        console.log("IN GOAL", goalId, queryObj);
+        if (s === null) {
+          EOSseen(`facts-sql rel ${goalId}`);
+          yield null;
+          return
+        }
+
+        if(patterns.length === 0) {
+          console.log("NO PATTERNS");
+          // yield s;
+          return;
+        }
+
+        const thisPatterns = patterns.filter(x => x.goalIds.includes(goalId));
+
+        for (const pattern of thisPatterns) {
+          const pidx = patterns.indexOf(pattern);
+          patterns.splice(pidx, 1)
+          let s2 = s;
+          for await (s2 of run(s2, pattern.queryObj)) {
+            yield s2;
+          }
+        }
+        return;
+      }
+   
     };
   };
 

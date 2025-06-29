@@ -6,7 +6,7 @@ import { PatternManager, SymmetricPatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { RegularRelation } from "./regular-relation.ts";
 import { SymmetricRelation } from "./symmetric-relation.ts";
-import { GoalFunction } from "./types.ts";
+import { GoalFunction, RelationOptions } from "./types.ts";
 
 export interface RelationFactoryDependencies {
   db: Knex;
@@ -20,7 +20,7 @@ export interface RelationFactoryDependencies {
 export class RelationFactory {
   constructor(private deps: RelationFactoryDependencies) {}
 
-  createRelation(table: string) {
+  createRelation(table: string, options?: RelationOptions) {
     const patternManager = new PatternManager(this.deps.logger);
     const relation = new RegularRelation(
       table,
@@ -30,6 +30,7 @@ export class RelationFactory {
       this.deps.queryBuilder,
       this.deps.queries,
       this.deps.realQueries,
+      options,
     );
 
     return (queryObj: Record<string, Term>): GoalFunction => {
@@ -37,7 +38,7 @@ export class RelationFactory {
     };
   }
 
-  createSymmetricRelation(table: string, keys: [string, string]) {
+  createSymmetricRelation(table: string, keys: [string, string], options?: RelationOptions) {
     const patternManager = new SymmetricPatternManager(this.deps.logger);
     const relation = new SymmetricRelation(
       table,
@@ -48,6 +49,7 @@ export class RelationFactory {
       this.deps.queryBuilder,
       this.deps.queries,
       this.deps.realQueries,
+      options,
     );
 
     return (queryObj: Record<string, Term<string | number>>): GoalFunction => {

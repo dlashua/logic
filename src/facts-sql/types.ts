@@ -47,3 +47,15 @@ export interface RelDBDependencies {
   db: Knex;
   config: BaseConfig;
 }
+
+export interface RelationOptions {
+  fullScanKeys?: string[];
+  cacheTTL?: number; // Time-to-live in milliseconds, defaults to 3000ms
+}
+
+export interface CacheEntry {
+  data: any[];
+  timestamp: number;
+}
+
+export type FullScanCache = Record<string, Record<string, CacheEntry>>;

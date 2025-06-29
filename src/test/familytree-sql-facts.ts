@@ -14,8 +14,12 @@ export const relDB = await makeRelDB({
   },
   useNullAsDefault: true,
 });
-const PK = await relDB.rel("family");
-const R = await relDB.relSym("relationship", ["a", "b"]);
+const PK = await relDB.rel("family", {
+  fullScanKeys: ["parent", "kid"]
+});
+const R = await relDB.relSym("relationship", ["a", "b"], {
+  fullScanKeys: ["a", "b"]
+});
 
 export const parent_kid = Rel(
   (p: Term, k: Term) =>

@@ -1,4 +1,5 @@
 import assert, { deepEqual, deepStrictEqual } from "node:assert";
+import { includes } from "lodash";
 import { query } from "../core.ts";
 import {
   cousinOf,
@@ -28,6 +29,7 @@ import {
 } from "../extended/familytree-rel.ts"
 import { membero } from "../relations-list.ts";
 import { QUERIES } from "./direct-sql.ts";
+import { relDB } from "./familytree-sql-facts.ts";
 
 console.log("START quick-test");
 
@@ -55,10 +57,11 @@ async function loadBackend(backend: string) {
           queries: module.relDB.realQueries.length,
           Fqueries: module.relDB.realQueries.filter(x => x.includes("family")).length,
           Rqueries: module.relDB.realQueries.filter(x => x.includes("relationship")).length,
+          // daniel_Rqueries: module.relDB.realQueries.filter(x => x.includes("daniel")),
           aux: QUERIES.length,
         });
       },
-      () => module.relDB.db.destroy(),
+      // () => module.relDB.db.destroy(),
     );
     return module;
   } else if (backend === "mem") {
@@ -72,47 +75,41 @@ async function loadBackend(backend: string) {
 const { parent_kid, relationship } = await loadBackend(BACKEND);
 
 const start = Date.now();
-const q = query()
-  // .enableProfiling()
-  // .select($ => ({
-  //   p: $.person 
-  // }))
-  .where($ => [
+function makeQuery() {
+  return query()
+    .where($ => [
+  
+      // DO NOT DELETE THIS TEST CASE COMMENT
+      // membero($.person, ["celeste", "daniel", "jackson"]),
+  
+      person($.person),
+      parentAgg($.person, $.parents),
+      stepParentAgg($.person, $.step_parents),
+      grandparentAgg($.person, $.grand_parents),
+      greatgrandparentAgg($.person, $.great_grand_parents),
+      uncleAgg($.person, $.uncle, 1),
+      uncleAgg($.person, $.uncle_2, 2),
+      uncleAgg($.person, $.uncle_3, 3),
+      uncleAgg($.person, $.uncle_4, 4),
+  
+      siblingsAgg($.person, $.siblings),
+      cousinsAgg($.person, $.cousins_1, 1),
+      cousinsAgg($.person, $.cousins_2, 2),
+      cousinsAgg($.person, $.cousins_3, 3),
+      cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+      cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+  
+      cousinsAgg($.person, $.cousins_2_2r, 2, 1),
+      cousinsAgg($.person, $.cousins_3_3r, 3, 1),
+      kidsAgg($.person, $.kids),
+  
+    ])
+}
 
-    // DO NOT DELETE THIS TEST CASE COMMENT
-    membero($.person, ["celeste", "daniel", "jackson"]),
-
-    person($.person),
-    // parentAgg($.person, $.parents),
-    // stepParentAgg($.person, $.step_parents),
-    // grandparentAgg($.person, $.grand_parents),
-    // greatgrandparentAgg($.person, $.great_grand_parents),
-    // uncleAgg($.person, $.uncle, 1),
-    // uncleAgg($.person, $.uncle_2, 2),
-    // uncleAgg($.person, $.uncle_3, 3),
-    // uncleAgg($.person, $.uncle_4, 4),
-
-    // siblingsAgg($.person, $.siblings),
-    cousinsAgg($.person, $.cousins_1, 1),
-    // cousinsAgg($.person, $.cousins_2, 2),
-    // cousinsAgg($.person, $.cousins_3, 3),
-    // cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-    // cousinsAgg($.person, $.cousins_1_1y, 1, -1),
-
-    // cousinsAgg($.person, $.cousins_2_2r, 2, 1),
-    // cousinsAgg($.person, $.cousins_3_3r, 3, 1),
-    // kidsAgg($.person, $.kids),
-
-  ])
-// .limit(10)
-
+const q = makeQuery();
 const results = [];
 for await (const row of q) {
-  if (row === null) {
-    console.log('End-of-stream marker (`null`) reached.');
-  } else {
-    results.push(row);
-  }
+  results.push(row);
 }
 // const results = await q.toArray();
 
@@ -125,7 +122,7 @@ console.dir({
 });
 await Promise.all(closeFns.map(x => x()));
 console.log("FINISHED", BACKEND, Date.now() - start);
-console.log("END quick-test");
+console.log("END quick-test #1");
 
 const expectedRes = {
   person: 'celeste',
@@ -194,12 +191,17 @@ const expectedRes = {
   kids: []
 };
 
-// const foundRes = results.find(x => x.person === "celeste");
-// deepStrictEqual(foundRes, expectedRes, "NOT THE SAME");
 
-// const a = parentOf("celeste", "daniel")
-// const b = a(new Map())
-// const c = await b.next().then(x => x.value !== undefined);
-// console.log("RESULT", c);
+console.log("Starting second query run...");
+const start2 = Date.now();
+const q2 = makeQuery();
+const results2 = [];
+for await (const row of q2) {
+  results2.push(row);
+}
+await Promise.all(closeFns.map(x => x()));
+console.log("FINISHED", BACKEND, Date.now() - start2);
+console.log("END quick-test #2");
+console.log("Results match:", results.length === results2.length);
 
-
+await relDB.db.destroy()

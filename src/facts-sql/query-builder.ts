@@ -45,7 +45,10 @@ export class QueryBuilder {
     keys: [string, string],
     groundedValues: (string | number)[]
   ): Knex.QueryBuilder {
-    if (groundedValues.length === 2) {
+    if (groundedValues.length === 0) {
+      // No grounded values - select all rows
+      return this.db(table).select(keys);
+    } else if (groundedValues.length === 2) {
       return this.db(table)
         .select(keys)
         .where(keys[0], groundedValues[0])

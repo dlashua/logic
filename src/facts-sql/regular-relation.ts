@@ -4,9 +4,19 @@ import { QueryCache } from "./cache.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { queryUtils, unificationUtils } from "./utils.ts";
-import { Pattern, GoalFunction } from "./types.ts";
+import { 
+  Pattern, 
+  GoalFunction, 
+  RelationOptions, 
+  FullScanCache, 
+  CacheEntry 
+} from "./types.ts";
 
 export class RegularRelation {
+  private fullScanCache: FullScanCache = {};
+  private fullScanKeys: Set<string>;
+  private cacheTTL: number;
+
   constructor(
     private table: string,
     private patternManager: PatternManager,
@@ -15,7 +25,11 @@ export class RegularRelation {
     private queryBuilder: QueryBuilder,
     private queries: string[],
     private realQueries: string[],
-  ) {}
+    private options?: RelationOptions,
+  ) {
+    this.fullScanKeys = new Set(options?.fullScanKeys || []);
+    this.cacheTTL = options?.cacheTTL ?? 10000; // Default 3 seconds
+  }
 
   createGoal(queryObj: Record<string, Term>): GoalFunction {
     const goalId = this.patternManager.generateGoalId();
@@ -147,6 +161,14 @@ export class RegularRelation {
     const { whereClauses } = await queryUtils.buildQueryParts(queryObj, s);
     const selectColsKeys = Object.keys(pattern.selectCols);
     
+    // Check if any where clause uses a fullScanKey
+    const fullScanKey = whereClauses.find(clause => this.fullScanKeys.has(clause.column));
+    
+    if (fullScanKey) {
+      return await this.executeFullScanQuery(pattern, queryObj, s, fullScanKey, selectColsKeys);
+    }
+    
+    // Regular query execution
     let query;
     if (selectColsKeys.length === 0) {
       // Confirmation query
@@ -177,5 +199,173 @@ export class RegularRelation {
         sql 
       }
     };
+  }
+
+  private async executeFullScanQuery(
+    pattern: Pattern,
+    queryObj: Record<string, Term>,
+    s: Subst,
+    fullScanKey: { column: string; value: any },
+    selectColsKeys: string[]
+  ): Promise<{ rows: any[], cacheInfo: any }> {
+    const { column, value } = fullScanKey;
+    
+    // Check if we already have valid (non-expired) full scan results cached
+    let allRows = this.getCachedData(column, value);
+    
+    if (!allRows) {
+      // Perform full scan for this key-value pair
+      const fullScanQuery = this.queryBuilder.buildSelectQuery(
+        this.table, 
+        ['*'], // Select all columns
+        [{ 
+          column, 
+          value 
+        }]
+      );
+      
+      const { rows, sql } = await this.queryBuilder.executeQuery(fullScanQuery);
+      
+      // Cache the full scan results using TTL-aware method
+      this.setCachedData(column, value, rows);
+      allRows = rows;
+      
+      this.logger.log("FULL_SCAN_EXECUTED", `Full scan executed for ${column}=${value}`, {
+        table: this.table,
+        column,
+        value,
+        rowCount: rows.length
+      });
+      
+      this.queries.push(sql);
+      this.realQueries.push(sql);
+      (pattern as any).queries.push(sql);
+    } else {
+      this.logger.log("FULL_SCAN_CACHE_HIT", `Full scan cache hit for ${column}=${value}`, {
+        table: this.table,
+        column,
+        value,
+        rowCount: allRows.length
+      });
+    }
+    
+    // Filter rows based on other where clauses (if any)
+    const { whereClauses } = await queryUtils.buildQueryParts(queryObj, s);
+    const otherWhereClauses = whereClauses.filter(clause => clause.column !== column);
+    
+    let filteredRows = allRows;
+    if (otherWhereClauses.length > 0) {
+      filteredRows = allRows.filter(row => {
+        return otherWhereClauses.every(clause => row[clause.column] === clause.value);
+      });
+    }
+    
+    // Project only the requested columns if not selecting all
+    let resultRows = filteredRows;
+    if (selectColsKeys.length > 0 && !selectColsKeys.includes('*')) {
+      resultRows = filteredRows.map(row => {
+        const projectedRow: any = {};
+        for (const key of selectColsKeys) {
+          projectedRow[key] = row[key];
+        }
+        return projectedRow;
+      });
+    }
+    
+    // Mark pattern as ran and store results for future cache hits
+    (pattern as any).ran = true;
+    (pattern as any).rows = resultRows;
+    this.patternManager.markPatternAsRan(pattern);
+    
+    // Create additional patterns for cache hits
+    this.createFullScanCachePatterns(column, value, allRows);
+    
+    return {
+      rows: resultRows,
+      cacheInfo: {
+        type: 'fullScan',
+        column,
+        value,
+        totalRows: allRows.length,
+        filteredRows: resultRows.length
+      }
+    };
+  }
+  
+  private createFullScanCachePatterns(column: string, value: any, allRows: any[]): void {
+    // Create a "master" pattern for this fullScan key-value pair
+    // This pattern will be used to match future queries that have the same where clause
+    const masterPattern: Pattern = {
+      table: this.table,
+      goalIds: [-1], // Special goal ID for fullScan patterns
+      rows: allRows,
+      ran: true,
+      selectCols: {}, // Empty - this pattern can match any select columns
+      whereCols: { 
+        [column]: value 
+      },
+      queries: [`FULL_SCAN:${this.table}:${column}=${value}`],
+      last: {
+        selectCols: [],
+        whereCols: []
+      }
+    };
+    
+    // Add this pattern to the pattern manager so future queries can match against it
+    this.patternManager.addPattern(masterPattern);
+    
+    this.logger.log("FULL_SCAN_PATTERNS_CREATED", `Master pattern created for future cache hits`, {
+      table: this.table,
+      column,
+      value,
+      rowCount: allRows.length,
+      patternId: masterPattern.goalIds[0]
+    });
+  }
+
+  private isCacheEntryExpired(entry: CacheEntry): boolean {
+    return Date.now() - entry.timestamp > this.cacheTTL;
+  }
+
+  private getCachedData(column: string, value: any): any[] | null {
+    const entry = this.fullScanCache[column]?.[value];
+    if (!entry) {
+      return null;
+    }
+    
+    if (this.isCacheEntryExpired(entry)) {
+      this.logger.log("FULL_SCAN_CACHE_EXPIRED", `Cache entry expired for ${column}=${value}`, {
+        table: this.table,
+        column,
+        value,
+        age: Date.now() - entry.timestamp,
+        ttl: this.cacheTTL
+      });
+      
+      // Clean up expired entry
+      delete this.fullScanCache[column][value];
+      return null;
+    }
+    
+    return entry.data;
+  }
+
+  private setCachedData(column: string, value: any, data: any[]): void {
+    if (!this.fullScanCache[column]) {
+      this.fullScanCache[column] = {};
+    }
+    
+    this.fullScanCache[column][value] = {
+      data,
+      timestamp: Date.now()
+    };
+    
+    this.logger.log("FULL_SCAN_CACHE_SET", `Cache entry created for ${column}=${value}`, {
+      table: this.table,
+      column,
+      value,
+      rowCount: data.length,
+      ttl: this.cacheTTL
+    });
   }
 }

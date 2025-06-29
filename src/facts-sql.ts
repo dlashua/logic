@@ -37,6 +37,7 @@ const LOG_IDS_TO_IGNORE = new Set<string>([
   "PATTERNS AFTER",
   "RAN FALSE PATTERNS",
   "PATTERNS BEFORE",
+  "FINAL PATTERNS",
 ]); // List of log IDs to ignore
 
 const CRITICAL_LOG_IDS = new Set<string>([ "SELECTCOLS MISMATCH PATTERNS"]);
@@ -186,7 +187,6 @@ export const makeRelDB = async (
 
     return function goal(queryObj: Record<string, Term>) {
       const goalId = nextGoalId++;
-      // console.log("MADE GOAL", goalId, queryObj);
       gatherAndMerge(queryObj);
 
       async function* run(s: Subst, queryObj: Record<string, Term>, pattern: Pattern, walkedQ: Record<string, Term>) {
@@ -196,6 +196,7 @@ export const makeRelDB = async (
         const rowKey = allParamsGrounded(walkedQ) ? makeRowCacheKey(pattern.table, walkedQ) : null;
         let rows;
         let cacheType = null;
+        let matchingPatternGoals = null;
 
         log("RUN_START", {
           pattern,
@@ -211,6 +212,35 @@ export const makeRelDB = async (
             pattern,
             rows,
           });
+        }
+
+        // Update pattern cache logic to check all patterns
+        if (!rows && PATTERN_CACHE_ENABLED) {
+          const matchingPattern = patterns.find(otherPattern => {
+            // Check if whereCols match and selectCols are not grounded
+            return (
+              JSON.stringify(otherPattern.whereCols) === JSON.stringify(pattern.whereCols) && otherPattern.ran === true
+            );
+          });
+
+          if (matchingPattern) {
+            if(matchingPattern.selectCols.length === 0) {
+              if (matchingPattern.rows[0] === true) {
+                rows = ["HERE"]
+              } else {
+                rows = []
+              }
+            } else {
+              rows = matchingPattern.rows;
+            }
+            cacheType = 'pattern';
+            matchingPatternGoals = matchingPattern.goalIds;
+            log("PATTERN_CACHE_HIT", {
+              pattern,
+              matchingPattern,
+              rows,
+            });
+          }
         }
 
         // If all params are grounded, try row cache first
@@ -281,7 +311,7 @@ export const makeRelDB = async (
           // Log cache hit
           let desc = '';
           if (cacheType === 'pattern') {
-            desc = `[PATTERN CACHE] ${pattern.table} rows=${JSON.stringify(rows)}`;
+            desc = `[PATTERN CACHE] ${pattern.table} goalIds=${matchingPatternGoals} rows=${JSON.stringify(rows)}`;
           } else if (cacheType === 'row') {
             desc = `[ROW CACHE] ${pattern.table} ${JSON.stringify(walkedQ)}`;
           } else if (cacheType === 'query') {
@@ -298,42 +328,49 @@ export const makeRelDB = async (
         }
 
         // Update the pattern with the rows returned
-        if (Object.keys(selectCols).length === 0) {
-          // Confirmation query
-          pattern.rows = rows.length > 0 ? [true] : [false];
+        if(rows.length === 1 && (
+          rows[0] === true
+          || rows[0] === false
+        )) {
+          //pass
         } else {
-          pattern.rows = rows.length > 0 ? rows : [false];
+          if (Object.keys(selectCols).length === 0) {
+          // Confirmation query
+            pattern.rows = rows.length > 0 ? [true] : [false];
+          } else {
+            pattern.rows = rows.length > 0 ? rows : [false];
 
-          // Ensure selectCols remain ungrounded if multiple rows are returned
-          if (rows.length > 1) {
-            log("MULTIPLE_ROWS_SELECTCOLS_UNCHANGED", {
-              pattern,
-              rows,
-            });
+            // Ensure selectCols remain ungrounded if multiple rows are returned
+            // if (rows.length > 1) {
+            //   log("MULTIPLE_ROWS_SELECTCOLS_UNCHANGED", {
+            //     pattern,
+            //     rows,
+            //   });
 
-            // Reset selectCols to its original state
-            pattern.selectCols = {
-              ...selectCols,
-            };
+            //   // Reset selectCols to its original state
+            //   pattern.selectCols = {
+            //     ...selectCols,
+            //   };
 
-            // Add a flag to indicate that selectCols were not grounded
-            pattern.selectColsUngrounded = true;
-          } else if (rows.length === 1) {
-            // Ground selectCols if a single row is returned
-            const singleRow = rows[0];
-            for (const col of Object.keys(selectCols)) {
-              if (isVar(selectCols[col])) {
-                log("GROUNDING_SELECT_COL", {
-                  key: col,
-                  currentValue: selectCols[col],
-                  newValue: singleRow[col],
-                });
-                pattern.selectCols[col] = singleRow[col];
-              }
-            }
+            //   // Add a flag to indicate that selectCols were not grounded
+            //   pattern.selectColsUngrounded = true;
+            // } else if (rows.length === 1) {
+            //   // Ground selectCols if a single row is returned
+            //   const singleRow = rows[0];
+            //   for (const col of Object.keys(selectCols)) {
+            //     if (isVar(selectCols[col])) {
+            //       log("GROUNDING_SELECT_COL", {
+            //         key: col,
+            //         currentValue: selectCols[col],
+            //         newValue: singleRow[col],
+            //       });
+            //       pattern.selectCols[col] = singleRow[col];
+            //     }
+            //   }
 
-            // Clear the ungrounded flag if only one row is returned
-            delete pattern.selectColsUngrounded;
+          //   // Clear the ungrounded flag if only one row is returned
+          //   delete pattern.selectColsUngrounded;
+          // }
           }
         }
 
@@ -560,12 +597,14 @@ export const makeRelDB = async (
         log("PATTERNS AFTER", {
           patterns,
         });
+
         const ranFalsePatterns = patterns.filter(x => x.ran === false);
         if(ranFalsePatterns.length > 0) {
           log("RAN FALSE PATTERNS", {
             ranFalsePatterns 
           });
         }
+
         const allSelectColsAreTags = (cols: Record<string, Term>): boolean => {
           return Object.values(cols).every((x: Term) => (x as any).id);
         };
@@ -575,6 +614,23 @@ export const makeRelDB = async (
             selectColsMismatchPatterns 
           });
         }
+
+        const mergedPatterns = patterns.filter(x => x.goalIds.length > 1);
+        if(mergedPatterns.length > 0) {
+          log("MERGED PATTERNS SEEN. GOOD!", {
+            mergedPatterns 
+          });
+        }
+
+        setTimeout(() => {
+          if (goalId === nextGoalId - 1) {
+            log("FINAL PATTERNS", {
+              patterns,
+              goalId, 
+            })
+          }
+        }, 500);
+
         return;
       }
    

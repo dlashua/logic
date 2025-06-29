@@ -165,8 +165,8 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
     s0Run.set(CTX_SYM, Ctx);
 
     const goal = this._getGoal();
-    
-    await wasteGen(goal(null));
+
+    // await wasteGen(goal(null));
     const gen = formatSubstitutions(goal(s0Run), formatter, this._limit);
     for await (const result of gen) {
       yield result;

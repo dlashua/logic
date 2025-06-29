@@ -54,7 +54,7 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        console.log("queries performed", module.relDB.realQueries);
+        // console.log("queries performed", module.relDB.realQueries);
         console.log("queries performed", {
           queries: module.relDB.realQueries.length,
           cached: module.relDB.cacheQueries.length,
@@ -90,21 +90,22 @@ const q = query()
     stepParentAgg($.person, $.step_parents),
     grandparentAgg($.person, $.grand_parents),
     greatgrandparentAgg($.person, $.great_grand_parents),
-    // uncleAgg($.person, $.uncle, 1),
-    // uncleAgg($.person, $.uncle_2, 2),
-    // uncleAgg($.person, $.uncle_3, 3),
-    // uncleAgg($.person, $.uncle_4, 4),
+    uncleAgg($.person, $.uncle, 1),
+    uncleAgg($.person, $.uncle_2, 2),
+    uncleAgg($.person, $.uncle_3, 3),
+    uncleAgg($.person, $.uncle_4, 4),
 
-    // siblingsAgg($.person, $.siblings),
-    // cousinsAgg($.person, $.cousins_1, 1),
-    // cousinsAgg($.person, $.cousins_2, 2),
-    // cousinsAgg($.person, $.cousins_3, 3),
-    // cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-    // cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+    siblingsAgg($.person, $.siblings),
+    cousinsAgg($.person, $.cousins_1, 1),
+    cousinsAgg($.person, $.cousins_2, 2),
+    cousinsAgg($.person, $.cousins_3, 3),
+    cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+    cousinsAgg($.person, $.cousins_1_1y, 1, -1),
 
-    // cousinsAgg($.person, $.cousins_2_2r, 2, 1),
-    // cousinsAgg($.person, $.cousins_3_3r, 3, 1),
-    
+    cousinsAgg($.person, $.cousins_2_2r, 2, 1),
+    cousinsAgg($.person, $.cousins_3_3r, 3, 1),
+    kidsAgg($.person, $.kids),
+
   ])
 // .enableProfiling()
 // .limit(10)
@@ -122,7 +123,7 @@ for await (const row of q) {
 console.dir({
   rescnt: results.length,
   // lastres: results.filter(x => ["daniel", "celeste", "roy_long"].includes(x.person)),
-  allres: results,
+  // allres: results,
 }, {
   depth: 100 
 });

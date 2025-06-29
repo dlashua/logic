@@ -57,6 +57,8 @@ async function loadBackend(backend: string) {
         // console.log("queries performed", module.relDB.realQueries);
         console.log("queries performed", {
           queries: module.relDB.realQueries.length,
+          Fqueries: module.relDB.realQueries.filter(x => x.includes("family")).length,
+          Rqueries: module.relDB.realQueries.filter(x => x.includes("relationship")).length,
           cached: module.relDB.cacheQueries.length,
           aux: QUERIES.length,
         });

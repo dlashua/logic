@@ -38,6 +38,8 @@ const LOG_IDS_TO_IGNORE = new Set<string>([
   "RAN FALSE PATTERNS",
   "PATTERNS BEFORE",
   "FINAL PATTERNS",
+  "FINAL PATTERNS SYM",
+
 ]); // List of log IDs to ignore
 
 const CRITICAL_LOG_IDS = new Set<string>([ "SELECTCOLS MISMATCH PATTERNS"]);
@@ -339,38 +341,6 @@ export const makeRelDB = async (
             pattern.rows = rows.length > 0 ? [true] : [false];
           } else {
             pattern.rows = rows.length > 0 ? rows : [false];
-
-            // Ensure selectCols remain ungrounded if multiple rows are returned
-            // if (rows.length > 1) {
-            //   log("MULTIPLE_ROWS_SELECTCOLS_UNCHANGED", {
-            //     pattern,
-            //     rows,
-            //   });
-
-            //   // Reset selectCols to its original state
-            //   pattern.selectCols = {
-            //     ...selectCols,
-            //   };
-
-            //   // Add a flag to indicate that selectCols were not grounded
-            //   pattern.selectColsUngrounded = true;
-            // } else if (rows.length === 1) {
-            //   // Ground selectCols if a single row is returned
-            //   const singleRow = rows[0];
-            //   for (const col of Object.keys(selectCols)) {
-            //     if (isVar(selectCols[col])) {
-            //       log("GROUNDING_SELECT_COL", {
-            //         key: col,
-            //         currentValue: selectCols[col],
-            //         newValue: singleRow[col],
-            //       });
-            //       pattern.selectCols[col] = singleRow[col];
-            //     }
-            //   }
-
-          //   // Clear the ungrounded flag if only one row is returned
-          //   delete pattern.selectColsUngrounded;
-          // }
           }
         }
 
@@ -639,35 +609,130 @@ export const makeRelDB = async (
 
   // --- Symmetric SQL relation (unchanged, but simplified) ---
   const relSym = async (table: string, keys: [string, string]) => {
+    let nextGoalId = 1;
+    interface Pattern {
+      table: string;
+      goalIds: number[];
+      rows: any[];
+      ran: boolean;
+      queryObj: Record<string, Term<string | number>>;
+      queries: string[];
+    }
+    const patterns: Pattern[] = [];
+
     return function goal(queryObj: Record<string, Term<string | number>>) {
-      const values = Object.values(queryObj);
-      return async function* (s: Subst) {
+      const goalId = nextGoalId++;
+      gatherAndMerge(queryObj);
+
+      async function* run(s: Subst, queryObj: Record<string, Term<string | number>>, pattern: Pattern) {
+        const values = Object.values(queryObj);
         if (s === null) {
           EOSseen("facts-sql relSym");
           yield null;
           return;
         }
         if (values.length > 2) return;
+
         const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
-        if(walkedValues[0] === walkedValues[1]) return;
+        if (walkedValues[0] === walkedValues[1]) return;
+
         const gv = walkedValues.filter(x => !isVar(x)) as (string | number)[];
         let rows;
-        if (gv.length === 2) {
-          const k = db(table).select(keys)
-            .where(keys[0], gv[0])
-            .andWhere(keys[1], gv[1]);
-          rows = await k;
-        } else {
-          const k = db(table).select(keys);
-          rows = await k;
+        let cacheType;
+        let matchingPatternGoals;
+
+        log("RUN_START", {
+          pattern,
+          queryObj,
+          walkedValues,
+        });
+
+        // If the pattern has already been run, use its rows directly
+        if (PATTERN_CACHE_ENABLED && pattern.ran) {
+          rows = pattern.rows;
+          log("PATTERN_CACHE_HIT", {
+            pattern,
+            rows,
+          });
         }
-        for (const row of rows) {
-          if (gv.length === 2) {
-            if (keys.every(k => gv.includes(row[k]))) {
-              yield s;
+
+        // Update pattern cache logic to check all patterns
+        if (!rows && PATTERN_CACHE_ENABLED) {
+          const matchingPattern = patterns.find(otherPattern => {
+            // Check if whereCols match and selectCols are not grounded
+            return (
+              JSON.stringify(otherPattern.whereCols) === JSON.stringify(pattern.whereCols) && otherPattern.ran === true
+            );
+          });
+
+          if (matchingPattern) {
+            if(matchingPattern.selectCols.length === 0) {
+              if (matchingPattern.rows[0] === true) {
+                rows = ["HERE"]
+              } else {
+                rows = []
+              }
+            } else {
+              rows = matchingPattern.rows;
             }
-            continue;
+            cacheType = 'pattern';
+            matchingPatternGoals = matchingPattern.goalIds;
+            log("PATTERN_CACHE_HIT", {
+              pattern,
+              matchingPattern,
+              rows,
+            });
           }
+        }
+
+        // Otherwise, hit the DB
+        if (!rows) {
+          let k;
+          if (gv.length === 2) {
+            k = db(table).select(keys)
+              .where(keys[0], gv[0])
+              .andWhere(keys[1], gv[1]);
+          } else {
+            k = db(table).select(keys).where(keys[0], gv[0]).orWhere(keys[1], gv[0]);
+          }
+          // Log real query
+          const sql = k.toString();
+          rows = await k;
+          pattern.ran = true;
+
+          log("DB_QUERY", {
+            sql,
+            rows,
+          });
+
+          realQueries.push(sql);
+          pattern.queries.push(sql);
+        } else {
+
+          // Log cache hit
+          let desc = '';
+          if (cacheType === 'pattern') {
+            desc = `[PATTERN CACHE] ${pattern.table} goalIds=${matchingPatternGoals} rows=${JSON.stringify(rows)}`;
+          } else {
+            desc = `[CACHE] ${pattern.table}`;
+          }
+          queries.push(desc);
+          cacheQueries.push(desc);
+          pattern.queries.push(desc);
+          log("CACHE_HIT", {
+            desc,
+          });
+
+        }
+
+        // Update the pattern with the rows returned
+        pattern.rows = rows;
+
+        log("PATTERN_ROWS_UPDATED", {
+          pattern,
+        });
+
+        for (const row of rows) {
           const s2 = new Map(s);
           const unified1 = await unify(walkedValues[0], row[keys[0]], s2);
           if (unified1) {
@@ -686,6 +751,75 @@ export const makeRelDB = async (
             }
           }
         }
+
+        log("RUN_END", {
+          pattern,
+        });
+      }
+
+      function gatherAndMerge(queryObj: Record<string, Term<string | number>>) {
+        // Normalize queryObj to account for symmetric keys
+        const normalizedQueryObj = Object.values(queryObj);
+        const whereCols = normalizedQueryObj.filter(x => !isVar(x));
+        const selectCols = normalizedQueryObj.filter(x => isVar(x));
+
+
+        patterns.push({
+          table,
+          selectCols,
+          whereCols,
+          goalIds: [goalId],
+          rows: [],
+          ran: false,
+          last: {
+            selectCols: [],
+            whereCols: [],
+          },
+          queries: [],
+        });
+        
+      }
+
+      return async function* factsSqlSym(s: Subst) {
+        if (s === null) {
+          EOSseen(`facts-sql relSym ${goalId}`);
+          yield null;
+          return;
+        }
+
+        if (patterns.length === 0) {
+          console.log("NO PATTERNS");
+          return;
+        }
+
+        log("PATTERNS BEFORE", {
+          patterns,
+        });
+
+        for (const pattern of patterns) {
+          if (!pattern.goalIds.includes(goalId)) continue;
+          let s2 = s;
+          for await (const result of run(s2, queryObj, pattern)) {
+            if (result === null) continue;
+            s2 = result;
+            yield s2;
+          }
+        }
+
+        log("PATTERNS AFTER", {
+          patterns,
+        });
+
+        setTimeout(() => {
+          if (goalId === nextGoalId - 1) {
+            log("FINAL PATTERNS SYM", {
+              patterns,
+              goalId, 
+            })
+          }
+        }, 500);
+
+        return;
       };
     };
   };

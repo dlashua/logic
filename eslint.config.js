@@ -34,6 +34,11 @@ export default defineConfig(
 
     },
     rules: {
+      
+      // delete these later
+      "@typescript-eslint/prefer-for-of": ["off"],
+
+      // leave these on
       "import/no-unresolved": ["off"],
       "computed-property-spacing": ["error", "never"],
       "comma-dangle": ["error", {

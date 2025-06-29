@@ -1,290 +1,48 @@
-// Fact helpers for MiniKanren-style logic programming
-import {
-  Subst,
-  Term,
-  Var,
-  isVar,
-  Goal,
-  or,
-  unify,
-  walk
-} from './core.ts'
+// Memory-based fact relations using modular architecture
+// This file provides a compatibility layer for existing code while using the new modular system
 
-/**
- * A relation for tuple facts (array-based).
- * Has a callable interface and a .set method for adding facts.
- */
-export interface FactRelation {
-    (...query: Term[]): Goal;
-    set: (...fact: Term[]) => void;
-    raw: Term[][];
-    indexes: Map<number, Map<any, Set<number>>>;
-}
+import { 
+  makeFacts as makeFactsNew,
+  makeFactsObj as makeFactsObjNew,
+  makeFactsSym as makeFactsSymNew,
+  makeFactsObjSym as makeFactsObjSymNew,
+  FactRelation,
+  FactObjRelation,
+  intersect,
+  isIndexable
+} from './facts/facts-memory.ts';
 
-/**
- * A relation for object facts (object-based).
- * Has a callable interface and a .set method for adding facts.
- */
-export interface FactObjRelation {
-    (queryObj: Record<string, Term>): Goal;
-    set: (factObj: Record<string, Term>) => void;
-    raw: Record<string, Term>[];
-    indexes: Map<string, Map<any, Set<number>>>;
-    keys: string[];
-}
+import { 
+  Term, 
+  Var, 
+  Subst, 
+  Goal, 
+  or, 
+  walk 
+} from './core.ts';
 
-/**
- * Create a tuple-based fact relation (like a table of tuples).
- */
-export function makeFacts(): FactRelation {
-  const facts: Term[][] = [];
-  const indexes = new Map<number, Map<any, Set<number>>>();
+// Re-export the new modular implementations
+export const makeFacts = makeFactsNew;
+export const makeFactsObj = makeFactsObjNew;
+export const makeFactsSym = makeFactsSymNew;
+export const makeFactsObjSym = makeFactsObjSymNew;
 
-  function goalFn(...query: Term[]): Goal {
-    return async function* (s: Subst) {
-      const walkedQuery = await Promise.all(query.map(term => walk(term, s)));
+// Re-export types
+export type { FactRelation, FactObjRelation };
 
-      // Find all indexable, grounded positions
-      const indexedPositions: number[] = [];
-      walkedQuery.forEach((wq, i) => {
-        if (!isVar(wq) && indexes.has(i)) {
-          indexedPositions.push(i);
-        }
-      });
+// Re-export utilities
+export { intersect, isIndexable };
 
-      let candidateIndexes: Set<number> | null = null;
-      if (indexedPositions.length > 0) {
-        // Intersect all index hits
-        for (const i of indexedPositions) {
-          const wq = walkedQuery[i];
-          const index = indexes.get(i);
-          if (!index) continue;
-          const factNums = index.get(wq);
-          if (!factNums) {
-            candidateIndexes = new Set();
-            break;
-          }
-          if (candidateIndexes === null) {
-            candidateIndexes = new Set(factNums);
-          } else {
-            candidateIndexes = intersect(candidateIndexes, factNums);
-            if (candidateIndexes.size === 0) break;
-          }
-        }
-      }
-
-      if (candidateIndexes === null) {
-        // No grounded values: full scan
-        for (const fact of facts) {
-          const s1 = await unify(query, fact, s);
-          if (s1) {
-            yield s1;
-          }
-        }
-        return;
-      }
-
-      for (const factIndex of candidateIndexes) {
-        const fact = facts[factIndex];
-        const s1 = await unify(query, fact, s);
-        if (s1) {
-          yield s1;
-        }
-      }
-    };
-  }
-
-  // const relation = (...query: Term[]): Goal => goalFn(...query);
-
-  /**
-     * Add a fact (tuple) to the relation.
-     */
-  goalFn.set = (...fact: Term[]) => {
-    const factIndex = facts.length;
-    facts.push(fact);
-    fact.forEach((term, i) => {
-      if (isIndexable(term)) {
-        let index = indexes.get(i);
-        if (!index) {
-          index = new Map<any, Set<number>>();
-          indexes.set(i, index);
-        }
-        let set = index.get(term);
-        if (!set) {
-          set = new Set<number>();
-          index.set(term, set);
-        }
-        set.add(factIndex);
-      }
-    });
-  };
-
-  goalFn.raw = facts;
-  goalFn.indexes = indexes;
-  return goalFn;
-}
-
-/**
- * Create an object-based fact relation (like a table of objects).
- */
-export function makeFactsObj(keys: string[]): FactObjRelation {
-  const facts: Record<string, Term>[] = [];
-  const indexes = new Map<string, Map<any, Set<number>>>();
-
-  function goalFn(queryObj: Record<string, Term>): Goal {
-    const keysArr = Object.keys(queryObj);
-    return async function* (s: Subst) {
-      const walkedQuery: Record<string, Term> = {};
-      for (const k of keysArr) {
-        walkedQuery[k] = await walk(queryObj[k], s);
-      }
-
-      // Find all indexable, grounded keys
-      const indexedKeys: string[] = [];
-      for (const k of keysArr) {
-        if (!isVar(walkedQuery[k]) && indexes.has(k)) {
-          indexedKeys.push(k);
-        }
-      }
-
-      let candidateIndexes: Set<number> | null = null;
-      if (indexedKeys.length > 0) {
-        for (const k of indexedKeys) {
-          const wq = walkedQuery[k];
-          const index = indexes.get(k);
-          if (!index) continue;
-          const factNums = index.get(wq);
-          if (!factNums) {
-            candidateIndexes = new Set();
-            break;
-          }
-          if (candidateIndexes === null) {
-            candidateIndexes = new Set(factNums);
-          } else {
-            candidateIndexes = intersect(candidateIndexes, factNums);
-            if (candidateIndexes.size === 0) break;
-          }
-        }
-      }
-
-      if (candidateIndexes === null) {
-        // No grounded values: full scan
-        for (const fact of facts) {
-          const s1 = await unify(keysArr.map(k => queryObj[k]), keysArr.map(k => fact[k]), s);
-          if (s1) yield s1;
-        }
-        return;
-      }
-
-      for (const factIndex of candidateIndexes) {
-        const fact = facts[factIndex];
-        const s1 = await unify(keysArr.map(k => queryObj[k]), keysArr.map(k => fact[k]), s);
-        if (s1) yield s1;
-      }
-    };
-  }
-
-  function relation(queryObj: Record<string, Term>): Goal {
-    return goalFn(queryObj);
-  }
-
-  /**
-     * Add a fact (object) to the relation.
-     */
-  relation.set = (factObj: Record<string, Term>) => {
-    const keys = Object.keys(factObj);
-    const factIndex = facts.length;
-    const fact: Record<string, Term> = {};
-    for (const k of keys) {
-      fact[k] = factObj[k];
-    }
-    facts.push(fact);
-    for (const k of keys) {
-      const term = fact[k];
-      if (isIndexable(term)) {
-        let index = indexes.get(k);
-        if (!index) {
-          index = new Map<any, Set<number>>();
-          indexes.set(k, index);
-        }
-        let set = index.get(term);
-        if (!set) {
-          set = new Set<number>();
-          index.set(term, set);
-        }
-        set.add(factIndex);
-      }
-    }
-  };
-
-  relation.raw = facts;
-  relation.indexes = indexes;
-  relation.keys = keys;
-  return relation;
-}
-
-// --- Symmetric tuple-based fact relation (query-time symmetry) ---
-export function makeFactsSym(): FactRelation {
-  const symGoal = makeFacts();
-  const origSet = symGoal.set;
-
-  symGoal.set = (...q) => {
-    origSet(q[0], q[1]);
-    origSet(q[1], q[0]);
-  }
-
-  return symGoal as FactRelation;
-}
-
+// Legacy compatibility function (slower version using or)
 export function makeFactsSymSlow(): FactRelation {
   const orig = makeFacts();
 
-  const symGoal = (...q: Term[]) => or(orig(q[0], q[1]), orig(q[1], q[0]))
+  const symGoal = (...q: Term[]) => or(orig(q[0], q[1]), orig(q[1], q[0]));
   symGoal.set = orig.set;
   symGoal.raw = orig.raw;
   symGoal.indexes = orig.indexes;
 
   return symGoal as FactRelation;
-}
-
-// --- Symmetric object-based fact relation (query-time symmetry) ---
-export function makeFactsObjSym(keys: string[]): FactObjRelation {
-  const orig = makeFactsObj(keys);
-  const symGoal = (queryObj: Record<string, Term>): Goal => {
-    if (keys.length === 2) {
-      const [k1, k2] = keys;
-      const swapped: Record<string, Term> = {};
-      swapped[k1] = queryObj[k2];
-      swapped[k2] = queryObj[k1];
-      return or(orig(queryObj), orig(swapped));
-    } else {
-      return orig(queryObj);
-    }
-  };
-  Object.assign(symGoal, orig);
-  return symGoal as FactObjRelation;
-}
-
-// --- Helpers ---
-
-/**
- * Returns the intersection of two sets.
- */
-export function intersect<F>(set_a: Set<F>, set_b: Set<F>): Set<F> {
-  const set_n = new Set<F>();
-  set_a.forEach(item => {
-    if (set_b.has(item)) {
-      set_n.add(item);
-    }
-  });
-  return set_n;
-}
-
-/**
- * Returns true if a value is indexable (string, number, boolean, or null).
- */
-export function isIndexable(v: any): boolean {
-  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null;
 }
 
 /**
@@ -329,8 +87,8 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
       aggArrays] of groupMap.entries()) {
       const groupValues = JSON.parse(groupKey);
       const s2 = new Map(s);
-      groupVars.forEach((v, i) => s2.set(v.id, groupValues[i]));
-      aggVars.forEach((v, i) => s2.set(v.id, aggArrays[i].map(async x => await x)));
+      groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
+      aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index].map(async x => await x)));
       yield s2;
     }
   };

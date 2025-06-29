@@ -1,15 +1,13 @@
-import { Configuration, CacheConfig, LogConfig } from './types.ts';
+import { BaseConfig, CacheConfig, LogConfig } from './types.ts';
 
 export class ConfigurationManager {
-  static createDefault(): Configuration {
+  static createDefault(): BaseConfig {
     return {
       cache: {
         patternCacheEnabled: true,
-        rowCacheEnabled: false,
-        recordCacheEnabled: false
       },
       logging: {
-        enabled: true,
+        enabled: false,
         ignoredIds: new Set([
           "MULTIPLE_ROWS_SELECTCOLS_UNCHANGED",
           "PATTERN_ROWS_UPDATED",
@@ -32,14 +30,17 @@ export class ConfigurationManager {
           "RAN FALSE PATTERNS",
           "PATTERNS BEFORE",
           "FINAL PATTERNS",
-          "FINAL PATTERNS SYM"
+          "FINAL PATTERNS SYM",
+          "MEMORY_SCAN",
+          "INDEX_LOOKUP",
+          "FACT_MATCH"
         ]),
         criticalIds: new Set(["SELECTCOLS MISMATCH PATTERNS"])
       }
     };
   }
 
-  static create(overrides: Partial<Configuration> = {}): Configuration {
+  static create(overrides: Partial<BaseConfig> = {}): BaseConfig {
     const defaultConfig = ConfigurationManager.createDefault();
     return {
       cache: {

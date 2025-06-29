@@ -1,12 +1,20 @@
 import type { Knex } from "knex";
-import { Term, Subst } from "../core.ts";
+import { Term } from "../core.ts";
+import type { BaseConfig } from "../shared/types.ts";
 
-export interface WhereClause {
-  readonly column: string;
-  readonly value: Term;
-  readonly operator?: 'eq' | 'gt' | 'lt' | 'in';
-}
+// Re-export shared types
+export type { 
+  BaseConfig as Configuration,
+  CacheConfig, 
+  LogConfig, 
+  QueryResult, 
+  CacheType, 
+  GoalFunction,
+  QueryParts,
+  WhereClause 
+} from "../shared/types.ts";
 
+// SQL-specific types
 export interface Pattern {
   readonly table: string;
   readonly goalIds: number[];
@@ -35,41 +43,7 @@ export interface SymmetricPattern {
   };
 }
 
-export interface QueryResult<T = any> {
-  readonly rows: readonly T[];
-  readonly fromCache: boolean;
-  readonly cacheType?: 'pattern' | 'row' | 'query';
-  readonly sql?: string;
-}
-
-export interface CacheConfig {
-  readonly patternCacheEnabled: boolean;
-  readonly rowCacheEnabled: boolean;
-  readonly recordCacheEnabled: boolean;
-}
-
-export interface LogConfig {
-  readonly enabled: boolean;
-  readonly ignoredIds: Set<string>;
-  readonly criticalIds: Set<string>;
-}
-
-export interface Configuration {
-  readonly cache: CacheConfig;
-  readonly logging: LogConfig;
-}
-
-export interface QueryParts {
-  readonly selectCols: string[];
-  readonly whereClauses: WhereClause[];
-  readonly walkedQ: Record<string, Term>;
-}
-
-export type CacheType = 'pattern' | 'row' | 'query';
-
 export interface RelDBDependencies {
   db: Knex;
-  config: Configuration;
+  config: BaseConfig;
 }
-
-export type GoalFunction = (s: Subst) => AsyncGenerator<Subst, void, unknown>;

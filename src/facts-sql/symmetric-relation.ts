@@ -5,7 +5,7 @@ import {
   unify,
   isVar
 } from "../core.ts"
-import { Logger } from "./logger.ts";
+import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { SymmetricPatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
@@ -21,7 +21,6 @@ export class SymmetricRelation {
     private queryBuilder: QueryBuilder,
     private queries: string[],
     private realQueries: string[],
-    private cacheQueries: string[]
   ) {}
 
   createGoal(queryObj: Record<string, Term<string | number>>): GoalFunction {
@@ -65,7 +64,7 @@ export class SymmetricRelation {
     const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
     if (walkedValues[0] === walkedValues[1]) return;
 
-    this.logger.log("RUN_START", {
+    this.logger.log("RUN_START", "Starting symmetric relation", {
       pattern,
       queryObj,
       walkedValues 
@@ -98,7 +97,7 @@ export class SymmetricRelation {
       }
     }
 
-    this.logger.log("RUN_END", {
+    this.logger.log("RUN_END", "Completed symmetric relation", {
       pattern 
     });
   }
@@ -109,7 +108,7 @@ export class SymmetricRelation {
   ): Promise<{ rows: any[], cacheInfo: any }> {
     // Try pattern cache first
     if (pattern.ran) {
-      this.logger.log("PATTERN_CACHE_HIT", {
+      this.logger.log("PATTERN_CACHE_HIT", "Pattern cache hit", {
         pattern,
         rows: pattern.rows 
       });
@@ -129,7 +128,7 @@ export class SymmetricRelation {
     
     if (matchingPattern) {
       const rows = this.cache.processCachedPatternResult(matchingPattern);
-      this.logger.log("PATTERN_CACHE_HIT", {
+      this.logger.log("PATTERN_CACHE_HIT", "Matching pattern found", {
         pattern,
         matchingPattern,
         rows,

@@ -1,11 +1,19 @@
 import { Term, isVar } from '../core.ts';
+import { Logger } from '../shared/logger.ts';
 import { Pattern, SymmetricPattern } from './types.ts';
-import { Logger } from './logger.ts';
 import { patternUtils, queryUtils } from './utils.ts';
 
 export class PatternManager {
   private patterns: Pattern[] = [];
   private nextGoalId = 1;
+  
+  // Performance optimization: Multiple indexes
+  private patternsByGoal = new Map<number, Pattern[]>();
+  private patternsByTable = new Map<string, Pattern[]>();
+  private unranPatterns = new Set<Pattern>();
+  
+  // Cache for expensive operations
+  private selectColsKeyCache = new Map<Pattern, string>();
 
   constructor(private logger: Logger) {}
 
@@ -15,14 +23,33 @@ export class PatternManager {
 
   addPattern(pattern: Pattern): void {
     this.patterns.push(pattern);
+    this.unranPatterns.add(pattern);
+    
+    // Update goal index
+    for (const goalId of pattern.goalIds) {
+      if (!this.patternsByGoal.has(goalId)) {
+        this.patternsByGoal.set(goalId, []);
+      }
+      this.patternsByGoal.get(goalId)!.push(pattern);
+    }
+    
+    // Update table index
+    if (!this.patternsByTable.has(pattern.table)) {
+      this.patternsByTable.set(pattern.table, []);
+    }
+    this.patternsByTable.get(pattern.table)!.push(pattern);
   }
 
   getPatternsForGoal(goalId: number): Pattern[] {
-    return this.patterns.filter(pattern => pattern.goalIds.includes(goalId));
+    return this.patternsByGoal.get(goalId) || [];
   }
 
   getAllPatterns(): Pattern[] {
-    return [...this.patterns];
+    return this.patterns;
+  }
+
+  markPatternAsRan(pattern: Pattern): void {
+    this.unranPatterns.delete(pattern);
   }
 
   createPattern(
@@ -47,157 +74,112 @@ export class PatternManager {
     };
   }
 
+  // Optimized: Cache selectCols keys to avoid repeated Object.keys() calls
+  private getSelectColsKey(pattern: Pattern): string {
+    if (!this.selectColsKeyCache.has(pattern)) {
+      const key = Object.keys(pattern.selectCols).sort().join('|');
+      this.selectColsKeyCache.set(pattern, key);
+    }
+    return this.selectColsKeyCache.get(pattern)!;
+  }
+
   async mergePatterns(
     queryObj: Record<string, Term>,
     walkedQ: Record<string, Term>,
     goalId: number
   ): Promise<void> {
-    const updatedPatterns: Pattern[] = [];
+    const patternsForGoal = this.getPatternsForGoal(goalId);
+    if (patternsForGoal.length <= 1) return; // Nothing to merge
 
-    for (const pattern of this.patterns) {
-      this.logger.log("MERGE_PATTERNS_START", {
-        pattern,
-        goalId 
-      });
-
-      // Skip patterns that do not match the current goalId
-      if (!pattern.goalIds.includes(goalId)) {
-        this.logger.log("SKIPPED_PATTERN", {
-          pattern,
-          reason: "GoalId does not match",
-          goalId,
-        });
-        updatedPatterns.push(pattern);
-        continue;
+    // Group patterns by selectCols key for O(n) merging instead of O(n²)
+    const selectColsGroups = new Map<string, Pattern[]>();
+    
+    for (const pattern of patternsForGoal) {
+      if (pattern.ran) continue;
+      
+      const selectColsKey = this.getSelectColsKey(pattern);
+      if (!selectColsGroups.has(selectColsKey)) {
+        selectColsGroups.set(selectColsKey, []);
       }
-
-      // Skip patterns that have already been run
-      if (pattern.ran) {
-        this.logger.log("SKIPPED_PATTERN", {
-          pattern,
-          reason: "Pattern already ran",
-        });
-        updatedPatterns.push(pattern);
-        continue;
-      }
-
-      // Find matching patterns with same selectCols
-      const matchingPatterns = this.patterns.filter(otherPattern => {
-        return (
-          otherPattern !== pattern &&
-          otherPattern.goalIds.includes(goalId) &&
-          JSON.stringify(Object.keys(otherPattern.selectCols).sort()) === 
-          JSON.stringify(Object.keys(pattern.selectCols).sort())
-        );
-      });
-
-      if (matchingPatterns.length > 0) {
-        this.logger.log("MERGING_PATTERNS", {
-          matchingPatterns 
-        });
-        this.mergeMatchingPatterns(pattern, matchingPatterns);
-      }
-
-      updatedPatterns.push(pattern);
+      selectColsGroups.get(selectColsKey)!.push(pattern);
     }
 
-    this.logger.log("MERGE_PATTERNS_END", {
-      updatedPatterns 
-    });
-    this.patterns = updatedPatterns;
+    // Merge within groups - now O(k) where k is group size
+    for (const group of selectColsGroups.values()) {
+      if (group.length > 1) {
+        this.mergePatternGroup(group);
+      }
+    }
   }
 
-  private mergeMatchingPatterns(pattern: Pattern, matchingPatterns: Pattern[]): void {
-    for (const match of matchingPatterns) {
-      // Merge selectCols
-      for (const key of Object.keys(match.selectCols)) {
-        if (isVar(pattern.selectCols[key]) && !isVar(match.selectCols[key])) {
-          this.logger.log("GROUNDING_SELECT_COL_DURING_MERGE", {
-            key,
-            currentValue: pattern.selectCols[key],
-            newValue: match.selectCols[key],
-          });
-          (pattern.selectCols as any)[key] = match.selectCols[key];
+  private mergePatternGroup(patterns: Pattern[]): void {
+    const basePattern = patterns[0];
+    
+    for (let i = 1; i < patterns.length; i++) {
+      const pattern = patterns[i];
+      
+      // Merge selectCols efficiently
+      const baseSelectKeys = Object.keys(basePattern.selectCols);
+      for (let j = 0; j < baseSelectKeys.length; j++) {
+        const key = baseSelectKeys[j];
+        if (isVar(basePattern.selectCols[key]) && !isVar(pattern.selectCols[key])) {
+          (basePattern.selectCols as any)[key] = pattern.selectCols[key];
         }
       }
 
-      // Merge whereCols
-      for (const key of Object.keys(match.whereCols)) {
-        if (isVar(pattern.whereCols[key]) && !isVar(match.whereCols[key])) {
-          this.logger.log("GROUNDING_WHERE_COL_DURING_MERGE", {
-            key,
-            currentValue: pattern.whereCols[key],
-            newValue: match.whereCols[key],
-          });
-          (pattern.whereCols as any)[key] = match.whereCols[key];
+      // Merge whereCols efficiently
+      const baseWhereKeys = Object.keys(basePattern.whereCols);
+      for (let j = 0; j < baseWhereKeys.length; j++) {
+        const key = baseWhereKeys[j];
+        if (isVar(basePattern.whereCols[key]) && !isVar(pattern.whereCols[key])) {
+          (basePattern.whereCols as any)[key] = pattern.whereCols[key];
         }
       }
 
-      // Merge goalIds
-      match.goalIds.forEach(id => {
-        if (!pattern.goalIds.includes(id)) {
-          (pattern.goalIds as any).push(id);
+      // Merge goalIds efficiently
+      for (const goalId of pattern.goalIds) {
+        if (!basePattern.goalIds.includes(goalId)) {
+          (basePattern.goalIds as any).push(goalId);
         }
-      });
+      }
     }
+    
+    // Clear cache since pattern was modified
+    this.selectColsKeyCache.delete(basePattern);
   }
 
   updatePatternRows(pattern: Pattern, rows: any[], selectCols: Record<string, Term>): void {
     if (rows.length === 1 && (rows[0] === true || rows[0] === false)) {
-      // Keep boolean results as-is
       (pattern as any).rows = rows;
     } else {
       if (Object.keys(selectCols).length === 0) {
-        // Confirmation query
         (pattern as any).rows = rows.length > 0 ? [true] : [false];
       } else {
         (pattern as any).rows = rows.length > 0 ? rows : [false];
       }
     }
-
-    this.logger.log("PATTERN_ROWS_UPDATED", {
-      pattern 
-    });
   }
 
   logFinalDiagnostics(goalId: number): void {
-    setTimeout(() => {
-      if (goalId === this.nextGoalId - 1) {
-        this.logger.log("FINAL PATTERNS", {
-          patterns: this.patterns,
-          goalId 
-        });
-
-        const ranFalsePatterns = this.patterns.filter(x => !x.ran);
+    // Remove setTimeout overhead entirely
+    if (goalId === this.nextGoalId - 1) {
+      // Only log if explicitly enabled and needed for debugging
+      if (this.logger && (this.logger as any).config?.enabled) {
+        const ranFalsePatterns = Array.from(this.unranPatterns);
         if (ranFalsePatterns.length > 0) {
-          this.logger.log("RAN FALSE PATTERNS", {
+          this.logger.log("RAN FALSE PATTERNS", "Pattern diagnostics", {
             ranFalsePatterns 
           });
         }
-
-        const selectColsMismatchPatterns = this.patterns.filter(
-          x => x.rows.length > 1 && !patternUtils.allSelectColsAreTags(x.selectCols)
-        );
-        if (selectColsMismatchPatterns.length > 0) {
-          this.logger.log("SELECTCOLS MISMATCH PATTERNS", {
-            selectColsMismatchPatterns 
-          });
-        }
-
-        const mergedPatterns = this.patterns.filter(x => x.goalIds.length > 1);
-        if (mergedPatterns.length > 0) {
-          this.logger.log("MERGED PATTERNS SEEN. GOOD!", {
-            mergedPatterns 
-          });
-        }
       }
-    }, 500);
+    }
   }
 }
 
 export class SymmetricPatternManager {
   private patterns: SymmetricPattern[] = [];
   private nextGoalId = 1;
+  private patternsByGoal = new Map<number, SymmetricPattern[]>();
 
   constructor(private logger: Logger) {}
 
@@ -207,14 +189,21 @@ export class SymmetricPatternManager {
 
   addPattern(pattern: SymmetricPattern): void {
     this.patterns.push(pattern);
+    
+    for (const goalId of pattern.goalIds) {
+      if (!this.patternsByGoal.has(goalId)) {
+        this.patternsByGoal.set(goalId, []);
+      }
+      this.patternsByGoal.get(goalId)!.push(pattern);
+    }
   }
 
   getPatternsForGoal(goalId: number): SymmetricPattern[] {
-    return this.patterns.filter(pattern => pattern.goalIds.includes(goalId));
+    return this.patternsByGoal.get(goalId) || [];
   }
 
   getAllPatterns(): SymmetricPattern[] {
-    return [...this.patterns];
+    return this.patterns;
   }
 
   createPattern(
@@ -241,19 +230,10 @@ export class SymmetricPatternManager {
 
   updatePatternRows(pattern: SymmetricPattern, rows: any[]): void {
     (pattern as any).rows = rows;
-    this.logger.log("PATTERN_ROWS_UPDATED", {
-      pattern 
-    });
   }
 
   logFinalDiagnostics(goalId: number): void {
-    setTimeout(() => {
-      if (goalId === this.nextGoalId - 1) {
-        this.logger.log("FINAL PATTERNS SYM", {
-          patterns: this.patterns,
-          goalId 
-        });
-      }
-    }, 500);
+    // Remove setTimeout overhead entirely
+    return;
   }
 }

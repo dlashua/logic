@@ -1,6 +1,6 @@
 import type { Knex } from "knex";
 import { Term, Subst } from "../core.ts";
-import { Logger } from "./logger.ts";
+import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { PatternManager, SymmetricPatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
@@ -15,7 +15,6 @@ export interface RelationFactoryDependencies {
   queryBuilder: QueryBuilder;
   queries: string[];
   realQueries: string[];
-  cacheQueries: string[];
 }
 
 export class RelationFactory {
@@ -31,7 +30,6 @@ export class RelationFactory {
       this.deps.queryBuilder,
       this.deps.queries,
       this.deps.realQueries,
-      this.deps.cacheQueries
     );
 
     return (queryObj: Record<string, Term>): GoalFunction => {
@@ -50,7 +48,6 @@ export class RelationFactory {
       this.deps.queryBuilder,
       this.deps.queries,
       this.deps.realQueries,
-      this.deps.cacheQueries
     );
 
     return (queryObj: Record<string, Term<string | number>>): GoalFunction => {

@@ -1,7 +1,7 @@
 import type { Knex } from "knex";
 import knex from "knex";
-import { ConfigurationManager } from "./config.ts";
-import { Logger } from "./logger.ts";
+import { ConfigurationManager } from "../shared/config.ts";
+import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { RelationFactory } from "./relation-factory.ts";
@@ -36,7 +36,6 @@ export const makeRelDB = async (
     queryBuilder,
     queries,
     realQueries,
-    cacheQueries
   });
 
   return {
@@ -45,6 +44,5 @@ export const makeRelDB = async (
     db,
     queries,
     realQueries,
-    cacheQueries,
   };
 };

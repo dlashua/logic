@@ -1,6 +1,6 @@
 // Core logic functions for MiniKanren-style logic programming
 
-const EOS_LOG = true;
+const EOS_LOG = false;
 export function EOSseen(name: string, details = {}) {
   if(!EOS_LOG) return;
   console.log("EOS seen", name);

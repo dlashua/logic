@@ -11,16 +11,42 @@ import {
   walk
 } from "./core.ts";
 
+const PATTERN_CACHE_ENABLED = true;
+const ROW_CACHE_ENABLED = false;
+const RECORD_CACHE_ENABLED = false;
 // --- Logging configuration ---
 const LOG_ENABLED = true; // Set to true to enable logging globally
-const LOG_IDS = new Set<string>([]); // No log filtering
+const LOG_IDS_TO_IGNORE = new Set<string>([
+  "MULTIPLE_ROWS_SELECTCOLS_UNCHANGED",
+  "PATTERN_ROWS_UPDATED",
+  "MERGING_PATTERNS",
+  "GROUNDING_SELECT_COL",
+  "RUN_START",
+  "PATTERN_CACHE_HIT",
+  "ROW_CACHE_HIT",
+  "QUERY_CACHE_HIT",
+  "DB_QUERY",
+  "ROW_CACHE_SET",
+  "CACHE_HIT",
+  "MATCHED_PATTERNS",
+  "UNMATCHED_QUERYOBJ",
+  "MERGE_PATTERNS_START",
+  "SKIPPED_PATTERN",
+  "MERGE_PATTERNS_END",
+  "RUN_END",
+  "PATTERNS AFTER",
+  "RAN FALSE PATTERNS",
+  "PATTERNS BEFORE",
+]); // List of log IDs to ignore
+
+const CRITICAL_LOG_IDS = new Set<string>([ "SELECTCOLS MISMATCH PATTERNS"]);
 
 function log(
   id: string,
   ...args: Record<string, unknown>[]
 ) {
   if (!LOG_ENABLED) return;
-  if (LOG_IDS.has(id)) return;
+  if (LOG_IDS_TO_IGNORE.has(id) && !CRITICAL_LOG_IDS.has(id)) return; // Show logs unless they are ignored and not critical
   if (args.length === 0) {
     console.dir(
       {
@@ -30,7 +56,7 @@ function log(
         depth: null,
       },
     );
-  } else if (args.length === 1) {
+  } else if(args.length === 1) {
     console.dir(
       {
         log: id,
@@ -40,7 +66,7 @@ function log(
         depth: null,
       },
     );
-  } else {
+  }else {
     console.dir(
       {
         log: id,
@@ -155,146 +181,399 @@ export const makeRelDB = async (
   // Main relation generator: exact query and row cache, with logging
   const rel = async (table: string) => {
     let nextGoalId = 1;
-    const patterns = [];
+    interface Pattern { table: string; goalIds: number[]; rows: any[]; ran: boolean; selectCols: Record<string, Term>; whereCols: Record<string, Term>; last: { selectCols: Record<string, Term>[]; whereCols: Record<string, Term>[] }, queries: string[]; selectColsUngrounded?: boolean }
+    const patterns: Pattern[] = [];
+
     return function goal(queryObj: Record<string, Term>) {
       const goalId = nextGoalId++;
-      console.log("MADE GOAL", goalId, queryObj);
+      // console.log("MADE GOAL", goalId, queryObj);
       gatherAndMerge(queryObj);
 
-      async function* run(s: Subst, queryObj: Record<string, Term>) {
-        const { selectCols, whereClauses, walkedQ } = await buildQueryParts(queryObj, s);
-        const cacheKey = makeCacheKey(table, selectCols, whereClauses);
-        const rowKey = allParamsGrounded(walkedQ) ? makeRowCacheKey(table, walkedQ) : null;
+      async function* run(s: Subst, queryObj: Record<string, Term>, pattern: Pattern, walkedQ: Record<string, Term>) {
+        const { whereCols, selectCols } = pattern;
+        const { whereClauses } = await buildQueryParts(queryObj, s);
+        const cacheKey = makeCacheKey(pattern.table, Object.keys(selectCols || {}), whereClauses);
+        const rowKey = allParamsGrounded(walkedQ) ? makeRowCacheKey(pattern.table, walkedQ) : null;
         let rows;
         let cacheType = null;
+
+        log("RUN_START", {
+          pattern,
+          queryObj,
+          walkedQ,
+        });
+
+        // If the pattern has already been run, use its rows directly
+        if (PATTERN_CACHE_ENABLED && pattern.ran) {
+          rows = pattern.rows;
+          cacheType = 'pattern';
+          log("PATTERN_CACHE_HIT", {
+            pattern,
+            rows,
+          });
+        }
+
         // If all params are grounded, try row cache first
-        if (rowKey) {
+        if (!rows && ROW_CACHE_ENABLED && rowKey) {
           if (rowCache.has(rowKey)) {
             rows = [rowCache.get(rowKey)];
             cacheType = 'row';
+            log("ROW_CACHE_HIT", {
+              rowKey,
+              rows,
+            });
           }
         }
+
         // Otherwise, try exact query cache
-        if (!rows && recordCache.has(cacheKey)) {
+        if (!rows && RECORD_CACHE_ENABLED && recordCache.has(cacheKey)) {
           rows = recordCache.get(cacheKey);
           cacheType = 'query';
+          log("QUERY_CACHE_HIT", {
+            cacheKey,
+            rows,
+          });
         }
+
         // Otherwise, hit the DB
         if (!rows) {
-          let k = db(table).select(selectCols);
-          for (const { col, val } of whereClauses) {
+          let k = db(pattern.table).select(Object.keys(selectCols || {}));
+          for (const [col, val] of Object.entries(whereCols)) {
             k = k.where(col, val as any);
           }
+          if (Object.keys(selectCols).length === 0) {
+            // Confirmation query: select a static value
+            k = db(pattern.table).select(db.raw('1'));
+            for (const clause of whereClauses) {
+              k = k.where(clause.col, clause.val as any);
+            }
+          } else {
+            k = db(pattern.table).select(Object.keys(selectCols));
+            for (const [col, val] of Object.entries(whereCols)) {
+              k = k.where(col, val as any);
+            }
+          }
           rows = await k;
+          pattern.ran = true;
           recordCache.set(cacheKey, rows);
+
+          log("DB_QUERY", {
+            sql: k.toString(),
+            rows,
+          });
+
           // If all params grounded and single row, cache in rowCache
           if (allParamsGrounded(walkedQ) && rows.length === 1) {
-            const rowKey = makeRowCacheKey(table, walkedQ);
+            const rowKey = makeRowCacheKey(pattern.table, walkedQ);
             rowCache.set(rowKey, rows[0]);
+            log("ROW_CACHE_SET", {
+              rowKey,
+              row: rows[0],
+            });
           }
+
           // Log real query
           const sql = k.toString();
           queries.push(sql);
           realQueries.push(sql);
+          pattern.queries.push(sql);
         } else {
           // Log cache hit
           let desc = '';
-          if (cacheType === 'row') {
-            desc = `[ROW CACHE] ${table} ${JSON.stringify(walkedQ)}`;
+          if (cacheType === 'pattern') {
+            desc = `[PATTERN CACHE] ${pattern.table} rows=${JSON.stringify(rows)}`;
+          } else if (cacheType === 'row') {
+            desc = `[ROW CACHE] ${pattern.table} ${JSON.stringify(walkedQ)}`;
           } else if (cacheType === 'query') {
-            desc = `[QUERY CACHE] ${table} select=${JSON.stringify(selectCols)} where=${JSON.stringify(whereClauses)}`;
+            desc = `[QUERY CACHE] ${pattern.table} select=${JSON.stringify(Object.keys(selectCols || {}))} where=${JSON.stringify(whereClauses)}`;
           } else {
-            desc = `[CACHE] ${table}`;
+            desc = `[CACHE] ${pattern.table}`;
           }
           queries.push(desc);
           cacheQueries.push(desc);
+          pattern.queries.push(desc);
+          log("CACHE_HIT", {
+            desc,
+          });
         }
-        if (!rows || rows.length === 0) {
-          return;
-        }
-        for (const row of rows) {
-          const unifiedSubst = await unifyRowWithWalkedQ(selectCols, walkedQ, row, s);
-          if (unifiedSubst) {
-            yield unifiedSubst;
+
+        // Update the pattern with the rows returned
+        if (Object.keys(selectCols).length === 0) {
+          // Confirmation query
+          pattern.rows = rows.length > 0 ? [true] : [false];
+        } else {
+          pattern.rows = rows.length > 0 ? rows : [false];
+
+          // Ensure selectCols remain ungrounded if multiple rows are returned
+          if (rows.length > 1) {
+            log("MULTIPLE_ROWS_SELECTCOLS_UNCHANGED", {
+              pattern,
+              rows,
+            });
+
+            // Reset selectCols to its original state
+            pattern.selectCols = {
+              ...selectCols,
+            };
+
+            // Add a flag to indicate that selectCols were not grounded
+            pattern.selectColsUngrounded = true;
+          } else if (rows.length === 1) {
+            // Ground selectCols if a single row is returned
+            const singleRow = rows[0];
+            for (const col of Object.keys(selectCols)) {
+              if (isVar(selectCols[col])) {
+                log("GROUNDING_SELECT_COL", {
+                  key: col,
+                  currentValue: selectCols[col],
+                  newValue: singleRow[col],
+                });
+                pattern.selectCols[col] = singleRow[col];
+              }
+            }
+
+            // Clear the ungrounded flag if only one row is returned
+            delete pattern.selectColsUngrounded;
           }
         }
+
+        log("PATTERN_ROWS_UPDATED", {
+          pattern,
+        });
+
+        for (const row of pattern.rows) {
+          if (row === false) {
+            // Skip if no rows were returned
+            continue;
+          } else if (row === true) {
+            // Confirmation query: unify queryObj with whereCols
+            const unifiedSubst = await unifyRowWithWalkedQ(Object.keys(whereCols), whereCols, queryObj, s);
+            if (unifiedSubst) {
+              yield unifiedSubst;
+            }
+          } else {
+            // Regular row processing
+            const unifiedSubst = await unifyRowWithWalkedQ(Object.keys(selectCols), walkedQ, row, s);
+            if (unifiedSubst) {
+              // Invoke mergePatterns after unification to update patterns with newly grounded terms
+              const updatedWalkedQ = await walkAllKeys(queryObj, unifiedSubst);
+              await mergePatterns(queryObj, updatedWalkedQ, goalId);
+
+              yield unifiedSubst;
+            }
+          }
+        }
+
+        log("RUN_END", {
+          pattern,
+        });
       };
       
       function gatherAndMerge(queryObj: Record<string, Term>) {
-        const matches = patterns.filter(x => {
-          
-        })
-        
-        patterns.push({
-          table,
-          goalIds: [goalId],
-          queryObj,
-          rows: [],
-          ran: false,
+        // Find patterns that match the current queryObj
+        const matches = patterns.filter(pattern => {
+          // Check if all keys and values in queryObj match the pattern's selectCols
+          for (const [key, value] of Object.entries(queryObj)) {
+            const patternValue = pattern.selectCols?.[key];
+
+            // If both are logic variables, check if their IDs match
+            if (isVar(value) && isVar(patternValue)) {
+              if (value.id !== patternValue.id) {
+                return false;
+              }
+            } else if (value !== patternValue) {
+              // Otherwise, check for direct equality
+              return false;
+            }
+          }
+          return true;
         });
+
+        if (matches.length > 0) {
+          // Log matched patterns for debugging
+          log("MATCHED_PATTERNS", {
+            matches,
+          });
+
+          // Merge the current goalId into the matching patterns
+          for (const match of matches) {
+            if (!match.goalIds.includes(goalId)) {
+              log("MERGING_PATTERNS", {
+                match,
+                goalId 
+              });
+              match.goalIds.push(goalId);
+            }
+          }
+        } else {
+          // Log unmatched queryObj for debugging
+          log("UNMATCHED_QUERYOBJ", {
+            queryObj,
+          });
+
+          // Separate queryObj into selectCols and whereCols
+          const selectCols: Record<string, Term> = {};
+          const whereCols: Record<string, Term> = {};
+
+          for (const [key, value] of Object.entries(queryObj)) {
+            if (isVar(value)) {
+              selectCols[key] = value;
+            } else {
+              whereCols[key] = value;
+            }
+          }
+
+          // Add `last` property to patterns during initialization with proper formatting
+          patterns.push({
+            table,
+            selectCols,
+            whereCols,
+            goalIds: [goalId],
+            rows: [],
+            ran: false,
+            last: {
+              selectCols: [],
+              whereCols: [],
+            },
+            queries: [],
+          });
+        }
       };
 
-      // return async function* factsSql(s: Subst) {
-      //   console.log("IN GOAL", goalId, queryObj);
-      //   if (s === null) {
-      //     if(EOS) {
-      //       console.log("null after EOS!");
-      //     }
+      async function mergePatterns(queryObj: Record<string, Term>, walkedQ: Record<string, Term>, goalId: number) {
+        const updatedPatterns: Pattern[] = [];
 
-      //     EOSseen(`facts-sql rel ${goalId}`);
-      //     EOS = true;          
+        for (const pattern of patterns) {
+          log("MERGE_PATTERNS_START", {
+            pattern,
+            goalId,
+          });
 
-      //     // const thisGoalPatterns = patterns.filter(x => x.goalId === goalId);
-      //     // console.log("thisGoalPatterns", thisGoalPatterns);
-      //     // if(thisGoalPatterns.length === 0) {
-      //     //   console.log("allPatterns", patterns);
-      //     // }
-      //     console.log("PATTERNS", patterns);
-      //     let s2 = patterns.find(x => x.goalId === 1)?.s;
-      //     if(!s2) return;
-      //     while (patterns.length > 0) {
-      //       const pattern = patterns.shift();
-      //       for await (s2 of run(s2, pattern.queryObj)) {
-      //         console.log("YIELD", s2);
-      //         yield s2;
-      //       }
-      //     }
-          
-      //     EOSsent(`facts-sql rel ${goalId}`);
-      //     yield null;
-      //     return;
-      //   }
-      //   if(EOS) {
-      //     console.log(`record after EOS ${goalId}`);
-      //   }
+          // Skip patterns that do not match the current goalId
+          if (!pattern.goalIds.includes(goalId)) {
+            log("SKIPPED_PATTERN", {
+              pattern,
+              reason: "GoalId does not match",
+              goalId,
+            });
+            updatedPatterns.push(pattern);
+            continue;
+          }
 
-      //   gather(queryObj, s);
-      //   yield s;
-      // }
+          // Skip patterns that have already been run
+          if (pattern.ran) {
+            log("SKIPPED_PATTERN", {
+              pattern,
+              reason: "Pattern already ran",
+            });
+            updatedPatterns.push(pattern);
+            continue;
+          }
+
+          // Ensure patterns with different selectCols are not merged
+          const matchingPatterns = patterns.filter(otherPattern => {
+            return (
+              otherPattern !== pattern &&
+              otherPattern.goalIds.includes(goalId) &&
+              JSON.stringify(Object.keys(otherPattern.selectCols).sort()) === JSON.stringify(Object.keys(pattern.selectCols).sort())
+            );
+          });
+
+          if (matchingPatterns.length > 0) {
+            log("MERGING_PATTERNS", {
+              matchingPatterns,
+            });
+
+            // Merge values from matching patterns
+            for (const match of matchingPatterns) {
+              for (const key of Object.keys(match.selectCols)) {
+                if (isVar(pattern.selectCols[key]) && !isVar(match.selectCols[key])) {
+                  log("GROUNDING_SELECT_COL_DURING_MERGE", {
+                    key,
+                    currentValue: pattern.selectCols[key],
+                    newValue: match.selectCols[key],
+                  });
+                  pattern.selectCols[key] = match.selectCols[key];
+                }
+              }
+
+              for (const key of Object.keys(match.whereCols)) {
+                if (isVar(pattern.whereCols[key]) && !isVar(match.whereCols[key])) {
+                  log("GROUNDING_WHERE_COL_DURING_MERGE", {
+                    key,
+                    currentValue: pattern.whereCols[key],
+                    newValue: match.whereCols[key],
+                  });
+                  pattern.whereCols[key] = match.whereCols[key];
+                }
+              }
+
+              // Merge goalIds
+              match.goalIds.forEach(id => {
+                if (!pattern.goalIds.includes(id)) {
+                  pattern.goalIds.push(id);
+                }
+              });
+            }
+          }
+
+          updatedPatterns.push(pattern);
+        }
+
+        log("MERGE_PATTERNS_END", {
+          updatedPatterns,
+        });
+
+        // Replace the original patterns with the updated ones
+        patterns.length = 0;
+        patterns.push(...updatedPatterns);
+      }
 
       return async function* factsSql(s: Subst) {
-        console.log("IN GOAL", goalId, queryObj);
+        // console.log("IN GOAL", goalId, queryObj);
         if (s === null) {
           EOSseen(`facts-sql rel ${goalId}`);
           yield null;
-          return
-        }
-
-        if(patterns.length === 0) {
-          console.log("NO PATTERNS");
-          // yield s;
           return;
         }
 
-        const thisPatterns = patterns.filter(x => x.goalIds.includes(goalId));
+        if (patterns.length === 0) {
+          console.log("NO PATTERNS");
+          return;
+        }
 
-        for (const pattern of thisPatterns) {
-          const pidx = patterns.indexOf(pattern);
-          patterns.splice(pidx, 1)
+        // Walk queryObj terms and pass to mergePatterns
+        const walkedQ = await walkAllKeys(queryObj, s);
+        await mergePatterns(queryObj, walkedQ, goalId);
+
+        log("PATTERNS BEFORE", {
+          patterns,
+        });
+
+        for (const pattern of patterns) {
+          if (!pattern.goalIds.includes(goalId)) continue;
           let s2 = s;
-          for await (s2 of run(s2, pattern.queryObj)) {
+          for await (s2 of run(s2, queryObj, pattern, walkedQ)) {
             yield s2;
           }
+        }
+        log("PATTERNS AFTER", {
+          patterns,
+        });
+        const ranFalsePatterns = patterns.filter(x => x.ran === false);
+        if(ranFalsePatterns.length > 0) {
+          log("RAN FALSE PATTERNS", {
+            ranFalsePatterns 
+          });
+        }
+        const allSelectColsAreTags = (cols: Record<string, Term>): boolean => {
+          return Object.values(cols).every((x: Term) => (x as any).id);
+        };
+        const selectColsMismatchPatterns = patterns.filter(x => x.rows.length > 1 && !allSelectColsAreTags(x.selectCols));
+        if(selectColsMismatchPatterns.length > 0) {
+          log("SELECTCOLS MISMATCH PATTERNS", {
+            selectColsMismatchPatterns 
+          });
         }
         return;
       }

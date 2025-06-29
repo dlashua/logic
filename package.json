@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "tsx --watch ./src/test/quick-test.ts"
+    "test": "tsx ./src/test/quick-test.ts"
   },
   "keywords": [],
   "author": "",

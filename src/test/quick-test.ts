@@ -54,7 +54,7 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        // console.log("queries performed", module.relDB.realQueries, module.relDB.realQueries.length);
+        console.log("queries performed", module.relDB.realQueries);
         console.log("queries performed", {
           queries: module.relDB.realQueries.length,
           cached: module.relDB.cacheQueries.length,
@@ -87,9 +87,9 @@ const q = query()
 
     // person($.person),
     parentAgg($.person, $.parents),
-    // stepParentAgg($.person, $.step_parents),
-    // grandparentAgg($.person, $.grand_parents),
-    // greatgrandparentAgg($.person, $.great_grand_parents),
+    stepParentAgg($.person, $.step_parents),
+    grandparentAgg($.person, $.grand_parents),
+    greatgrandparentAgg($.person, $.great_grand_parents),
     // uncleAgg($.person, $.uncle, 1),
     // uncleAgg($.person, $.uncle_2, 2),
     // uncleAgg($.person, $.uncle_3, 3),

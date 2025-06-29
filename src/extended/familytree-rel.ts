@@ -80,7 +80,7 @@ export const kidOf = Rel((p, v) => {
 });
 
 export const parentAgg = Rel(function parentAgg (k, p) {
-  const in_s = lvar("in_s");
+  const in_s = lvar("parentAgg_in_s");
   return collecto(in_s, parentOf(k, in_s), p);
 });
 
@@ -103,7 +103,7 @@ export const stepKidOf = Rel((stepparent: any, kid: any) => {
 });
 
 export const stepParentAgg = Rel((k, p) => {
-  const in_s = lvar("in_s");
+  const in_s = lvar("stepParentAgg_in_s");
   return collecto(in_s, stepParentOf(k, in_s), p);
 });
 

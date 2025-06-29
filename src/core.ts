@@ -1,5 +1,22 @@
 // Core logic functions for MiniKanren-style logic programming
 
+const EOS_LOG = false;
+export function EOSseen(name: string, details = {}) {
+  if(!EOS_LOG) return;
+  console.log("EOS seen", name);
+}
+
+export function EOSsent(name: string, details = {}) {
+  if(!EOS_LOG) return;
+  console.log("EOS sent", name);
+}
+
+export async function wasteGen(g) {
+  for await(const _ of g){
+    // pass
+  }
+  return;
+}
 /**
  * Logic variable representation
  */
@@ -147,6 +164,7 @@ export async function unify(u: Term, v: Term, s: Subst): Promise<Subst | null> {
 
 /**
  * Extends a substitution with a new variable binding, with occurs check.
+ * Ensures `null` is not processed.
  */
 export async function extendSubst(
   v: Var,
@@ -235,8 +253,13 @@ export function logicList<T = unknown>(...items: T[]): Term {
 
 /**
  * Returns true if variable v occurs anywhere in x (occurs check for unification).
+ * Handles `null` gracefully.
  */
 export async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
+  if (x === null) {
+    return false; // `null` cannot contain variables
+  }
+
   x = await walk(x, s);
   if (isVar(x)) return v.id === x.id;
   if (Array.isArray(x)) {

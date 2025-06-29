@@ -36,7 +36,11 @@ import { QUERIES } from "./direct-sql.ts";
 console.log("START quick-test");
 
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
+  if (reason === null) {
+    console.warn('End-of-stream marker (`null`) received.');
+  } else {
+    console.error('Unhandled Rejection:', reason);
+  }
 });
 
 
@@ -77,15 +81,11 @@ const q = query()
   //   p: $.person 
   // }))
   .where($ => [
-    
-    // membero($.person, ["celeste", "daniel", "alexh"]),
-    // parent_kid($.parent, $.person),
 
     // DO NOT DELETE THIS TEST CASE COMMENT
-    membero($.person, ["celeste", "daniel"]),
-    // grandparent_kid($.gp, $.person),
+    membero($.person, ["celeste"]),
 
-    person($.person),
+    // person($.person),
     parentAgg($.person, $.parents),
     stepParentAgg($.person, $.step_parents),
     grandparentAgg($.person, $.grand_parents),
@@ -111,7 +111,11 @@ const q = query()
 
 const results = [];
 for await (const row of q) {
-  results.push(row);
+  if (row === null) {
+    console.log('End-of-stream marker (`null`) reached.');
+  } else {
+    results.push(row);
+  }
 }
 // const results = await q.toArray();
 

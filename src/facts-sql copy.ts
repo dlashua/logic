@@ -2,7 +2,6 @@ import type { Knex } from "knex";
  
 import knex from "knex";
 import {
-  EOSseen,
   Subst,
   Term,
   isVar,
@@ -155,11 +154,6 @@ export const makeRelDB = async (
   const rel = async (table: string) => {
     return function goal(queryObj: Record<string, Term>) {
       return async function* factsSql(s: Subst) {
-        if (s === null) {
-          EOSseen("facts-sql rel");
-          yield null;
-          return;
-        }
         const { selectCols, whereClauses, walkedQ } = await buildQueryParts(queryObj, s);
         const cacheKey = makeCacheKey(table, selectCols, whereClauses);
         let rows;
@@ -225,11 +219,6 @@ export const makeRelDB = async (
     return function goal(queryObj: Record<string, Term<string | number>>) {
       const values = Object.values(queryObj);
       return async function* (s: Subst) {
-        if (s === null) {
-          EOSseen("facts-sql relSym");
-          yield null;
-          return;
-        }
         if (values.length > 2) return;
         const walkedValues: Term[] = await Promise.all(values.map(x => walk(x, s)));
         if(walkedValues[0] === walkedValues[1]) return;

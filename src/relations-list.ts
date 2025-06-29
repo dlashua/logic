@@ -5,7 +5,8 @@ import {
   lvar,
   nil,
   unify,
-  walk
+  walk,
+  EOSseen
 } from "./core.ts"
 import type { Term } from "./core.ts";
 import {
@@ -18,6 +19,11 @@ import {
 
 export function membero(x: Term, list: Term): ProfilableGoal {
   return maybeProfile(async function* (s) {
+    if(s === null) {
+      EOSseen("membero");
+      yield null;
+      return;
+    }
     const l = await walk(list, s);
     if (l && typeof l === "object" && "tag" in l) {
       if ((l as any).tag === "cons") {

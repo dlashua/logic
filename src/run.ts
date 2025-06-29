@@ -1,6 +1,12 @@
 // Run handlers for MiniKanren-style logic programming
 import type { Goal } from "./relations.ts";
-import { isVar, logicListToArray, lvar, walk } from "./core.ts";
+import {
+  EOSseen,
+  isVar,
+  logicListToArray,
+  lvar,
+  walk
+} from "./core.ts"
 import type { Subst, Term, Var } from "./core.ts";
 
 /**
@@ -22,6 +28,11 @@ export async function* formatSubstitutions<
 ): AsyncGenerator<RunResult<Fmt>> {
   let count = 0;
   for await (const s of substs) {
+    if (s === null) {
+      EOSseen("formatSubstitutions");
+      yield null;
+      return;
+    }
     if (count++ >= n) break;
     const out: Partial<RunResult<Fmt>> = {};
     for (const key in formatter) {

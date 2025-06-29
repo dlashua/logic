@@ -1,5 +1,5 @@
 import type { Subst, Term } from "./core.ts";
-import { arrayToLogicList, walk } from "./core.ts";
+import { arrayToLogicList, walk, EOSseen, EOSsent } from "./core.ts";
 import type { Goal, enableLogicProfiling, disableLogicProfiling } from "./relations.ts";
 import { eq } from "./relations.ts";
 
@@ -83,8 +83,18 @@ export function aggregateRelFactory(
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
     return maybeProfile(async function* aggregateRelFactory (s: Subst) {
+      if (s === null) {
+        EOSseen("aggregateRelFactory");
+        yield* goal(null);
+        yield null; 
+        return;
+      }
       const results: Term[] = [];
       for await (const s1 of goal(s)) {
+        if(s1 === null) {
+          yield null;
+          return;
+        }
         const val = await walk(x, s1);
         results.push(val);
       }

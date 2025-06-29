@@ -6,7 +6,14 @@ import {
   disableLogicProfiling,
   printLogicProfileRecap
 } from "./relations.ts"
-import { Subst, Term, Var, CTX_SYM } from "./core.ts";
+import {
+  Subst,
+  Term,
+  Var,
+  CTX_SYM,
+  EOSseen,
+  EOSsent
+} from "./core.ts"
 import { createLogicVarProxy, formatSubstitutions, withFluentAsyncGen, RunResult } from "./run.ts"
 
 type FluentAsyncGen<R> = AsyncGenerator<R> & {
@@ -148,18 +155,11 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
     }
     const goal = this._getGoal();
 
-    // --- Two-pass logic: collect patterns, then run ---
-    // Use symbol for context key in Subst
-    // Pass 1: Collect mode
     const Ctx = {
       mode: "collect",
       patterns: []
     };
-    const s0Collect: Subst = new Map();
-    s0Collect.set(CTX_SYM, Ctx);
-    // Run the goal in collect mode (primitive relations should push to ctx[patterns symbol])
-    for await (const _ of goal(s0Collect)) {/* ignore */}
-    // Pass 2: Run mode, stuff collectCtx into runCtx
+
     Ctx.mode = "run";
     const s0Run: Subst = new Map();
     s0Run.set(CTX_SYM, Ctx);
@@ -167,6 +167,8 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
     for await (const result of gen) {
       yield result;
     }
+    EOSsent("runQuery");
+    yield* goal(null);
   }
 
   /**
@@ -228,6 +230,9 @@ function wrapRelationForProfiling(
     async function* profiledGen() {
       try {
         for await (const v of gen) {
+          if (v === null) {
+            EOSseen("wrapRelationForProfiling");
+          }
           yield v;
         }
         finished = true;

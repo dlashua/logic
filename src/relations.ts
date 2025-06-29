@@ -1,7 +1,16 @@
 // Relation helpers for MiniKanren-style logic programming
 
 import type { Subst, Term, Var } from "./core.ts";
-import { isVar, lvar, unify, walk } from "./core.ts"
+import {
+  isVar,
+  lvar,
+  nil,
+  unify,
+  walk,
+  EOSseen,
+  EOSsent,
+  wasteGen,
+} from "./core.ts"
 
 /**
  * A logic goal: a function from a substitution to an async generator of substitutions.
@@ -13,6 +22,11 @@ export type Goal = (s: Subst) => AsyncGenerator<Subst>;
  */
 export function eq(u: Term, v: Term) {
   const goal = async function* eq (s: Subst) {
+    if(s === null) {
+      EOSseen("eq");
+      yield s;
+      return;
+    }
     yield* unifyGenerator(u,v,s);
   };
   return maybeProfile(goal);
@@ -36,43 +50,88 @@ export function fresh(f: (...vars: Var[]) => Goal) {
 
 /**
  * Logical OR: succeeds if either g1 or g2 succeeds.
+ * Propagates `null` to both branches.
  */
 export function disj(g1: Goal, g2: Goal) {
-  const goal = async function* disj (s: Subst) {
+  const goal = async function* disj(s: Subst) {
+    if (s === null) {
+      yield null; // Propagate end-of-stream marker
+      return;
+    }
+
     yield* g1(s);
-      
     yield* g2(s);
-  
-    
+    yield null; // Ensure `null` is passed downstream
   };
   return maybeProfile(goal);
 }
 
 /**
  * Logical AND: succeeds if both g1 and g2 succeed in sequence.
+ * Propagates `null` to the second goal if the first yields `null`.
  */
 export function conj(g1: Goal, g2: Goal) {
   const goal = async function* conj (s: Subst) {
-    for await (const s1 of g1(s)) {
-      yield* g2(s1);
+    if (s === null) {
+      EOSseen("conj");
+      EOSseen("conj wasting g1");
+      await wasteGen(g1(null));
+      EOSseen("conj wasting g2");
+      await wasteGen(g2(null));
+      EOSsent("conj");
+      yield null;
+      return;
     }
-    
+
+    for await (const s1 of g1(s)) {
+      if (s1 === null) {
+        EOSseen("conj goal1")
+        await wasteGen(g2(null));
+        yield null; // Propagate `null` to the second goal
+        return;
+      }
+      for await (const s2 of g2(s1)) {
+        if (s2 === null) {
+          EOSseen("conj goal2")
+          yield null; // Propagate `null` to the second goal
+          return;
+        }
+        yield s2
+      }
+    }
   };
   return maybeProfile(goal);
 }
 
 /**
  * Logic programming conditional (multi-statement AND per clause).
- * This is an OR of ANDs. Each argument is an array of goals. Those
- * goals are anded together and must all succeed. If the goals in the
- * first argument don't succeed, then the second argument is attempted.
+ * Propagates `null` to all clauses.
  */
 export function conde(...clauses: Goal[][]) {
   const goal = async function* conde (s: Subst) {
+    if (s === null) {
+      EOSseen("conde");
+      for (const clause of clauses) {
+        for (const subclause of clause) {
+          yield* subclause(null);
+        }
+      }
+      EOSsent("conde");
+      yield null; // Propagate end-of-stream marker
+      return;
+    }
+
     for (const clause of clauses) {
       const subgoal = and(...clause);
-      for await (const s1 of subgoal(s)) yield s1;
+      for await (const s1 of subgoal(s)) {
+        if (s1 === null) {
+          yield null; // Propagate `null` to all clauses
+          return;
+        }
+        yield s1;
+      }
     }
+    yield null; // Ensure `null` is passed downstream
   };
   return maybeProfile(goal);
 }
@@ -192,11 +251,23 @@ export function Rel<F extends (...args: any) => any>(
 ): (...args: Parameters<F>) => ProfilableGoal {
   return (...args: Parameters<F>) => {
     const goal = async function* relGoal(s: Subst) {
+      if(s === null) {
+        EOSseen("Rel");
+        const subgoal = fn(...args);
+        EOSsent("Rel subgoal");
+        await wasteGen(subgoal(null));
+        yield null;
+        return;
+      }
       // Walk all arguments with the current substitution
       const walkedArgs = await Promise.all(args.map(arg => walk(arg, s)));
       // Call the underlying relation function with grounded arguments
       const subgoal = fn(...walkedArgs);
       for await (const s1 of subgoal(s)) {
+        if(s1 === null) {
+          EOSseen("Rel subgoal");
+          return;
+        }
         yield s1;
       }
     };
@@ -244,11 +315,29 @@ export function ___Rel<F extends (...args: any) => any>(
 
 /**
  * not(goal): Succeeds if the given goal fails (negation as failure).
+ * Propagates `null` downstream.
  */
 export function not(goal: Goal): Goal {
-  const g = async function* not (s: Subst) {
-    for await (const _ of goal(s)) return;
-    yield s;
+  const g = async function* not(s: Subst) {
+    if (s === null) {
+      EOSseen("not");
+      EOSsent("not subgoal");
+      await wasteGen(goal(null));
+      yield null; // Propagate end-of-stream marker
+      return;
+    }
+
+    let found = false;
+    for await (const _ of goal(s)) {
+      if(_ === null) {
+        EOSseen("not subgoal");
+        // yield null;
+        return;
+      }
+      found = true;
+      break;
+    }
+    if (!found) yield s;
   };
   return maybeProfile(g);
 }
@@ -291,8 +380,19 @@ export function ifte(g1: Goal, g2: Goal): Goal {
 export const eitherOr = ifte;
 export const neq_C = Rel((x: Term, y: Term) => maybeProfile(not(eq(x, y))));
 export const distincto_G = Rel((t: Term, g: Goal) => maybeProfile(async function* distincto_G (s: Subst) {
+  if (s === null) {
+    EOSseen("distincto_G");
+    await wasteGen(g(null));
+    yield null;
+    return;
+  }
   const seen = new Set();
   for await (const s2 of g(s)) {
+    if (s2 === null) {
+      EOSseen("distincto_G goal");
+      yield null;
+      return;
+    }
     const w_t = await walk(t, s2);
     if (isVar(w_t)) {
       yield s2;
@@ -364,6 +464,11 @@ function wrapGoalForProfiling(goal: Goal): ProfiledGoal {
     async function* profiledGen() {
       try {
         for await (const v of gen) {
+          if(v===null) {
+            EOSseen("wrapGoalForProfiling");
+            yield null;
+            return;
+          }
           yield v;
         }
         finished = true;

@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
-import knex from "knex";
+import knex, { Knex } from "knex";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 

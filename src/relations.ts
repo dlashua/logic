@@ -196,7 +196,9 @@ export function Rel<F extends (...args: any) => any>(
       const walkedArgs = await Promise.all(args.map(arg => walk(arg, s)));
       // Call the underlying relation function with grounded arguments
       const subgoal = fn(...walkedArgs);
-      for await (const s1 of subgoal(s)) yield s1;
+      for await (const s1 of subgoal(s)) {
+        yield s1;
+      }
     };
     // Always set a custom property for the logical name
     if (typeof goal === "function" && fn.name) {

@@ -1,8 +1,13 @@
 import { query } from "../query-builder.ts";
-import { cousinsAgg } from "../extended/familytree-rel.ts"
-import { relDB } from "./familytree-sql-facts.ts";
+import { cousinsAgg, set_parent_kid, set_relationship } from "../extended/familytree-rel.ts"
+import { parent_kid, relationship, relDB } from "./familytree-sql-facts.ts";
+// import { parent_kid, relationship } from "./familytree-mem-facts.ts";
+
 import { getCousinsOf, QUERIES } from "./direct-sql.ts";
 
+
+set_parent_kid(parent_kid);
+set_relationship(relationship);
 
 async function sequentialPromises(promiseFunctions: (() => Promise<any>)[]) {
   const res = [];

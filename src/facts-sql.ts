@@ -1,10 +1,9 @@
 import type { Knex } from "knex";
-// eslint-disable-next-line import/no-named-as-default
+ 
 import knex from "knex";
 import {
   Subst,
   Term,
-  CTX_SYM,
   isVar,
   unify,
   walk

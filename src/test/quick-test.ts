@@ -31,6 +31,7 @@ import {
 import { membero } from "../relations-list.ts";
 import { and, eq, fresh } from "../relations.ts";
 import { lvar } from "../core.ts";
+import { QUERIES } from "./direct-sql.ts";
 
 console.log("START quick-test");
 
@@ -49,7 +50,12 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        console.log("queries performed", module.relDB.realQueries, module.relDB.realQueries.length);
+        // console.log("queries performed", module.relDB.realQueries, module.relDB.realQueries.length);
+        console.log("queries performed", {
+          queries: module.relDB.realQueries.length,
+          cached: module.relDB.cacheQueries.length,
+          aux: QUERIES.length,
+        });
       },
       () => module.relDB.db.destroy(),
     );
@@ -76,8 +82,8 @@ const q = query()
     // parent_kid($.parent, $.person),
 
     // DO NOT DELETE THIS TEST CASE COMMENT
-    membero($.person, ["celeste", "daniel", "alexh"]),
-    grandparent_kid($.gp, $.person),
+    membero($.person, ["celeste", "daniel"]),
+    // grandparent_kid($.gp, $.person),
 
     person($.person),
     parentAgg($.person, $.parents),

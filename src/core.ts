@@ -160,30 +160,39 @@ export function isLogicList(x: Term): x is LogicList {
 
 /**
  * Recursively finds the ultimate binding of a term in a given substitution.
+ * Optimized to use iteration for variable chains and avoid deep recursion.
  * @param u The term to resolve.
  * @param s The substitution map.
  */
 export async function walk(u: Term, s: Subst): Promise<Term> {
-  if (isVar(u) && s.has(u.id)) {
-    return walk(s.get(u.id)!, s);
+  let current = u;
+  
+  // Fast path for variable chains - use iteration instead of recursion
+  while (isVar(current) && s.has(current.id)) {
+    current = s.get(current.id)!;
   }
-  if (isCons(u)) {
+  
+  // If we ended up with a non-variable, check if it needs structural walking
+  if (isCons(current)) {
     // Walk both parts of the cons cell
-    return cons(await walk(u.head, s), await walk(u.tail, s));
+    return cons(await walk(current.head, s), await walk(current.tail, s));
   }
-  if (Array.isArray(u)) {
-    return Promise.all(u.map((x) => walk(x, s)));
+  
+  if (Array.isArray(current)) {
+    return Promise.all(current.map((x) => walk(x, s)));
   }
-  if (u && typeof u === "object" && !isVar(u) && !isLogicList(u)) {
+  
+  if (current && typeof current === "object" && !isVar(current) && !isLogicList(current)) {
     const out: Record<string, Term> = {};
-    for (const k in u) {
-      if (Object.hasOwn(u, k)) {
-        out[k] = await walk((u as any)[k], s);
+    for (const k in current) {
+      if (Object.hasOwn(current, k)) {
+        out[k] = await walk((current as any)[k], s);
       }
     }
     return out;
   }
-  return u;
+  
+  return current;
 }
 
 /**
@@ -221,17 +230,37 @@ async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
 
 /**
  * The core unification algorithm. It attempts to make two terms structurally equivalent.
+ * Optimized with fast paths for common cases.
  */
 export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | null> {
-  if(s===null) {
+  if (s === null) {
     return null;
+  }
+
+  // Fast path: if both terms are identical primitives, no walking needed
+  if (u === v) {
+    return s;
   }
 
   const uWalked = await walk(u, s);
   const vWalked = await walk(v, s);
 
+  // Fast path: after walking, if they're still identical, succeed
+  if (uWalked === vWalked) {
+    return s;
+  }
+
   if (isVar(uWalked)) return extendSubst(uWalked, vWalked, s);
   if (isVar(vWalked)) return extendSubst(vWalked, uWalked, s);
+
+  // Fast paths for primitive types
+  if (typeof uWalked === 'number' && typeof vWalked === 'number') {
+    return uWalked === vWalked ? s : null;
+  }
+  
+  if (typeof uWalked === 'string' && typeof vWalked === 'string') {
+    return uWalked === vWalked ? s : null;
+  }
 
   if (isNil(uWalked) && isNil(vWalked)) return s;
   if (isCons(uWalked) && isCons(vWalked)) {
@@ -568,21 +597,28 @@ export function query<Fmt>(): Query<Fmt> {
 
 /**
  * A goal that succeeds if `x` is a member of the logic `list`.
+ * Optimized for both arrays and logic lists.
  */
 export function membero(x: Term, list: Term): Goal {
   return async function* (s) {
     const l = await walk(list, s);
+    
+    // Fast path for arrays
+    if (Array.isArray(l)) {
+      for (const item of l) {
+        const s2 = await unify(x, item, s);
+        if (s2) yield s2;
+      }
+      return;
+    }
+    
+    // Logic list traversal with iterative approach when possible
     if (l && typeof l === "object" && "tag" in l) {
       if ((l as any).tag === "cons") {
         const s1 = await unify(x, (l as any).head, s);
         if (s1) yield s1;
+        // Recursive call for tail
         for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
-      }
-    } else if (Array.isArray(l)) {
-      for (const item of l) {
-        const walkedItem = await walk(item, s);
-        const s2 = await unify(x, walkedItem, s);
-        if (s2) yield s2;
       }
     }
   };
@@ -671,7 +707,7 @@ export function Rel<F extends (...args: any) => any>(
 }
 
 export const distincto_G = Rel((t: Term, g: Goal) => 
-  async function* distincto_G (s: Subst) {
+  async function* distincto_G(s: Subst) {
     const seen = new Set();
     for await (const s2 of g(s)) {
       const w_t = await walk(t, s2);
@@ -690,7 +726,7 @@ export const distincto_G = Rel((t: Term, g: Goal) =>
 export function not(goal: Goal): Goal {
   const g = async function* not(s: Subst) {
     let found = false;
-    for await (const _ of goal(s)) {
+    for await (const _subst of goal(s)) {
       found = true;
       break;
     }

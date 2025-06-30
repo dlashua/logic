@@ -22,9 +22,9 @@ import {
   resto,
   appendo,
   logicListToArray,
-  gtc,
+  gto,
   not,
-  neq_C
+  neqo
 } from './core.ts';
 
 describe('Core Logic Engine', () => {
@@ -227,8 +227,8 @@ describe('Core Logic Engine', () => {
       expect(results[1].get(x.id)).toBe(2);
     });
 
-    it('should work with gtc (greater than constraint)', async () => {
-      const goal = gtc(5, 3);
+    it('should work with gto (greater than constraint)', async () => {
+      const goal = gto(5, 3);
       const s = new Map();
       
       const results = [];
@@ -240,8 +240,8 @@ describe('Core Logic Engine', () => {
       expect(results[0]).toBe(s);
     });
 
-    it('should fail with gtc when constraint not met', async () => {
-      const goal = gtc(3, 5);
+    it('should fail with gto when constraint not met', async () => {
+      const goal = gto(3, 5);
       const s = new Map();
       
       const results = [];
@@ -269,11 +269,11 @@ describe('Core Logic Engine', () => {
       expect(results[0].get(x.id)).toBe(42);
     });
 
-    it('should work with neq_C (not equal constraint)', async () => {
+    it('should work with neqo (not equal constraint)', async () => {
       const x = lvar('x');
       const goal = and(
         eq(x, 42),
-        neq_C(x, 43)
+        neqo(x, 43)
       );
       const s = new Map();
       

@@ -1,10 +1,5 @@
 import { describe, it, beforeEach } from 'vitest';
-import {
-  lvar,
-  resetVarCounter,
-  walk,
-  unify
-} from './core.ts';
+import { lvar, resetVarCounter, walk, unify } from './core.ts'
 // Note: Optimizations are now integrated into core.ts
 // This test compares the current optimized core against a baseline
 import { compareBenchmarks } from './benchmark.ts';
@@ -18,7 +13,9 @@ describe('Optimization Tests', () => {
     // Test deep substitution chains
     await compareBenchmarks(
       async () => {
-        const vars = Array.from({ length: 20 }, (_, i) => lvar(`x${i}`));
+        const vars = Array.from({
+          length: 20 
+        }, (_, i) => lvar(`x${i}`));
         const s = new Map();
         
         // Create a chain: x0 -> x1 -> x2 -> ... -> x19 -> 42
@@ -30,7 +27,9 @@ describe('Optimization Tests', () => {
         return await walk(vars[0], s);
       },
       async () => {
-        const vars = Array.from({ length: 20 }, (_, i) => lvar(`x${i}`));
+        const vars = Array.from({
+          length: 20 
+        }, (_, i) => lvar(`x${i}`));
         const s = new Map();
         
         // Create a chain: x0 -> x1 -> x2 -> ... -> x19 -> 42
@@ -86,7 +85,9 @@ describe('Optimization Tests', () => {
 
   it('should verify correctness of optimizations', async () => {
     // Ensure optimized versions produce same results as originals
-    const vars = Array.from({ length: 10 }, (_, i) => lvar(`x${i}`));
+    const vars = Array.from({
+      length: 10 
+    }, (_, i) => lvar(`x${i}`));
     const s = new Map();
     
     for (let i = 0; i < vars.length - 1; i++) {

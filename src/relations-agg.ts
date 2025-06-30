@@ -58,17 +58,8 @@ export async function* groupByGoal(
   }
 }
 
-// Helper to profile goals if profiling is enabled
-function maybeProfile(goal: Goal): Goal {
-  // Use the global maybeProfile from relations.ts if available
-  // (imported above), otherwise fallback to identity
-  return ((globalThis as any).LOGIC_PROFILING_ENABLED !== undefined)
-    ? (globalThis as any).LOGIC_PROFILING_ENABLED ? (globalThis as any).wrapGoalForProfiling(goal) : goal
-    : goal;
-}
-
 /**
- * aggregateRelFactory: generic helper for collecto, distincto, counto.
+ * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.
  * - x: variable to collect
  * - goal: logic goal
  * - out: output variable
@@ -80,7 +71,7 @@ export function aggregateRelFactory(
   dedup = false,
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return maybeProfile(async function* aggregateRelFactory (s: Subst) {
+    return async function* aggregateRelFactory (s: Subst) {
       const results: Term[] = [];
       for await (const s1 of goal(s)) {
         const val = await walk(x, s1);
@@ -88,14 +79,14 @@ export function aggregateRelFactory(
       }
       const agg = aggFn(dedup ? deduplicate(results) : results);
       yield* eq(out, agg)(s);
-    });
+    };
   };
 }
 
 /**
  * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
  * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg, dedup?) => Goal
- * Example: const groupCollecto = groupAggregateRelFactory(arrayToLogicList)
+ * Example: const group_by_collecto = groupAggregateRelFactory(arrayToLogicList)
  */
 export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
   return (
@@ -125,8 +116,8 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     };
 }
 
-export const groupCollecto = groupAggregateRelFactory(arrayToLogicList);
-export const groupCounto = groupAggregateRelFactory(
+export const group_by_collecto = groupAggregateRelFactory(arrayToLogicList);
+export const group_by_counto = groupAggregateRelFactory(
   (items: any[]) => items.length,
 );
 
@@ -137,10 +128,10 @@ export const groupCounto = groupAggregateRelFactory(
 export const collecto = aggregateRelFactory((arr) => arrayToLogicList(arr));
 
 /**
- * distincto(x, goal, xs): xs is the list of distinct values of x under goal.
- * Usage: distincto(x, goal, xs)
+ * collect_distincto(x, goal, xs): xs is the list of distinct values of x under goal.
+ * Usage: collect_distincto(x, goal, xs)
  */
-export const distincto = aggregateRelFactory(
+export const collect_distincto = aggregateRelFactory(
   (arr) => arrayToLogicList(arr),
   true,
 );

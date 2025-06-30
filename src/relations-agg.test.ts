@@ -10,10 +10,10 @@ import {
 } from './core.ts';
 import {
   collecto,
-  distincto,
+  collect_distincto,
   counto,
-  groupCollecto,
-  groupCounto,
+  group_by_collecto,
+  group_by_counto,
   aggregateVar,
   aggregateVarMulti
 } from './relations-agg.ts';
@@ -63,11 +63,11 @@ describe('Aggregation Relations', () => {
     });
   });
 
-  describe('distincto', () => {
+  describe('collect_distincto', () => {
     it('should collect distinct values only', async () => {
       const x = lvar('x');
       const result = lvar('result');
-      const goal = distincto(
+      const goal = collect_distincto(
         x,
         or(eq(x, 1), eq(x, 2), eq(x, 1), eq(x, 3), eq(x, 2)),
         result
@@ -78,7 +78,7 @@ describe('Aggregation Relations', () => {
       for await (const subst of goal(s)) {
         const res = await walk(result, subst);
         const collected = logicListToArray(res);
-        // Sort for consistent comparison since distincto doesn't guarantee order
+        // Sort for consistent comparison since collect_distincto doesn't guarantee order
         collected.sort();
         results.push(collected);
       }
@@ -125,14 +125,14 @@ describe('Aggregation Relations', () => {
     });
   });
 
-  describe('groupCollecto', () => {
+  describe('group_by_collecto', () => {
     it('should group by key and collect values', async () => {
       const key = lvar('key');
       const value = lvar('value');
       const outKey = lvar('outKey');
       const outValues = lvar('outValues');
       
-      const goal = groupCollecto(
+      const goal = group_by_collecto(
         key,
         value,
         or(
@@ -172,14 +172,14 @@ describe('Aggregation Relations', () => {
     });
   });
 
-  describe('groupCounto', () => {
+  describe('group_by_counto', () => {
     it('should group by key and count values', async () => {
       const key = lvar('key');
       const value = lvar('value');
       const outKey = lvar('outKey');
       const outCount = lvar('outCount');
       
-      const goal = groupCounto(
+      const goal = group_by_counto(
         key,
         value,
         or(

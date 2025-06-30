@@ -1,4 +1,4 @@
-import { query, and, gtc } from "../../core.ts";
+import { query, and, gto } from "../../core.ts";
 import { arrayLength } from "../../relations-list.ts";
 import { aggregateVarMulti } from "../../relations-agg.ts";
 import {
@@ -46,7 +46,7 @@ await timeit("logic", async () => {
             state($.id, $.state),
             city($.id, $.city),
             population($.id, $.pop),
-            gtc($.pop, 10000),
+            gto($.pop, 10000),
           ),
         ),
         arrayLength($.city, $.city_cnt),
@@ -61,5 +61,3 @@ await timeit("logic", async () => {
   console.log(res.length);
   return res;
 });
-
-

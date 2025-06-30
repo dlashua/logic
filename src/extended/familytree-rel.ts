@@ -3,9 +3,9 @@ import {
   lvar,
   createLogicVarProxy ,
   Goal,
-  Rel,
+  lift,
   and,
-  distincto_G,
+  uniqueo,
   eq,
   not,
   or,
@@ -21,24 +21,24 @@ let relationship = (a: Term<string|number>, b: Term<string|number>): Goal => {
 };
 
 export function set_parent_kid(fn: typeof parent_kid) {
-  parent_kid = Rel(fn);
+  parent_kid = lift(fn);
 }
 
 export function set_relationship(fn: typeof relationship) {
-  relationship = Rel(fn);
+  relationship = lift(fn);
 }
 
-export const parentOf = Rel((v, p) => parent_kid(p, v));
+export const parentOf = lift((v, p) => parent_kid(p, v));
 
-export const person = Rel((p) => {
+export const person = lift((p) => {
   const { proxy: $$ } = createLogicVarProxy("person_");
-  return distincto_G(
+  return uniqueo(
     p,
     or(parent_kid(p, $$.kid), parent_kid($$.parent, p)),
   );
 });
 
-export const kidsAgg = Rel((v, s) => {
+export const kidsAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, anyKidOf(v, in_s), s);
 });
@@ -47,36 +47,36 @@ export const kidsAgg = Rel((v, s) => {
 export const grandparent_kid = (gp: Term, k: Term) => ancestorOf(2)(k,gp);
 export const greatgrandparent_kid = (ggp: Term, k: Term) => ancestorOf(3)(k, ggp);
 
-export const grandparentAgg = Rel((k, gp) => {
+export const grandparentAgg = lift((k, gp) => {
   const { proxy: $$ } = createLogicVarProxy("grandparentagg_");
   return collecto($$.in_gp, grandparent_kid($$.in_gp, k), gp);
 });
 
-export const greatgrandparentAgg = Rel((k, gp) => {
+export const greatgrandparentAgg = lift((k, gp) => {
   const in_s = lvar("in_s");
   return collecto(in_s, greatgrandparent_kid(in_s, k), gp);
 });
 
-export const anyParentOf = Rel((v, p) => {
+export const anyParentOf = lift((v, p) => {
   return or(stepParentOf(v, p), parentOf(v, p));
 });
 
-export const anyKidOf = Rel((p, v) => {
+export const anyKidOf = lift((p, v) => {
   return or(stepKidOf(p, v), parentOf(v, p));
   // return or(parentOf(v, p), parentOf(v, p));
 
 });
 
-export const kidOf = Rel((p, v) => {
+export const kidOf = lift((p, v) => {
   return parentOf(v, p);
 });
 
-export const parentAgg = Rel(function parentAgg (k, p) {
+export const parentAgg = lift(function parentAgg (k, p) {
   const in_s = lvar("parentAgg_in_s");
   return collecto(in_s, parentOf(k, in_s), p);
 });
 
-export const stepParentOf = Rel((kid: any, stepparent: any) => {
+export const stepParentOf = lift((kid: any, stepparent: any) => {
   const { proxy: $$ } = createLogicVarProxy("stepparentof_");
   return and(
     parentOf(kid, $$.parent),
@@ -85,7 +85,7 @@ export const stepParentOf = Rel((kid: any, stepparent: any) => {
   );
 });
 
-export const stepKidOf = Rel((stepparent: any, kid: any) => {
+export const stepKidOf = lift((stepparent: any, kid: any) => {
   const { proxy: $$ } = createLogicVarProxy("stepkidof_");
   return and(
     relationship(stepparent, $$.parent),
@@ -94,7 +94,7 @@ export const stepKidOf = Rel((stepparent: any, kid: any) => {
   );
 });
 
-export const stepParentAgg = Rel((k, p) => {
+export const stepParentAgg = lift((k, p) => {
   const in_s = lvar("stepParentAgg_in_s");
   return collecto(in_s, stepParentOf(k, in_s), p);
 });
@@ -106,10 +106,10 @@ export const tap = (msg: any) => {
   };
 };
 
-export const fullSiblingOf = Rel((out_v, out_s) => {
+export const fullSiblingOf = lift((out_v, out_s) => {
   const p1 = lvar("fullsibof_p1");
   const p2 = lvar("fullsibof_p2");
-  return distincto_G(
+  return uniqueo(
     out_s,
     and(
       parentOf(out_v, p1),
@@ -124,14 +124,14 @@ export const fullSiblingOf = Rel((out_v, out_s) => {
   );
 });
 
-export const fullSiblingsAgg = Rel((v, s) => {
+export const fullSiblingsAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, fullSiblingOf(v, in_s), s);
 });
 
-export const halfSiblingOf = Rel((out_v, out_s) => {
+export const halfSiblingOf = lift((out_v, out_s) => {
   const sharedparent = lvar("halfsibof_sharedparent");
-  return distincto_G(
+  return uniqueo(
     out_s,
     and(
       parentOf(out_v, sharedparent),
@@ -142,14 +142,14 @@ export const halfSiblingOf = Rel((out_v, out_s) => {
   )
 });
 
-export const halfSiblingsAgg = Rel((v, s) => {
+export const halfSiblingsAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, halfSiblingOf(v, in_s), s);
 });
 
-export const stepSiblingOf = Rel((out_v: any, out_s: any) => {
+export const stepSiblingOf = lift((out_v: any, out_s: any) => {
   const { proxy: $$ } = createLogicVarProxy("stepsiblingof_");
-  return distincto_G(
+  return uniqueo(
     out_s,
     and(
       anyParentOf(out_v, $$.parent),
@@ -161,17 +161,17 @@ export const stepSiblingOf = Rel((out_v: any, out_s: any) => {
   )
 });
 
-export const stepSiblingsAgg = Rel((v, s) => {
+export const stepSiblingsAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, stepSiblingOf(v, in_s), s);
 });
 
-export const siblingOf = Rel((v, s) => {
+export const siblingOf = lift((v, s) => {
   const in_s = lvar("in_s");
-  return distincto_G(s, and(anyParentOf(v, in_s), anyKidOf(in_s, s), not(eq(v, s))))
+  return uniqueo(s, and(anyParentOf(v, in_s), anyKidOf(in_s, s), not(eq(v, s))))
 });
 
-export const siblingsAgg = Rel((v, s) => {
+export const siblingsAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, siblingOf(v, in_s), s);
 });
@@ -180,19 +180,19 @@ export const siblingsAgg = Rel((v, s) => {
 export const uncleOf = uncleOfLevel(1);
 export const greatuncleOf = uncleOfLevel(2);
 
-export const uncleAgg = Rel((v, s, level = 1) => {
+export const uncleAgg = lift((v, s, level = 1) => {
   const in_s = lvar("in_s");
   return collecto(in_s, uncleOfLevel(level)(v, in_s), s);
 });
 
-export const greatuncleAgg = Rel((v, s) => {
+export const greatuncleAgg = lift((v, s) => {
   const in_s = lvar("in_s");
   return collecto(in_s, greatuncleOf(v, in_s), s);
 });
 
 // Generalized ancestor relation: ancestorOf(level)(descendant, ancestor)
 export const ancestorOf = function ancestorOf(level: number) {
-  return Rel((descendant, ancestor) => {
+  return lift((descendant, ancestor) => {
     if (level < 1) return eq(descendant, ancestor);
     const chain = [descendant];
     for (let i = 0; i < level; ++i) {
@@ -210,10 +210,10 @@ export const ancestorOf = function ancestorOf(level: number) {
 
 // Generalized uncle/aunt relation: uncleOfLevel(level)(person, uncle)
 export function uncleOfLevel(level = 1) {
-  return Rel((person: any, uncle: any) => {
+  return lift((person: any, uncle: any) => {
     const ancestor = lvar("uncle_ancestor");
     const sibling = lvar("uncle_sibling");
-    return distincto_G(
+    return uniqueo(
       uncle,
       and(
         ancestorOf(level)(person, ancestor),
@@ -263,7 +263,7 @@ export function cousinOf(a: any, b: any, degree = 1, removal = 0): any {
 
   exclusions.push(not(eq(a, b))); 
   
-  return distincto_G(
+  return uniqueo(
     b,
     and(
       ...aUpGoals,
@@ -298,7 +298,7 @@ export function cousinOf(a: any, b: any, degree = 1, removal = 0): any {
 //   return goal;
 // }
 
-export const cousinsAgg = Rel((v, s, degree = 1, removal = 0) => {
+export const cousinsAgg = lift((v, s, degree = 1, removal = 0) => {
   const in_s = lvar("in_s");
   return collecto(in_s, cousinOf(v, in_s, degree, removal), s);
 });
@@ -308,9 +308,9 @@ export const secondcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 2);
 export const thirdcousinsAgg = (v: any, s: any) => cousinsAgg(v, s, 3);
 
 // Nephew/Niece relation: nephewOf(person, nephew)
-export const nephewOf = Rel((person, nephew) => {
+export const nephewOf = lift((person, nephew) => {
   const parent = lvar("nephew_parent");
-  return distincto_G(
+  return uniqueo(
     nephew,
     and(
       anyParentOf(nephew, parent),

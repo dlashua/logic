@@ -7,3 +7,5 @@ extra/**
 data/**
 pnpm-workspace.yaml
 CLAUDE.md
+GEMINI.md
+.gemini

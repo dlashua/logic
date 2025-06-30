@@ -49,7 +49,9 @@ describe('Performance Tests', () => {
 
     // Test deep substitution chains
     const deepWalkResult = await benchmark('Deep substitution walking', async () => {
-      const vars = Array.from({ length: 10 }, (_, i) => lvar(`x${i}`));
+      const vars = Array.from({
+        length: 10 
+      }, (_, i) => lvar(`x${i}`));
       const s = new Map();
       
       // Create a chain: x0 -> x1 -> x2 -> ... -> x9 -> 42
@@ -114,7 +116,10 @@ describe('Performance Tests', () => {
     // Test query builder
     const queryResult = await benchmark('Query builder', async () => {
       return await query()
-        .select($ => ({ x: $.x, y: $.y }))
+        .select($ => ({
+          x: $.x,
+          y: $.y 
+        }))
         .where($ => [
           or(eq($.x, 1), eq($.x, 2), eq($.x, 3)),
           eq($.y, 42)

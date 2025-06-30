@@ -685,11 +685,11 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
 
 /** Forgotten Items **/
 
-export function Rel<F extends (...args: any) => any>(
+export function lift<F extends (...args: any) => any>(
   fn: F,
 ): (...args: Parameters<F>) => Goal {
   return (...args: Parameters<F>) => {
-    const goal = async function* relGoal(s: Subst) {
+    const goal = async function* liftGoal(s: Subst) {
       // Walk all arguments with the current substitution
       const walkedArgs = await Promise.all(args.map(arg => walk(arg, s)));
       // Call the underlying relation function with grounded arguments
@@ -706,8 +706,8 @@ export function Rel<F extends (...args: any) => any>(
   };
 }
 
-export const distincto_G = Rel((t: Term, g: Goal) => 
-  async function* distincto_G(s: Subst) {
+export const uniqueo = lift((t: Term, g: Goal) => 
+  async function* uniqueo(s: Subst) {
     const seen = new Set();
     for await (const s2 of g(s)) {
       const w_t = await walk(t, s2);
@@ -735,14 +735,14 @@ export function not(goal: Goal): Goal {
   return g;
 }
 
-export const neq_C = Rel((x: Term, y: Term) => not(eq(x, y)));
+export const neqo = lift((x: Term, y: Term) => not(eq(x, y)));
 
 /**
  * A goal that succeeds if the numeric value in the first term is greater than
  * the numeric value in the second term.
  */
-export function gtc(x: Term, y: Term): Goal {
-  return async function* gtcGoal(s: Subst) {
+export function gto(x: Term, y: Term): Goal {
+  return async function* gtoGoal(s: Subst) {
     const xWalked = await walk(x, s);
     const yWalked = await walk(y, s);
     

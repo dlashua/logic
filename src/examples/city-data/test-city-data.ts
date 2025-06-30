@@ -1,10 +1,6 @@
-import { 
-  query,
-  and,
-  gtc,
-  arrayLength,
-  aggregateVarMulti 
-} from "../../core.ts";
+import { query, and, gtc } from "../../core.ts";
+import { arrayLength } from "../../relations-list.ts";
+import { aggregateVarMulti } from "../../relations-agg.ts";
 import {
   loadData,
   acquireData,

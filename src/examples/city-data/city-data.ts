@@ -1,10 +1,13 @@
 import fs from "fs/promises";
+import { resolve } from "path";
+import { fileURLToPath } from 'url';
 import { makeFacts } from "../../facts/facts-memory.ts";
 
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const MORE_URI =
   "https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/exports/json?lang=en&timezone=America%2FChicago";
 
-const LOCAL_DATA = "./data/data.json";
+const LOCAL_DATA = resolve(__dirname, "../../../data/data.json");
 
 export const country_state_city = makeFacts();
 

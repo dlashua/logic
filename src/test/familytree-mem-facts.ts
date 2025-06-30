@@ -1,7 +1,7 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
 import knex from "knex";
-import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
+import { FamilytreeRelations } from "../extended/familytree-rel.ts";
 import { Term } from "../core/types.ts";
 import { makeFacts, makeFactsSym } from "../facts/facts-memory.ts";
 
@@ -9,11 +9,10 @@ import { makeFacts, makeFactsSym } from "../facts/facts-memory.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-export const parent_kid = makeFacts();
-set_parent_kid(parent_kid);
+const parent_kid = makeFacts();
+const relationship = makeFactsSym();
 
-export const relationship = makeFactsSym();
-set_relationship(relationship);
+export const familytree = new FamilytreeRelations(parent_kid, relationship);
 
 // FACT HELPERS
 export const family = (parents: Term[], kids: Term[]) => {

@@ -54,7 +54,7 @@ export type RunResult<Fmt> = {
   [K in keyof Fmt]: Term;
 };
 
-export type TermedArgs<T extends (...args: any) => any> = T extends (
+export type LiftedArgs<T extends (...args: any) => any> = T extends (
   ...args: infer A
 ) => infer R
   ? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<R>]) => Goal

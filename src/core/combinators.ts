@@ -1,5 +1,11 @@
-import { Goal, Subst, Term, Var } from "./types.ts";
-import { unify, lvar } from "./kernel.ts";
+import {
+  Goal,
+  Subst,
+  Term,
+  Var,
+  LiftedArgs
+} from "./types.ts";
+import { unify, lvar, walk, isVar } from "./kernel.ts";
 
 /**
  * A goal that succeeds if two terms can be unified.
@@ -69,4 +75,45 @@ export const or = (...goals: Goal[]): Goal => {
 export function conde(...clauses: Goal[][]): Goal {
   const clauseGoals = clauses.map(clause => and(...clause));
   return or(...clauseGoals);
+}
+
+/**
+ * Lifts a pure JavaScript function into a Goal function.
+ * The lifted function takes the same parameters as the original function,
+ * but each parameter is wrapped in Term<>. It also adds a final 'out' parameter
+ * that represents the result of the function call, also wrapped in Term<>.
+ */
+export function lift<T extends (...args: any) => any>(fn: T): LiftedArgs<T> {
+  return ((...args: any[]) => {
+    // Extract the 'out' parameter (last argument)
+    const out = args[args.length - 1];
+    const inputArgs = args.slice(0, -1);
+    
+    return async function* liftedGoal(s: Subst) {
+      try {
+        // Walk all input arguments to resolve any variables
+        const resolvedArgs = await Promise.all(
+          inputArgs.map(arg => walk(arg, s))
+        );
+        
+        // Check if all arguments are ground (no variables)
+        const hasVariables = resolvedArgs.some(arg => isVar(arg));
+        
+        if (!hasVariables) {
+          // All arguments are ground, we can call the function
+          const result = fn(...resolvedArgs);
+          
+          // Unify the result with the output parameter
+          const unified = await unify(out, result, s);
+          if (unified !== null) {
+            yield unified;
+          }
+        }
+        // If there are variables in the input, the goal fails
+        // (we can't reverse-engineer the function)
+      } catch (error) {
+        // If the function throws, the goal fails silently
+      }
+    };
+  }) as LiftedArgs<T>;
 }

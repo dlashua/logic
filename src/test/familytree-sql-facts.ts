@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
-import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
+import { FamilytreeRelations } from "../extended/familytree-rel.ts";
 // import { makeRelDB } from "../facts-sql.ts";
 import { Term } from "../core/types.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
@@ -21,20 +21,19 @@ const R = await relDB.relSym("relationship", ["a", "b"], {
   fullScanKeys: ["a", "b"]
 });
 
-export const parent_kid = (p: Term, k: Term) =>
+const parent_kid = (p: Term, k: Term) =>
   PK({
     parent: p,
     kid: k,
   });
 
-export const relationship = (a: Term<string|number>, b: Term<string|number>) => 
+const relationship = (a: Term<string|number>, b: Term<string|number>) => 
   R({
     a,
     b,
   });
     
 // RELATIONS
-set_parent_kid(parent_kid);
-set_relationship(relationship);
+export const familytree = new FamilytreeRelations(parent_kid, relationship);
 
 // await relDB.registerSqlOptimizer();

@@ -23,6 +23,7 @@ export interface Pattern {
   readonly selectCols: Record<string, Term>;
   readonly whereCols: Record<string, Term>;
   readonly queries: string[];
+  readonly timestamp?: number; // For TTL support
   readonly last: {
     selectCols: Record<string, Term>[];
     whereCols: Record<string, Term>[];

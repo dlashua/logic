@@ -16,9 +16,20 @@ export class QueryCache extends BaseCache {
   /**
    * Find matching pattern using optimized comparison
    */
-  findMatchingPattern(patterns: Pattern[], currentPattern: Pattern): Pattern | null {
+  findMatchingPattern(patterns: Pattern[], currentPattern: Pattern, cacheTTL?: number): Pattern | null {
     if (!this.config.patternCacheEnabled) return null;
-    return this.patternComparator.findMatchingPattern(patterns, currentPattern);
+    
+    // Filter out expired patterns if TTL is provided
+    let validPatterns = patterns;
+    if (cacheTTL !== undefined) {
+      const now = Date.now();
+      validPatterns = patterns.filter(pattern => {
+        if (!pattern.timestamp) return true; // No timestamp means no expiration
+        return (now - pattern.timestamp) <= cacheTTL;
+      });
+    }
+    
+    return this.patternComparator.findMatchingPattern(validPatterns, currentPattern);
   }
 
   /**

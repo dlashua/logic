@@ -26,7 +26,6 @@ export const makeRelDB = async (
   // Query logging arrays
   const queries: string[] = [];
   const realQueries: string[] = [];
-  const cacheQueries: string[] = [];
   
   // Create relation factory
   const relationFactory = new RelationFactory({

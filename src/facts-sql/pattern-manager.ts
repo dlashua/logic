@@ -15,7 +15,8 @@ export class PatternManager {
   // Cache for expensive operations
   private selectColsKeyCache = new Map<Pattern, string>();
 
-  constructor(private logger: Logger) {}
+  constructor(private logger: Logger) {
+  }
 
   generateGoalId(): number {
     return this.nextGoalId++;
@@ -48,6 +49,7 @@ export class PatternManager {
     return this.patterns;
   }
 
+
   markPatternAsRan(pattern: Pattern): void {
     this.unranPatterns.delete(pattern);
   }
@@ -66,6 +68,7 @@ export class PatternManager {
       goalIds: [goalId],
       rows: [],
       ran: false,
+      timestamp: Date.now(), // Set timestamp at creation time
       last: {
         selectCols: [],
         whereCols: [],

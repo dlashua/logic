@@ -435,7 +435,6 @@ async function* formatSubstitutions<Fmt>(
 // Section 5: The Fluent Query Builder
 // -----------------------------------------------------------------------------
 
-type Selector<Fmt> = (($: Record<string, Var>) => Fmt) | "*" | any;
 
 type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
   ? RunResult<Fmt>
@@ -446,7 +445,7 @@ type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
 /**
  * A fluent interface for building and executing logic queries.
  */
-class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
+class Query<Fmt = Record<string, Var>, Sel = "*"> {
   private _formatter: Fmt | Record<string, Var> | null = null;
   private _rawSelector: any = null;
   private _goals: Goal[] = [];
@@ -457,20 +456,29 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
   constructor() {
     const { proxy } = createLogicVarProxy("q_");
     this._logicVarProxy = proxy;
+    this._selectAllVars = true;
   }
 
   /**
    * Specifies the shape of the desired output.
    */
-  select<NewSel extends Selector<Fmt>>(selector: NewSel): Query<Fmt, NewSel> {
+  select<NewSel extends "*">(selector: NewSel): Query<Record<string, Var>, NewSel>;
+  select<NewSel extends ($: Record<string, Var>) => any>(selector: NewSel): Query<ReturnType<NewSel>, NewSel>;
+  select<NewSel extends any>(selector: NewSel): Query<any, any> {
     if (selector === "*") {
+      this._formatter = null;
+      this._rawSelector = null;
       this._selectAllVars = true;
     } else if (typeof selector === "function") {
+      this._rawSelector = null;
+      this._selectAllVars = false;
       this._formatter = selector(this._logicVarProxy);
     } else {
+      this._formatter = null;
+      this._selectAllVars = false;
       this._rawSelector = selector;
     }
-    return this as unknown as Query<Fmt, NewSel>;
+    return this;
   }
 
   /**

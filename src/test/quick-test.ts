@@ -75,7 +75,10 @@ const { parent_kid, relationship } = await loadBackend(BACKEND);
 const start = Date.now();
 function makeQuery() {
   return query()
-    .select("*")
+    // .select(($) => ({
+    //   person: $.person,
+    //   l: $.l 
+    // }))
     .where($ => [
   
       // DO NOT DELETE THIS TEST CASE COMMENT
@@ -108,10 +111,7 @@ function makeQuery() {
 }
 
 const q = makeQuery();
-const results = [];
-for await (const row of q) {
-  results.push(row);
-}
+const results = await q.toArray();
 // const results = await q.toArray();
 
 console.dir({

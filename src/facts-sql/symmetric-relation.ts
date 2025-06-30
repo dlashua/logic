@@ -17,8 +17,7 @@ export class SymmetricRelation {
   private fullScanKeys: Set<string>;
   private cacheTTL: number;
 
-  // Pattern management fields (moved from SymmetricPatternManager)
-  private patterns: SymmetricPattern[] = [];
+  // Minimal pattern management for goal execution
   private nextGoalId = 1;
   private patternsByGoal = new Map<number, SymmetricPattern[]>();
 
@@ -67,10 +66,6 @@ export class SymmetricRelation {
     queryObj: Record<string, Term<string | number>>,
     pattern: SymmetricPattern
   ): AsyncGenerator<Subst, void, unknown> {
-    // FIXED: Disable pattern.ran check to fix conjunction bugs
-    // if (pattern.ran && pattern.rows.length === 0) {
-    //   return;
-    // }
 
     const values = Object.values(queryObj);
     if (values.length > 2) return;
@@ -120,45 +115,7 @@ export class SymmetricRelation {
     pattern: SymmetricPattern,
     walkedValues: Term[]
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // FIXED: Don't use pattern.ran cache for SQL relations as it ignores input substitutions
-    // This was causing conjunction bugs where the second substitution would get cached results
-    // from the first substitution instead of executing the proper query
-    // if (pattern.ran) {
-    //   this.logger.log("PATTERN_CACHE_HIT", "Pattern cache hit", {
-    //     pattern,
-    //     rows: pattern.rows 
-    //   });
-    //   return {
-    //     rows: pattern.rows,
-    //     cacheInfo: {
-    //       type: 'pattern' 
-    //     }
-    //   };
-    // }
-
-    // DISABLED: Pattern matching cache also causes conjunction issues
-    // This cache needs to be redesigned to properly handle different input substitutions
-    // Check for matching patterns
-    // const matchingPattern = this.cache.findMatchingSymmetricPattern(
-    //   this.getAllPatterns(),
-    //   pattern
-    // );
-    
-    // if (matchingPattern) {
-    //   const rows = this.cache.processCachedPatternResult(matchingPattern);
-    //   this.logger.log("PATTERN_CACHE_HIT", "Matching pattern found", {
-    //     pattern,
-    //     matchingPattern,
-    //     rows,
-    //   });
-    //   return {
-    //     rows,
-    //     cacheInfo: {
-    //       type: 'pattern',
-    //       matchingGoals: matchingPattern.goalIds 
-    //     }
-    //   };
-    // }
+    // Pattern caching removed - only using full scan cache for performance
 
     // Execute database query
     return await this.executeQuery(pattern, walkedValues);
@@ -392,8 +349,7 @@ export class SymmetricRelation {
   }
 
   private addPattern(pattern: SymmetricPattern): void {
-    this.patterns.push(pattern);
-    
+    // Minimal pattern tracking for goal execution
     for (const goalId of pattern.goalIds) {
       if (!this.patternsByGoal.has(goalId)) {
         this.patternsByGoal.set(goalId, []);
@@ -404,10 +360,6 @@ export class SymmetricRelation {
 
   private getPatternsForGoal(goalId: number): SymmetricPattern[] {
     return this.patternsByGoal.get(goalId) || [];
-  }
-
-  private getAllPatterns(): SymmetricPattern[] {
-    return this.patterns;
   }
 
   private createPattern(

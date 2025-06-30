@@ -17,13 +17,9 @@ export class RegularRelation {
   private fullScanKeys: Set<string>;
   private cacheTTL: number;
 
-  // Pattern management fields (moved from PatternManager)
-  private patterns: Pattern[] = [];
+  // Minimal pattern management for full scan cache
   private nextGoalId = 1;
   private patternsByGoal = new Map<number, Pattern[]>();
-  private patternsByTable = new Map<string, Pattern[]>();
-  private unranPatterns = new Set<Pattern>();
-  private selectColsKeyCache = new Map<Pattern, string>();
 
   constructor(
     private table: string,
@@ -55,8 +51,6 @@ export class RegularRelation {
       const walkedQ = await queryUtils.walkAllKeys(queryObj, s);
       
 
-      // Pattern merging for optimization
-      await this.mergePatterns(queryObj, walkedQ, goalId);
 
       for (const pattern of this.getPatternsForGoal(goalId)) {
         for await (const s3 of this.runPattern(s, queryObj, pattern, walkedQ)) {
@@ -75,10 +69,6 @@ export class RegularRelation {
     pattern: Pattern,
     walkedQ: Record<string, Term>
   ): AsyncGenerator<Subst, void, unknown> {
-    // TEMPORARY: Disable pattern.ran check to debug caching
-    // if (pattern.ran && pattern.rows.length === 0) {
-    //   return;
-    // }
 
     const { rows, cacheInfo } = await this.getPatternRows(pattern, queryObj, s, walkedQ);
     
@@ -115,9 +105,6 @@ export class RegularRelation {
           s
         );
         if (unifiedSubst) {
-          // Pattern merging after successful unification
-          const updatedWalkedQ = await queryUtils.walkAllKeys(queryObj, unifiedSubst);
-          await this.mergePatterns(queryObj, updatedWalkedQ, pattern.goalIds[0]);
           yield unifiedSubst;
         }
       }
@@ -130,36 +117,7 @@ export class RegularRelation {
     s: Subst,
     walkedQ: Record<string, Term>
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // FIXED: Don't use pattern.ran cache for SQL relations as it ignores input substitutions
-    // This was causing conjunction bugs where the second substitution would get cached results
-    // from the first substitution instead of executing the proper query
-    // if (pattern.ran) {
-    //   return {
-    //     rows: pattern.rows,
-    //     cacheInfo: {
-    //       type: 'pattern' 
-    //     }
-    //   };
-    // }
-
-    // DISABLED: Pattern matching cache also causes conjunction issues
-    // This cache needs to be redesigned to properly handle different input substitutions
-    // Check for matching patterns in cache
-    // const matchingPattern = this.cache.findMatchingPattern(
-    //   this.getAllPatterns(),
-    //   pattern
-    // );
-    
-    // if (matchingPattern) {
-    //   const rows = this.cache.processCachedPatternResult(matchingPattern, pattern);
-    //   return {
-    //     rows,
-    //     cacheInfo: {
-    //       type: 'pattern',
-    //       matchingGoals: matchingPattern.goalIds 
-    //     }
-    //   };
-    // }
+    // Pattern caching removed - only using full scan cache for performance
 
     // Execute database query
     return await this.executeQuery(pattern, queryObj, s);
@@ -193,9 +151,8 @@ export class RegularRelation {
 
     const { rows, sql } = await this.queryBuilder.executeQuery(query);
     
-    // Mark pattern as ran and update indexes
+    // Mark pattern as ran  
     (pattern as any).ran = true;
-    this.markPatternAsRan(pattern);
 
     // Minimal logging
     if (this.logger) {
@@ -288,7 +245,6 @@ export class RegularRelation {
     // Mark pattern as ran and store results for future cache hits
     (pattern as any).ran = true;
     (pattern as any).rows = resultRows;
-    this.markPatternAsRan(pattern);
     
     // Create additional patterns for cache hits
     this.createFullScanCachePatterns(column, value, allRows);
@@ -388,34 +344,17 @@ export class RegularRelation {
   }
 
   private addPattern(pattern: Pattern): void {
-    this.patterns.push(pattern);
-    this.unranPatterns.add(pattern);
-    
-    // Update goal index
+    // Minimal pattern tracking for goal execution
     for (const goalId of pattern.goalIds) {
       if (!this.patternsByGoal.has(goalId)) {
         this.patternsByGoal.set(goalId, []);
       }
       this.patternsByGoal.get(goalId)!.push(pattern);
     }
-    
-    // Update table index
-    if (!this.patternsByTable.has(pattern.table)) {
-      this.patternsByTable.set(pattern.table, []);
-    }
-    this.patternsByTable.get(pattern.table)!.push(pattern);
   }
 
   private getPatternsForGoal(goalId: number): Pattern[] {
     return this.patternsByGoal.get(goalId) || [];
-  }
-
-  private getAllPatterns(): Pattern[] {
-    return this.patterns;
-  }
-
-  private markPatternAsRan(pattern: Pattern): void {
-    this.unranPatterns.delete(pattern);
   }
 
   private createPattern(
@@ -441,72 +380,6 @@ export class RegularRelation {
     };
   }
 
-  private getSelectColsKey(pattern: Pattern): string {
-    if (!this.selectColsKeyCache.has(pattern)) {
-      const key = Object.keys(pattern.selectCols).sort().join('|');
-      this.selectColsKeyCache.set(pattern, key);
-    }
-    return this.selectColsKeyCache.get(pattern)!;
-  }
-
-  private async mergePatterns(
-    _queryObj: Record<string, Term>,
-    _walkedQ: Record<string, Term>,
-    goalId: number
-  ): Promise<void> {
-    const patternsForGoal = this.getPatternsForGoal(goalId);
-    if (patternsForGoal.length <= 1) return;
-
-    const selectColsGroups = new Map<string, Pattern[]>();
-    
-    for (const pattern of patternsForGoal) {
-      if (pattern.ran) continue;
-      
-      const selectColsKey = this.getSelectColsKey(pattern);
-      if (!selectColsGroups.has(selectColsKey)) {
-        selectColsGroups.set(selectColsKey, []);
-      }
-      selectColsGroups.get(selectColsKey)!.push(pattern);
-    }
-
-    for (const group of selectColsGroups.values()) {
-      if (group.length > 1) {
-        this.mergePatternGroup(group);
-      }
-    }
-  }
-
-  private mergePatternGroup(patterns: Pattern[]): void {
-    const basePattern = patterns[0];
-    
-    for (let i = 1; i < patterns.length; i++) {
-      const pattern = patterns[i];
-      
-      const baseSelectKeys = Object.keys(basePattern.selectCols);
-      for (let j = 0; j < baseSelectKeys.length; j++) {
-        const key = baseSelectKeys[j];
-        if (isVar(basePattern.selectCols[key]) && !isVar(pattern.selectCols[key])) {
-          (basePattern.selectCols as any)[key] = pattern.selectCols[key];
-        }
-      }
-
-      const baseWhereKeys = Object.keys(basePattern.whereCols);
-      for (let j = 0; j < baseWhereKeys.length; j++) {
-        const key = baseWhereKeys[j];
-        if (isVar(basePattern.whereCols[key]) && !isVar(pattern.whereCols[key])) {
-          (basePattern.whereCols as any)[key] = pattern.whereCols[key];
-        }
-      }
-
-      for (const goalId of pattern.goalIds) {
-        if (!basePattern.goalIds.includes(goalId)) {
-          (basePattern.goalIds as any).push(goalId);
-        }
-      }
-    }
-    
-    this.selectColsKeyCache.delete(basePattern);
-  }
 
   private updatePatternRows(pattern: Pattern, rows: any[], selectCols: Record<string, Term>): void {
     if (rows.length === 1 && (rows[0] === true || rows[0] === false)) {
@@ -520,16 +393,8 @@ export class RegularRelation {
     }
   }
 
-  private logFinalDiagnostics(goalId: number): void {
-    if (goalId === this.nextGoalId - 1) {
-      if (this.logger && (this.logger as any).config?.enabled) {
-        const ranFalsePatterns = Array.from(this.unranPatterns);
-        if (ranFalsePatterns.length > 0) {
-          this.logger.log("RAN FALSE PATTERNS", "Pattern diagnostics", {
-            ranFalsePatterns 
-          });
-        }
-      }
-    }
+  private logFinalDiagnostics(_goalId: number): void {
+    // Simplified diagnostics - pattern tracking removed
+    return;
   }
 }

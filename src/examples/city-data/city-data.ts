@@ -1,10 +1,10 @@
 import fs from "fs/promises";
-import { makeFacts } from "../../facts.ts";
+import { makeFacts } from "../../facts/facts-memory.ts";
 
 const MORE_URI =
   "https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/exports/json?lang=en&timezone=America%2FChicago";
 
-const LOCAL_DATA = "./data.json";
+const LOCAL_DATA = "./data/data.json";
 
 export const country_state_city = makeFacts();
 

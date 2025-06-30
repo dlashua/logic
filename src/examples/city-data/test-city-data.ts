@@ -1,5 +1,10 @@
-import { aggregateVarMulti } from "../../facts.ts";
-import { run , and, gtc } from "../../core.ts";
+import { 
+  query,
+  and,
+  gtc,
+  arrayLength,
+  aggregateVarMulti 
+} from "../../core.ts";
 import {
   loadData,
   acquireData,
@@ -29,30 +34,29 @@ const timeit = async (name: string, fn: () => any) => {
 await timeit("logic", async () => {
   console.log("logic way...");
 
-  const results = run(
-    (v_state, v_city, v_id, v_pop, v_city_cnt) => [
-      {
-        v_state,
-        v_city_cnt,
-      },
-      and(
+  const results = query()
+    .select($ => ({
+      state: $.state,
+      city_cnt: $.city_cnt,
+    }))
+    .where(
+      ($) => [
+
         aggregateVarMulti(
-          [v_state],
-          [v_city],
+          [$.state],
+          [$.city],
           and(
-            countrycode(v_id, "US"),
-            state(v_id, v_state),
-            city(v_id, v_city),
-            population(v_id, v_pop),
-            gtc(v_pop, 10000),
+            countrycode($.id, "US"),
+            state($.id, $.state),
+            city($.id, $.city),
+            population($.id, $.pop),
+            gtc($.pop, 10000),
           ),
         ),
-        arrayLength(v_city, v_city_cnt),
-      )
-    ],
+        arrayLength($.city, $.city_cnt),
+      
+      ])
     // 10,
-    Infinity,
-  )
 
   const res = [];
   for await (const item of results) {

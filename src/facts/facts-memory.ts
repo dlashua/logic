@@ -87,7 +87,3 @@ export const makeFactsObjSym = (
   return factory.createSymmetricObjectRelation(keys);
 };
 
-// Utility exports
-export { aggregateVar, aggregateVarMulti } from "../facts.ts";
-export { intersect, isIndexable } from "../shared/utils.ts";
-export type { FactRelation, FactObjRelation } from "./types.ts";

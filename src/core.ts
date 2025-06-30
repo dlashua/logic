@@ -665,6 +665,106 @@ export function not(goal: Goal): Goal {
 
 export const neq_C = Rel((x: Term, y: Term) => not(eq(x, y)));
 
+/**
+ * A goal that succeeds if the numeric value in the first term is greater than
+ * the numeric value in the second term.
+ */
+export function gtc(x: Term, y: Term): Goal {
+  return async function* gtcGoal(s: Subst) {
+    const xWalked = await walk(x, s);
+    const yWalked = await walk(y, s);
+    
+    // Both must be grounded to numeric values
+    if (typeof xWalked === 'number' && typeof yWalked === 'number') {
+      if (xWalked > yWalked) {
+        yield s;
+      }
+    }
+    // If either is ungrounded, this constraint cannot be satisfied
+  };
+}
+
+/**
+ * A goal that unifies the length of an array or logic list with a numeric value.
+ * @param arrayOrList The array or logic list to measure
+ * @param length The length to unify with
+ */
+export function arrayLength(arrayOrList: Term, length: Term): Goal {
+  return async function* arrayLengthGoal(s: Subst) {
+    const walkedArray = await walk(arrayOrList, s);
+    const walkedLength = await walk(length, s);
+    
+    let actualLength: number;
+    
+    // Handle logic lists
+    if (isLogicList(walkedArray)) {
+      actualLength = logicListToArray(walkedArray).length;
+    }
+    // Handle regular arrays
+    else if (Array.isArray(walkedArray)) {
+      actualLength = walkedArray.length;
+    }
+    // If neither array nor logic list, fail
+    else {
+      return;
+    }
+    
+    // Unify the actual length with the length term
+    const unified = await unify(actualLength, walkedLength, s);
+    if (unified !== null) {
+      yield unified;
+    }
+  };
+}
+
+/**
+ * Aggregates all possible values of a logic variable into an array and binds to sourceVar in a single solution.
+ */
+export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
+  return async function* (s: Subst) {
+    const results: Term[] = [];
+    for await (const subst of subgoal(s)) {
+      results.push(await walk(sourceVar, subst));
+    }
+    const s2 = new Map(s);
+    s2.set(sourceVar.id, results);
+    yield s2;
+  };
+}
+
+/**
+ * For each unique combination of groupVars, aggregate all values of each aggVar in aggVars, and yield a substitution with arrays bound to each aggVar.
+ */
+export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goal): Goal {
+  return async function* (s: Subst) {
+    const groupMap = new Map<string, Term[][]>();
+    for await (const subst of subgoal(s)) {
+      const groupKey = JSON.stringify(await Promise.all(groupVars.map(v => walk(v, subst))));
+      let aggArrays = groupMap.get(groupKey);
+      if (!aggArrays) {
+        aggArrays = aggVars.map(() => []);
+        groupMap.set(groupKey, aggArrays);
+      }
+      aggVars.forEach((v, i) => {
+        aggArrays![i].push(walk(v, subst));
+      });
+    }
+    if (groupMap.size === 0) {
+      const s2 = new Map(s);
+      aggVars.forEach((v, i) => s2.set(v.id, []));
+      yield s2;
+      return;
+    }
+    for (const [groupKey, aggArrays] of groupMap.entries()) {
+      const groupValues = JSON.parse(groupKey);
+      const s2 = new Map(s);
+      groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
+      aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index].map(async x => await x)));
+      yield s2;
+    }
+  };
+}
+
 export type TermedArgs<T extends (...args: any) => any> = T extends (
   ...args: infer A
 ) => infer R

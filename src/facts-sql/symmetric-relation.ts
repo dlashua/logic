@@ -20,6 +20,9 @@ export class SymmetricRelation {
   // Minimal pattern management for goal execution
   private nextGoalId = 1;
   private patternsByGoal = new Map<number, SymmetricPattern[]>();
+  
+  // New substitution-aware query cache
+  private queryCache = new Map<string, { rows: any[], timestamp: number }>();
 
   constructor(
     private table: string,
@@ -115,10 +118,27 @@ export class SymmetricRelation {
     pattern: SymmetricPattern,
     walkedValues: Term[]
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // Pattern caching removed - only using full scan cache for performance
+    // Check new substitution-aware cache first
+    const cacheKey = this.createQueryCacheKey(walkedValues);
+    const cachedRows = this.getCachedQuery(cacheKey);
+    
+    if (cachedRows !== null) {
+      return {
+        rows: cachedRows,
+        cacheInfo: {
+          type: 'substitution-aware',
+          cacheKey
+        }
+      };
+    }
 
     // Execute database query
-    return await this.executeQuery(pattern, walkedValues);
+    const result = await this.executeQuery(pattern, walkedValues);
+    
+    // Cache the results with the substitution-aware key
+    this.setCachedQuery(cacheKey, result.rows);
+    
+    return result;
   }
 
   private async executeQuery(
@@ -390,5 +410,48 @@ export class SymmetricRelation {
 
   private logFinalDiagnostics(_goalId: number): void {
     return;
+  }
+
+  // New substitution-aware caching methods
+  private createQueryCacheKey(
+    walkedValues: Term[]
+  ): string {
+    // Create a cache key based on the table and resolved query parameters
+    const resolvedValues: any[] = [];
+    
+    for (const value of walkedValues) {
+      // Only include non-variable values in the cache key
+      if (!isVar(value)) {
+        resolvedValues.push(value);
+      }
+    }
+    
+    // Sort values for consistent cache keys (important for symmetric relations)
+    const sortedValues = resolvedValues.sort();
+    
+    return `${this.table}:${this.keys.join(',')}:${sortedValues.join(',')}`;
+  }
+
+  private getCachedQuery(cacheKey: string): any[] | null {
+    const cached = this.queryCache.get(cacheKey);
+    
+    if (!cached) {
+      return null;
+    }
+    
+    // Check if cache entry is expired
+    if (Date.now() - cached.timestamp > this.cacheTTL) {
+      this.queryCache.delete(cacheKey);
+      return null;
+    }
+    
+    return cached.rows;
+  }
+
+  private setCachedQuery(cacheKey: string, rows: any[]): void {
+    this.queryCache.set(cacheKey, {
+      rows,
+      timestamp: Date.now()
+    });
   }
 }

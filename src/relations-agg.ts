@@ -179,9 +179,10 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
         aggArrays = aggVars.map(() => []);
         groupMap.set(groupKey, aggArrays);
       }
-      aggVars.forEach((v, i) => {
-        aggArrays![i].push(walk(v, subst));
-      });
+      for (let i = 0; i < aggVars.length; i++) {
+        const value = await walk(aggVars[i], subst);
+        aggArrays![i].push(value);
+      }
     }
     if (groupMap.size === 0) {
       const s2 = new Map(s);
@@ -193,7 +194,7 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
       const groupValues = JSON.parse(groupKey);
       const s2 = new Map(s);
       groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
-      aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index].map(async x => await x)));
+      aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index]));
       yield s2;
     }
   };

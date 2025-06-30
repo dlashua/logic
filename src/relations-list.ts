@@ -84,7 +84,7 @@ export function mapo(
   ys: Term,
 ): Goal {
   return async function* (s) {
-    const xsVal = walk(xs, s);
+    const xsVal = await walk(xs, s);
     if (isNil(xsVal)) {
       yield* eq(ys, nil)(s);
       return;
@@ -109,13 +109,18 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
   return async function* (s) {
     const xsVal = await walk(xs, s);
     if (isNil(xsVal)) {
-      yield* eq(ys, nil)(s);
+      // If we reach nil without finding the element, fail
       return;
     }
     if (isCons(xsVal)) {
-      if (xsVal.head === x) {
+      const walkedX = await walk(x, s);
+      const walkedHead = await walk(xsVal.head, s);
+      
+      if (JSON.stringify(walkedHead) === JSON.stringify(walkedX)) {
+        // Found the element, remove it
         yield* eq(ys, xsVal.tail)(s);
       } else {
+        // Element not at head, try to remove from tail
         const rest = lvar();
         for await (const s1 of and(
           eq(ys, cons(xsVal.head, rest)),

@@ -24,9 +24,11 @@ import {
   set_parent_kid,
   set_relationship,
   kidOf,
-  anyKidOf
+  anyKidOf,
+  parent_kid,
 } from "../extended/familytree-rel.ts"
 import { membero } from "../relations/lists.ts";
+import { eq } from "../core/combinators.ts";
 // import { QUERIES } from "./direct-sql.ts";
 // import { relDB } from "./familytree-sql-facts.ts";
 
@@ -41,8 +43,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-const BACKEND = "sql";
-// const BACKEND = "mem";
+// const BACKEND = "sql";
+const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -56,7 +58,6 @@ async function loadBackend(backend: string) {
           queries: module.relDB.realQueries.length,
           Fqueries: module.relDB.realQueries.filter(x => x.includes("family")).length,
           Rqueries: module.relDB.realQueries.filter(x => x.includes("relationship")).length,
-          // daniel_Rqueries: module.relDB.realQueries.filter(x => x.includes("daniel")),
         });
       },
       () => module.relDB.db.destroy(),
@@ -70,7 +71,7 @@ async function loadBackend(backend: string) {
   }
 }
 
-const { parent_kid, relationship } = await loadBackend(BACKEND);
+await loadBackend(BACKEND);
 
 const start = Date.now();
 function makeQuery() {
@@ -83,10 +84,10 @@ function makeQuery() {
   
       // DO NOT DELETE THIS TEST CASE COMMENT
       membero($.person, ["celeste", "daniel", "jackson"]),
+      // membero($.person, ["celeste"]),
+
       // person($.person),
       
-      // stepParentOf($.person, $.stepparent),
-
       parentAgg($.person, $.parents),
       stepParentAgg($.person, $.step_parents),
       grandparentAgg($.person, $.grand_parents),
@@ -117,7 +118,7 @@ const results = await q.toArray();
 console.dir({
   rescnt: results.length,
   // lastres: results.filter(x => ["daniel", "celeste", "roy_long"].includes(x.person)),
-  // allres: results,
+  allres: results,
 }, {
   depth: 100 
 });

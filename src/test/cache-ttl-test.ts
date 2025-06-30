@@ -1,6 +1,8 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
-import { and, query, Subst } from "../core.ts"
+import { Subst } from "../core/types.ts"
+import { query } from "../query.ts"
+import { and } from "../core/combinators.ts"
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
 import { relDB } from "./familytree-sql-facts.ts";
 

@@ -45,7 +45,7 @@ async function logic_test(people: string[], degree = 1, removal = 0) {
         .select("*")
         .where($ => cousinsAgg(person, $.o, degree, removal))
         .toArray()
-        .then(cousinsO => cousinsO[0].o)
+        .then(cousinsO => cousinsO[0].o as string[])
         .then(cousins => ({
           person,
           cousins: cousins.sort(), 

@@ -3,8 +3,8 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
 import { query } from "../query.ts";
-import { lift as Rel } from "../relations/control.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
+import { Term } from "../core/types.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -23,10 +23,10 @@ async function testPatternCache() {
     fullScanKeys: ["parent", "kid"]
   });
 
-  const parent_kid = Rel((p, k) => PK({
+  const parent_kid = (p: Term<string>, k: Term<string>) => PK({
     parent: p,
     kid: k 
-  }));
+  });
 
   console.log("1. First simple query");
   const queryCount1 = relDB.realQueries.length;

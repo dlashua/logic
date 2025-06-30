@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import { Term, Subst } from "../core.ts";
+import { Term, Subst } from "../core/types.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";

@@ -3,7 +3,7 @@
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
 import { query } from "../query.ts";
-import { lift as Rel } from "../relations/control.ts";
+import type { Term } from "../core/types.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -27,10 +27,10 @@ async function testCacheTTL() {
     cacheTTL: 500 // 500ms for fast testing
   });
 
-  const parent_kid = Rel((p, k) => PK({
+  const parent_kid = (p: Term<string>, k: Term<string>) => PK({
     parent: p,
     kid: k 
-  }));
+  });
 
   console.log("1. First query - should execute database query and cache result (testing fullScan)");
   const queryCount1 = relDB.realQueries.length;
@@ -73,10 +73,10 @@ async function testCacheTTL() {
     cacheTTL: 500 // 500ms for fast testing
   });
 
-  const relationship = Rel((a, b) => R({
+  const relationship = (a: Term<string>, b: Term<string>) => R({
     a,
     b 
-  }));
+  });
 
   console.log("1. First symmetric query - should execute database query and cache result (testing fullScan)");
   const symQueryCount1 = relDB.realQueries.length;

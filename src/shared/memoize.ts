@@ -1,42 +1,58 @@
 import { Goal, Term, Subst } from "../core/types.ts";
-import {
-  isVar,
-  walk,
-  isCons,
-  isNil,
-  isLogicList
-} from "../core/kernel.ts"
+import { isVar, walk, isCons, isNil, isLogicList } from "../core/kernel.ts";
 
 type GoalFunction = (...args: any[]) => Goal;
 
 // The cacheKeyFn now takes the original arguments AND the current substitution
-type CacheKeyFunction = (args: Parameters<GoalFunction>, s: Subst) => Promise<string>;
+type CacheKeyFunction<T extends GoalFunction> = (this: ThisParameterType<T>, args: Parameters<T>, s: Subst) => Promise<string>;
 
 export function memoize<T extends GoalFunction>(
   fn: T,
-  cacheKeyFn: CacheKeyFunction = defaultCacheKeyFn // Use the new signature
+  options?: { cacheKeyFn?: CacheKeyFunction<T>; ttl?: number; cleanupInterval?: number }
 ): T {
-  const cache = new Map<string, Subst[]>(); // Stores resolved arrays of substitutions
+  const cache = new Map<string, { value: Subst[]; expiry: number }>(); // Stores resolved arrays of substitutions with expiry
+  const effectiveCacheKeyFn = options?.cacheKeyFn || defaultCacheKeyFn;
+  const ttl = options?.ttl ?? 5000; // Default to 5000ms (5 seconds)
+  const cleanupInterval = options?.cleanupInterval ?? 60000; // Default to 60000ms (1 minute)
+
+  const cleanup = () => {
+    const now = Date.now();
+    for (const [key, entry] of cache.entries()) {
+      if (entry.expiry <= now) {
+        cache.delete(key);
+      }
+    }
+  };
+
+  // Start periodic cleanup
+  const intervalId = setInterval(cleanup, cleanupInterval);
 
   const memoizedFn = ((...args: Parameters<T>): Goal => {
-    return async function* (s: Subst) {
+    return async function* (s: Subst): Goal {
       // Generate the key using the original arguments and the current substitution
-      const key = await cacheKeyFn(args, s); // Await the async cacheKeyFn
+      const key = await effectiveCacheKeyFn.call(this, args, s); // Pass 'this' context
 
       if (cache.has(key)) {
-        const cachedSubsts = cache.get(key)!;
-        for (const subst of cachedSubsts) {
-          yield subst;
+        const cachedEntry = cache.get(key)!;
+        if (cachedEntry.expiry > Date.now()) {
+          // Cache hit and not expired
+          for (const subst of cachedEntry.value) {
+            yield subst;
+          }
+          return;
+        } else {
+          // Cache expired, remove it
+          cache.delete(key);
         }
-        return;
       }
 
       const results: Subst[] = [];
-      for await (const subst of fn(...args)(s)) {
+      for await (const subst of fn.apply(this, args)(s)) {
         results.push(subst);
         yield subst;
       }
-      cache.set(key, results);
+      // Store new results with expiry
+      cache.set(key, { value: results, expiry: Date.now() + ttl });
     };
   }) as T;
 
@@ -45,11 +61,20 @@ export function memoize<T extends GoalFunction>(
     cache.clear();
   };
 
+  // Add a way to manually trigger cleanup
+  (memoizedFn as any).clearExpired = cleanup;
+
+  // Optionally, add a way to stop the periodic cleanup if the memoized function is no longer used
+  // This would require a more complex lifecycle management for the memoized function.
+  // (memoizedFn as any).stopCleanup = () => {
+  //   clearInterval(intervalId);
+  // };
+
   return memoizedFn;
 }
 
 // Default cache key function: now takes original arguments and Subst as arguments
-async function defaultCacheKeyFn(args: any[], s: Subst): Promise<string> {
+async function defaultCacheKeyFn(this: any, args: any[], s: Subst): Promise<string> {
   if (args.length === 0) {
     return "no_args";
   }

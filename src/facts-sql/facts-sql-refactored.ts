@@ -43,5 +43,12 @@ export const makeRelDB = async (
     db,
     queries,
     realQueries,
+    // Safe query management methods
+    getQueries: () => [...realQueries], // Return copy to prevent mutation
+    clearQueries: () => {
+      queries.length = 0;
+      realQueries.length = 0;
+    },
+    getQueryCount: () => realQueries.length,
   };
 };

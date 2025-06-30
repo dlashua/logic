@@ -1,5 +1,5 @@
 import { Term, Subst } from "../core/types.ts";
-import { walk , isVar } from "../core/kernel.ts";
+import { walk, isVar } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";
@@ -20,6 +20,9 @@ export class RegularRelation {
   // Minimal pattern management for full scan cache
   private nextGoalId = 1;
   private patternsByGoal = new Map<number, Pattern[]>();
+  
+  // New substitution-aware query cache
+  private queryCache = new Map<string, { rows: any[], timestamp: number }>();
 
   constructor(
     private table: string,
@@ -117,10 +120,27 @@ export class RegularRelation {
     s: Subst,
     walkedQ: Record<string, Term>
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // Pattern caching removed - only using full scan cache for performance
+    // Check new substitution-aware cache first
+    const cacheKey = this.createQueryCacheKey(queryObj, walkedQ);
+    const cachedRows = this.getCachedQuery(cacheKey);
+    
+    if (cachedRows !== null) {
+      return {
+        rows: cachedRows,
+        cacheInfo: {
+          type: 'substitution-aware',
+          cacheKey
+        }
+      };
+    }
 
     // Execute database query
-    return await this.executeQuery(pattern, queryObj, s);
+    const result = await this.executeQuery(pattern, queryObj, s);
+    
+    // Cache the results with the substitution-aware key
+    this.setCachedQuery(cacheKey, result.rows);
+    
+    return result;
   }
 
   private async executeQuery(
@@ -396,5 +416,50 @@ export class RegularRelation {
   private logFinalDiagnostics(_goalId: number): void {
     // Simplified diagnostics - pattern tracking removed
     return;
+  }
+
+  // New substitution-aware caching methods
+  private createQueryCacheKey(
+    queryObj: Record<string, Term>, 
+    walkedQ: Record<string, Term>
+  ): string {
+    // Create a cache key based on the table and resolved query parameters
+    const resolvedParams: Record<string, any> = {};
+    
+    for (const [key, value] of Object.entries(walkedQ)) {
+      // Only include non-variable values in the cache key
+      if (!isVar(value)) {
+        resolvedParams[key] = value;
+      }
+    }
+    
+    // Sort keys for consistent cache keys
+    const sortedKeys = Object.keys(resolvedParams).sort();
+    const keyParts = sortedKeys.map(key => `${key}:${resolvedParams[key]}`);
+    
+    return `${this.table}:${keyParts.join(',')}`;
+  }
+
+  private getCachedQuery(cacheKey: string): any[] | null {
+    const cached = this.queryCache.get(cacheKey);
+    
+    if (!cached) {
+      return null;
+    }
+    
+    // Check if cache entry is expired
+    if (Date.now() - cached.timestamp > this.cacheTTL) {
+      this.queryCache.delete(cacheKey);
+      return null;
+    }
+    
+    return cached.rows;
+  }
+
+  private setCachedQuery(cacheKey: string, rows: any[]): void {
+    this.queryCache.set(cacheKey, {
+      rows,
+      timestamp: Date.now()
+    });
   }
 }

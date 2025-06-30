@@ -16,8 +16,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-// const BACKEND = "sql";
-const BACKEND = "mem";
+const BACKEND = "sql";
+// const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -26,11 +26,12 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        // console.log("queries performed", module.relDB.realQueries);
+        // console.log("queries performed", module.relDB.getQueries());
+        const allQueries = module.relDB.getQueries();
         console.log("queries performed", {
-          queries: module.relDB.realQueries.length,
-          Fqueries: module.relDB.realQueries.filter(x => x.includes("family")).length,
-          Rqueries: module.relDB.realQueries.filter(x => x.includes("relationship")).length,
+          queries: module.relDB.getQueryCount(),
+          Fqueries: allQueries.filter(x => x.includes("family")).length,
+          Rqueries: allQueries.filter(x => x.includes("relationship")).length,
         });
       },
       () => module.relDB.db.destroy(),
@@ -56,10 +57,10 @@ function makeQuery() {
     .where($ => [
   
       // DO NOT DELETE THIS TEST CASE COMMENT
-      membero($.person, ["celeste", "daniel", "jackson"]),
+      // membero($.person, ["celeste", "daniel", "jackson"]),
       // membero($.person, ["celeste"]),
 
-      // person($.person),
+      familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),

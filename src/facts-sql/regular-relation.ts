@@ -28,7 +28,7 @@ export class RegularRelation {
     options?: RelationOptions,
   ) {
     this.fullScanKeys = new Set(options?.fullScanKeys || []);
-    this.cacheTTL = options?.cacheTTL ?? 2000; // Default 3 seconds
+    this.cacheTTL = options?.cacheTTL ?? 10000; // Default 3 seconds
   }
 
   createGoal(queryObj: Record<string, Term>): GoalFunction {
@@ -121,31 +121,24 @@ export class RegularRelation {
     s: Subst,
     walkedQ: Record<string, Term>
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // Try pattern cache first, but check TTL
+    // Try pattern cache first
     if (pattern.ran) {
-      if (pattern.timestamp && (Date.now() - pattern.timestamp) > this.cacheTTL) {
-        // Pattern is expired, mark as not ran to force re-execution
-        (pattern as any).ran = false;
-        (pattern as any).rows = [];
-      } else {
-        return {
-          rows: pattern.rows,
-          cacheInfo: {
-            type: 'pattern' 
-          }
-        };
-      }
+      return {
+        rows: pattern.rows,
+        cacheInfo: {
+          type: 'pattern' 
+        }
+      };
     }
 
     // Check for matching patterns using optimized comparison
     const matchingPattern = this.cache.findMatchingPattern(
       this.patternManager.getAllPatterns(),
-      pattern,
-      this.cacheTTL
+      pattern
     );
     
     if (matchingPattern) {
-      const rows = this.cache.processCachedPatternResult(matchingPattern);
+      const rows = this.cache.processCachedPatternResult(matchingPattern, pattern);
       return {
         rows,
         cacheInfo: {
@@ -307,7 +300,6 @@ export class RegularRelation {
       goalIds: [-1], // Special goal ID for fullScan patterns
       rows: allRows,
       ran: true,
-      timestamp: Date.now(),
       selectCols: {}, // Empty - this pattern can match any select columns
       whereCols: { 
         [column]: value 

@@ -455,7 +455,7 @@ class Query<Fmt, Sel = ($: Record<string, Var>) => Fmt> {
   private _selectAllVars = false;
 
   constructor() {
-    const { proxy } = createLogicVarProxy("q");
+    const { proxy } = createLogicVarProxy("q_");
     this._logicVarProxy = proxy;
   }
 

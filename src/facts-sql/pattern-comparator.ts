@@ -71,10 +71,51 @@ export class PatternComparator {
         if (currentHash === otherHash) {
           return otherPattern;
         }
+        
+        // Check if otherPattern can satisfy currentPattern via subset matching
+        if (this.canPatternSatisfy(otherPattern, currentPattern)) {
+          return otherPattern;
+        }
       }
     }
     
     return null;
+  }
+
+  /**
+   * Check if an existing pattern can satisfy a new pattern's requirements
+   * This handles cases where a broader query (fewer where conditions) can answer
+   * a more specific query (more where conditions)
+   */
+  private canPatternSatisfy(existingPattern: Pattern, newPattern: Pattern): boolean {
+    // Only handle regular patterns (not symmetric)
+    if (Array.isArray(existingPattern.whereCols) || Array.isArray(newPattern.whereCols)) {
+      return false;
+    }
+    
+    const existingWhere = existingPattern.whereCols as Record<string, Term>;
+    const newWhere = newPattern.whereCols as Record<string, Term>;
+    
+    // Check if existingPattern's where conditions are a subset of newPattern's where conditions
+    // and all matching keys have the same values
+    const existingKeys = Object.keys(existingWhere);
+    const newKeys = Object.keys(newWhere);
+    
+    // existingPattern must have fewer or equal where conditions
+    if (existingKeys.length > newKeys.length) {
+      return false;
+    }
+    
+    // All of existingPattern's where conditions must be present in newPattern with same values
+    for (const key of existingKeys) {
+      if (!(key in newWhere) || existingWhere[key] !== newWhere[key]) {
+        return false;
+      }
+    }
+    
+    // For this to be a cache hit, we need to verify the existingPattern's results
+    // can answer the newPattern's query by filtering the cached results
+    return true;
   }
 
   /**

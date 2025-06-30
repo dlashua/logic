@@ -7,8 +7,8 @@ import {
 } from "../core.ts"
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
-import { SymmetricPatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
+import { patternUtils } from "./utils.ts";
 import { 
   SymmetricPattern, 
   GoalFunction, 
@@ -22,10 +22,14 @@ export class SymmetricRelation {
   private fullScanKeys: Set<string>;
   private cacheTTL: number;
 
+  // Pattern management fields (moved from SymmetricPatternManager)
+  private patterns: SymmetricPattern[] = [];
+  private nextGoalId = 1;
+  private patternsByGoal = new Map<number, SymmetricPattern[]>();
+
   constructor(
     private table: string,
     private keys: [string, string],
-    private patternManager: SymmetricPatternManager,
     private logger: Logger,
     private cache: QueryCache,
     private queryBuilder: QueryBuilder,
@@ -34,18 +38,18 @@ export class SymmetricRelation {
     private options?: RelationOptions,
   ) {
     this.fullScanKeys = new Set(options?.fullScanKeys || []);
-    this.cacheTTL = options?.cacheTTL ?? 10000; // Default 3 seconds
+    this.cacheTTL = options?.cacheTTL ?? 5000; // Default 3 seconds
   }
 
   createGoal(queryObj: Record<string, Term<string | number>>): GoalFunction {
-    const goalId = this.patternManager.generateGoalId();
+    const goalId = this.generateGoalId();
     
     // Create and add pattern
-    const pattern = this.patternManager.createPattern(this.table, queryObj, goalId);
-    this.patternManager.addPattern(pattern);
+    const pattern = this.createPattern(this.table, queryObj, goalId);
+    this.addPattern(pattern);
 
     return async function* factsSqlSym(this: SymmetricRelation, s: Subst) {
-      const patterns = this.patternManager.getPatternsForGoal(goalId);
+      const patterns = this.getPatternsForGoal(goalId);
       if (patterns.length === 0) {
         return;
       }
@@ -59,7 +63,7 @@ export class SymmetricRelation {
         }
       }
 
-      this.patternManager.logFinalDiagnostics(goalId);
+      this.logFinalDiagnostics(goalId);
     }.bind(this);
   }
 
@@ -85,7 +89,7 @@ export class SymmetricRelation {
     });
 
     const { rows, cacheInfo } = await this.getPatternRows(pattern, walkedValues);
-    this.patternManager.updatePatternRows(pattern, rows);
+    this.updatePatternRows(pattern, rows);
 
     // Process rows and yield unified substitutions
     for (const row of pattern.rows) {
@@ -136,7 +140,7 @@ export class SymmetricRelation {
 
     // Check for matching patterns
     const matchingPattern = this.cache.findMatchingSymmetricPattern(
-      this.patternManager.getAllPatterns(),
+      this.getAllPatterns(),
       pattern
     );
     
@@ -325,7 +329,7 @@ export class SymmetricRelation {
     };
     
     // Add this pattern to the pattern manager so future queries can match against it
-    this.patternManager.addPattern(masterPattern);
+    this.addPattern(masterPattern);
     
     this.logger.log("FULL_SCAN_PATTERNS_CREATED", `Symmetric master pattern created for future cache hits`, {
       table: this.table,
@@ -380,5 +384,59 @@ export class SymmetricRelation {
       rowCount: data.length,
       ttl: this.cacheTTL
     });
+  }
+
+  // Pattern management methods (moved from SymmetricPatternManager)
+  private generateGoalId(): number {
+    return this.nextGoalId++;
+  }
+
+  private addPattern(pattern: SymmetricPattern): void {
+    this.patterns.push(pattern);
+    
+    for (const goalId of pattern.goalIds) {
+      if (!this.patternsByGoal.has(goalId)) {
+        this.patternsByGoal.set(goalId, []);
+      }
+      this.patternsByGoal.get(goalId)!.push(pattern);
+    }
+  }
+
+  private getPatternsForGoal(goalId: number): SymmetricPattern[] {
+    return this.patternsByGoal.get(goalId) || [];
+  }
+
+  private getAllPatterns(): SymmetricPattern[] {
+    return this.patterns;
+  }
+
+  private createPattern(
+    table: string,
+    queryObj: Record<string, Term>,
+    goalId: number
+  ): SymmetricPattern {
+    const { selectCols, whereCols } = patternUtils.separateSymmetricColumns(queryObj);
+
+    return {
+      table,
+      selectCols,
+      whereCols,
+      goalIds: [goalId],
+      rows: [],
+      ran: false,
+      last: {
+        selectCols: [],
+        whereCols: [],
+      },
+      queries: [],
+    };
+  }
+
+  private updatePatternRows(pattern: SymmetricPattern, rows: any[]): void {
+    (pattern as any).rows = rows;
+  }
+
+  private logFinalDiagnostics(_goalId: number): void {
+    return;
   }
 }

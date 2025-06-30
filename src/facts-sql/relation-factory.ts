@@ -2,7 +2,6 @@ import type { Knex } from "knex";
 import { Term, Subst } from "../core.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
-import { PatternManager, SymmetricPatternManager } from "./pattern-manager.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { RegularRelation } from "./regular-relation.ts";
 import { SymmetricRelation } from "./symmetric-relation.ts";
@@ -21,10 +20,8 @@ export class RelationFactory {
   constructor(private deps: RelationFactoryDependencies) {}
 
   createRelation(table: string, options?: RelationOptions) {
-    const patternManager = new PatternManager(this.deps.logger);
     const relation = new RegularRelation(
       table,
-      patternManager,
       this.deps.logger,
       this.deps.cache,
       this.deps.queryBuilder,
@@ -39,11 +36,9 @@ export class RelationFactory {
   }
 
   createSymmetricRelation(table: string, keys: [string, string], options?: RelationOptions) {
-    const patternManager = new SymmetricPatternManager(this.deps.logger);
     const relation = new SymmetricRelation(
       table,
       keys,
-      patternManager,
       this.deps.logger,
       this.deps.cache,
       this.deps.queryBuilder,

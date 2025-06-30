@@ -1,8 +1,8 @@
 import { ConfigurationManager } from "../shared/config.ts";
 import { Logger } from "../shared/logger.ts";
 import { BaseCache } from "../shared/cache.ts";
-import { FactRelationFactory } from "./relation-factory.ts";
 import { BaseConfig } from "../shared/types.ts";
+import { FactRelationFactory } from "./relation-factory.ts";
 import { FactRelation, FactObjRelation, FactRelationConfig } from "./types.ts";
 
 export const makeFacts = (
@@ -16,7 +16,10 @@ export const makeFacts = (
   const factory = new FactRelationFactory({
     logger,
     cache,
-    config: factConfig || { enableLogging: false, enableIndexing: true }
+    config: factConfig || {
+      enableLogging: false,
+      enableIndexing: true 
+    }
   });
 
   return factory.createArrayRelation();
@@ -34,7 +37,10 @@ export const makeFactsObj = (
   const factory = new FactRelationFactory({
     logger,
     cache,
-    config: factConfig || { enableLogging: false, enableIndexing: true }
+    config: factConfig || {
+      enableLogging: false,
+      enableIndexing: true 
+    }
   });
 
   return factory.createObjectRelation(keys);
@@ -51,7 +57,10 @@ export const makeFactsSym = (
   const factory = new FactRelationFactory({
     logger,
     cache,
-    config: factConfig || { enableLogging: false, enableIndexing: true }
+    config: factConfig || {
+      enableLogging: false,
+      enableIndexing: true 
+    }
   });
 
   return factory.createSymmetricArrayRelation();
@@ -69,7 +78,10 @@ export const makeFactsObjSym = (
   const factory = new FactRelationFactory({
     logger,
     cache,
-    config: factConfig || { enableLogging: false, enableIndexing: true }
+    config: factConfig || {
+      enableLogging: false,
+      enableIndexing: true 
+    }
   });
 
   return factory.createSymmetricObjectRelation(keys);

@@ -1,4 +1,4 @@
-import { Term, or } from "../core.ts";
+import { Term, eq, or } from "../core.ts";
 import { Logger } from "../shared/logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { MemoryRelation } from "./memory-relation.ts";
@@ -9,9 +9,9 @@ export class SymmetricMemoryRelation {
   private memoryRelation: MemoryRelation;
 
   constructor(
-    private logger: Logger,
-    private cache: BaseCache,
-    private config: FactRelationConfig
+    logger: Logger,
+    cache: BaseCache,
+    config: FactRelationConfig
   ) {
     this.memoryRelation = new MemoryRelation(logger, cache, config);
   }
@@ -21,8 +21,8 @@ export class SymmetricMemoryRelation {
     const origSet = baseRelation.set;
 
     const symGoal = (...query: Term[]) => {
-      if (query.length === 2) {
-        return or(baseRelation(query[0], query[1]), baseRelation(query[1], query[0]));
+      if (query.length !== 2) {
+        return eq(1,0); //fail
       }
       return baseRelation(...query);
     };
@@ -31,9 +31,9 @@ export class SymmetricMemoryRelation {
       if (fact.length === 2) {
         origSet(fact[0], fact[1]);
         origSet(fact[1], fact[0]);
-      } else {
-        origSet(...fact);
+        return;
       }
+      throw Error("Symmetric Facts are Binary");
     };
 
     symGoal.raw = baseRelation.raw;
@@ -48,9 +48,9 @@ export class SymmetricMemoryObjRelation {
 
   constructor(
     private keys: string[],
-    private logger: Logger,
-    private cache: BaseCache,
-    private config: FactRelationConfig
+    logger: Logger,
+    cache: BaseCache,
+    config: FactRelationConfig
   ) {
     this.memoryObjRelation = new MemoryObjRelation(keys, logger, cache, config);
   }
@@ -66,7 +66,7 @@ export class SymmetricMemoryObjRelation {
         swapped[k2] = queryObj[k1];
         return or(baseRelation(queryObj), baseRelation(swapped));
       }
-      return baseRelation(queryObj);
+      return eq(1,0); // fail
     };
 
     Object.assign(symGoal, baseRelation);

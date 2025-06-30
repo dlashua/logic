@@ -2,97 +2,52 @@ import {
   cons,
   isCons,
   isNil,
+  isLogicList,
   lvar,
   nil,
-  unify,
   walk,
   and,
   eq,
   Goal,
+  logicListToArray,
+  unify,
 } from "./core.ts"
-import type { Term } from "./core.ts";
+import type { Term, Subst } from "./core.ts";
 
-export function membero(x: Term, list: Term): Goal {
-  return async function* (s) {
-    const l = await walk(list, s);
-    if (l && typeof l === "object" && "tag" in l) {
-      if ((l as any).tag === "cons") {
-        const s1 = await unify(x, (l as any).head, s);
-        if (s1) yield s1;
-        for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
-      }
-    } else if (Array.isArray(l)) {
-      for (const item of l) {
-        const walkedItem = await walk(item, s);
-        const s2 = await unify(x, walkedItem, s);
-        if (s2) yield s2;
-      }
+// Re-export the core list functions for backward compatibility
+export { membero, firsto, resto, appendo } from "./core.ts";
+
+/**
+ * A goal that unifies the length of an array or logic list with a numeric value.
+ * @param arrayOrList The array or logic list to measure
+ * @param length The length to unify with
+ */
+export function arrayLength(arrayOrList: Term, length: Term): Goal {
+  return async function* arrayLengthGoal(s: Subst) {
+    const walkedArray = await walk(arrayOrList, s);
+    const walkedLength = await walk(length, s);
+    
+    let actualLength: number;
+    
+    // Handle logic lists
+    if (isLogicList(walkedArray)) {
+      actualLength = logicListToArray(walkedArray).length;
+    }
+    // Handle regular arrays
+    else if (Array.isArray(walkedArray)) {
+      actualLength = walkedArray.length;
+    }
+    // If neither array nor logic list, fail
+    else {
+      return;
+    }
+    
+    // Unify the actual length with the length term
+    const unified = await unify(actualLength, walkedLength, s);
+    if (unified !== null) {
+      yield unified;
     }
   };
-}
-
-export function firsto(x: Term, xs: Term): Goal {
-  return async function* (s) {
-    const l = await walk(xs, s);
-    if (isCons(l)) {
-      const consNode = l as { tag: "cons"; head: Term; tail: Term };
-      const s1 = await unify(x, consNode.head, s);
-      if (s1) yield s1;
-    }
-  };
-}
-
-export function resto(xs: Term, tail: Term): Goal {
-  return async function* (s) {
-    const l = await walk(xs, s);
-    if (isCons(l)) {
-      const consNode = l as { tag: "cons"; head: Term; tail: Term };
-      const s1 = await unify(tail, consNode.tail, s);
-      if (s1) yield s1;
-    }
-  };
-}
-
-export function appendo(xs: Term, ys: Term, zs: Term): Goal {
-  return async function* (s) {
-    const xsVal = await walk(xs, s);
-    if (isCons(xsVal)) {
-      const consNode = xsVal as { tag: "cons"; head: Term; tail: Term };
-      const head = consNode.head;
-      const tail = consNode.tail;
-      const rest = lvar();
-      const s1 = await unify(
-        zs,
-        {
-          tag: "cons",
-          head,
-          tail: rest,
-        },
-        s,
-      );
-      if (s1) {
-        for await (const s2 of appendo(tail, ys, rest)(s1)) yield s2;
-      }
-    } else if (isNil(xsVal)) {
-      const s1 = await unify(ys, zs, s);
-      if (s1) yield s1;
-    }
-  };
-}
-
-function logicListToArray(list: Term): Term[] {
-  const out = [];
-  let cur = list;
-  while (
-    cur &&
-    typeof cur === "object" &&
-    "tag" in cur &&
-    (cur as any).tag === "cons"
-  ) {
-    out.push((cur as any).head);
-    cur = (cur as any).tail;
-  }
-  return out;
 }
 
 export function permuteo(xs: Term, ys: Term): Goal {
@@ -130,7 +85,6 @@ export function mapo(
 ): Goal {
   return async function* (s) {
     const xsVal = walk(xs, s);
-    const ysVal = walk(ys, s);
     if (isNil(xsVal)) {
       yield* eq(ys, nil)(s);
       return;
@@ -171,5 +125,36 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
         }
       }
     }
+  };
+}
+
+/**
+ * alldistincto(xs): true if all elements of xs are distinct.
+ */
+export function alldistincto(xs: Term): Goal {
+  return async function* (s: Subst) {
+    const arr = await walk(xs, s);
+    let jsArr: any[] = [];
+    if (arr && typeof arr === "object" && "tag" in arr) {
+      // Convert logic list to JS array
+      let cur: Term = arr;
+      while (isCons(cur)) {
+        jsArr.push(cur.head);
+        cur = cur.tail;
+      }
+    } else if (Array.isArray(arr)) {
+      jsArr = arr;
+    }
+    const seen = new Set();
+    let allDistinct = true;
+    for (const v of jsArr) {
+      const key = JSON.stringify(v);
+      if (seen.has(key)) {
+        allDistinct = false;
+        break;
+      }
+      seen.add(key);
+    }
+    if (allDistinct) yield s;
   };
 }

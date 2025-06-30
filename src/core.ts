@@ -348,12 +348,17 @@ export type RunResult<Fmt> = {
  * Converts a logic list to a JavaScript array.
  * @param list The logic list to convert.
  */
-function logicListToArray(list: Term): Term[] {
+export function logicListToArray(list: Term): Term[] {
   const out = [];
   let cur = list;
-  while (isCons(cur)) {
-    out.push(cur.head);
-    cur = cur.tail;
+  while (
+    cur &&
+    typeof cur === "object" &&
+    "tag" in cur &&
+    (cur as any).tag === "cons"
+  ) {
+    out.push((cur as any).head);
+    cur = (cur as any).tail;
   }
   return out;
 }
@@ -565,31 +570,50 @@ export function query<Fmt>(): Query<Fmt> {
  * A goal that succeeds if `x` is a member of the logic `list`.
  */
 export function membero(x: Term, list: Term): Goal {
-  return fresh(head =>
-    fresh(tail =>
-      and(
-        eq(list, cons(head, tail)),
-        or(
-          eq(x, head),
-          membero(x, tail)
-        )
-      )
-    )
-  );
+  return async function* (s) {
+    const l = await walk(list, s);
+    if (l && typeof l === "object" && "tag" in l) {
+      if ((l as any).tag === "cons") {
+        const s1 = await unify(x, (l as any).head, s);
+        if (s1) yield s1;
+        for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
+      }
+    } else if (Array.isArray(l)) {
+      for (const item of l) {
+        const walkedItem = await walk(item, s);
+        const s2 = await unify(x, walkedItem, s);
+        if (s2) yield s2;
+      }
+    }
+  };
 }
 
 /**
  * A goal that succeeds if `h` is the head of the logic list `l`.
  */
-export function firsto(h: Term, l: Term): Goal {
-  return fresh(tail => eq(l, cons(h, tail)));
+export function firsto(x: Term, xs: Term): Goal {
+  return async function* (s) {
+    const l = await walk(xs, s);
+    if (isCons(l)) {
+      const consNode = l as { tag: "cons"; head: Term; tail: Term };
+      const s1 = await unify(x, consNode.head, s);
+      if (s1) yield s1;
+    }
+  };
 }
 
 /**
  * A goal that succeeds if `t` is the tail of the logic list `l`.
  */
-export function resto(l: Term, t: Term): Goal {
-  return fresh(head => eq(l, cons(head, t)));
+export function resto(xs: Term, tail: Term): Goal {
+  return async function* (s) {
+    const l = await walk(xs, s);
+    if (isCons(l)) {
+      const consNode = l as { tag: "cons"; head: Term; tail: Term };
+      const s1 = await unify(tail, consNode.tail, s);
+      if (s1) yield s1;
+    }
+  };
 }
 
 /**
@@ -597,18 +621,30 @@ export function resto(l: Term, t: Term): Goal {
  * logic list `ys` to `xs`.
  */
 export function appendo(xs: Term, ys: Term, zs: Term): Goal {
-  return conde(
-    [eq(xs, nil), eq(ys, zs)],
-    [fresh(head =>
-      fresh(tail =>
-        fresh(rest => and(
-          eq(xs, cons(head, tail)),
-          eq(zs, cons(head, rest)),
-          appendo(tail, ys, rest)
-        ))
-      )
-    )]
-  );
+  return async function* (s) {
+    const xsVal = await walk(xs, s);
+    if (isCons(xsVal)) {
+      const consNode = xsVal as { tag: "cons"; head: Term; tail: Term };
+      const head = consNode.head;
+      const tail = consNode.tail;
+      const rest = lvar();
+      const s1 = await unify(
+        zs,
+        {
+          tag: "cons",
+          head,
+          tail: rest,
+        },
+        s,
+      );
+      if (s1) {
+        for await (const s2 of appendo(tail, ys, rest)(s1)) yield s2;
+      }
+    } else if (isNil(xsVal)) {
+      const s1 = await unify(ys, zs, s);
+      if (s1) yield s1;
+    }
+  };
 }
 
 /** Forgotten Items **/
@@ -684,86 +720,7 @@ export function gtc(x: Term, y: Term): Goal {
   };
 }
 
-/**
- * A goal that unifies the length of an array or logic list with a numeric value.
- * @param arrayOrList The array or logic list to measure
- * @param length The length to unify with
- */
-export function arrayLength(arrayOrList: Term, length: Term): Goal {
-  return async function* arrayLengthGoal(s: Subst) {
-    const walkedArray = await walk(arrayOrList, s);
-    const walkedLength = await walk(length, s);
-    
-    let actualLength: number;
-    
-    // Handle logic lists
-    if (isLogicList(walkedArray)) {
-      actualLength = logicListToArray(walkedArray).length;
-    }
-    // Handle regular arrays
-    else if (Array.isArray(walkedArray)) {
-      actualLength = walkedArray.length;
-    }
-    // If neither array nor logic list, fail
-    else {
-      return;
-    }
-    
-    // Unify the actual length with the length term
-    const unified = await unify(actualLength, walkedLength, s);
-    if (unified !== null) {
-      yield unified;
-    }
-  };
-}
 
-/**
- * Aggregates all possible values of a logic variable into an array and binds to sourceVar in a single solution.
- */
-export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
-  return async function* (s: Subst) {
-    const results: Term[] = [];
-    for await (const subst of subgoal(s)) {
-      results.push(await walk(sourceVar, subst));
-    }
-    const s2 = new Map(s);
-    s2.set(sourceVar.id, results);
-    yield s2;
-  };
-}
-
-/**
- * For each unique combination of groupVars, aggregate all values of each aggVar in aggVars, and yield a substitution with arrays bound to each aggVar.
- */
-export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goal): Goal {
-  return async function* (s: Subst) {
-    const groupMap = new Map<string, Term[][]>();
-    for await (const subst of subgoal(s)) {
-      const groupKey = JSON.stringify(await Promise.all(groupVars.map(v => walk(v, subst))));
-      let aggArrays = groupMap.get(groupKey);
-      if (!aggArrays) {
-        aggArrays = aggVars.map(() => []);
-        groupMap.set(groupKey, aggArrays);
-      }
-      aggVars.forEach((v, i) => {
-        aggArrays![i].push(walk(v, subst));
-      });
-    }
-    if (groupMap.size === 0) {
-      const s2 = new Map(s);
-      aggVars.forEach((v, i) => s2.set(v.id, []));
-      yield s2;
-      return;
-    }
-    for (const [groupKey, aggArrays] of groupMap.entries()) {
-      const groupValues = JSON.parse(groupKey);
-      const s2 = new Map(s);
-      groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
-      aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index].map(async x => await x)));
-      yield s2;
-    }
-  };
-}
 
 export type TermedArgs<T extends (...args: any) => any> = T extends (
   ...args: infer A

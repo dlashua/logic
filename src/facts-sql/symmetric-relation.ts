@@ -33,7 +33,7 @@ export class SymmetricRelation {
     private options?: RelationOptions,
   ) {
     this.fullScanKeys = new Set(options?.fullScanKeys || []);
-    this.cacheTTL = options?.cacheTTL ?? 5000; // Default 3 seconds
+    this.cacheTTL = options?.cacheTTL ?? 1000; // Default 3 seconds
   }
 
   createGoal(queryObj: Record<string, Term<string | number>>): GoalFunction {
@@ -67,9 +67,10 @@ export class SymmetricRelation {
     queryObj: Record<string, Term<string | number>>,
     pattern: SymmetricPattern
   ): AsyncGenerator<Subst, void, unknown> {
-    if (pattern.ran && pattern.rows.length === 0) {
-      return;
-    }
+    // FIXED: Disable pattern.ran check to fix conjunction bugs
+    // if (pattern.ran && pattern.rows.length === 0) {
+    //   return;
+    // }
 
     const values = Object.values(queryObj);
     if (values.length > 2) return;
@@ -119,41 +120,45 @@ export class SymmetricRelation {
     pattern: SymmetricPattern,
     walkedValues: Term[]
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // Try pattern cache first
-    if (pattern.ran) {
-      this.logger.log("PATTERN_CACHE_HIT", "Pattern cache hit", {
-        pattern,
-        rows: pattern.rows 
-      });
-      return {
-        rows: pattern.rows,
-        cacheInfo: {
-          type: 'pattern' 
-        }
-      };
-    }
+    // FIXED: Don't use pattern.ran cache for SQL relations as it ignores input substitutions
+    // This was causing conjunction bugs where the second substitution would get cached results
+    // from the first substitution instead of executing the proper query
+    // if (pattern.ran) {
+    //   this.logger.log("PATTERN_CACHE_HIT", "Pattern cache hit", {
+    //     pattern,
+    //     rows: pattern.rows 
+    //   });
+    //   return {
+    //     rows: pattern.rows,
+    //     cacheInfo: {
+    //       type: 'pattern' 
+    //     }
+    //   };
+    // }
 
+    // DISABLED: Pattern matching cache also causes conjunction issues
+    // This cache needs to be redesigned to properly handle different input substitutions
     // Check for matching patterns
-    const matchingPattern = this.cache.findMatchingSymmetricPattern(
-      this.getAllPatterns(),
-      pattern
-    );
+    // const matchingPattern = this.cache.findMatchingSymmetricPattern(
+    //   this.getAllPatterns(),
+    //   pattern
+    // );
     
-    if (matchingPattern) {
-      const rows = this.cache.processCachedPatternResult(matchingPattern);
-      this.logger.log("PATTERN_CACHE_HIT", "Matching pattern found", {
-        pattern,
-        matchingPattern,
-        rows,
-      });
-      return {
-        rows,
-        cacheInfo: {
-          type: 'pattern',
-          matchingGoals: matchingPattern.goalIds 
-        }
-      };
-    }
+    // if (matchingPattern) {
+    //   const rows = this.cache.processCachedPatternResult(matchingPattern);
+    //   this.logger.log("PATTERN_CACHE_HIT", "Matching pattern found", {
+    //     pattern,
+    //     matchingPattern,
+    //     rows,
+    //   });
+    //   return {
+    //     rows,
+    //     cacheInfo: {
+    //       type: 'pattern',
+    //       matchingGoals: matchingPattern.goalIds 
+    //     }
+    //   };
+    // }
 
     // Execute database query
     return await this.executeQuery(pattern, walkedValues);

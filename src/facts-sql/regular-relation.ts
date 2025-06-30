@@ -35,7 +35,7 @@ export class RegularRelation {
     options?: RelationOptions,
   ) {
     this.fullScanKeys = new Set(options?.fullScanKeys || []);
-    this.cacheTTL = options?.cacheTTL ?? 5000; // Default 3 seconds
+    this.cacheTTL = options?.cacheTTL ?? 1000; // Default 3 seconds
   }
 
   createGoal(queryObj: Record<string, Term>): GoalFunction {
@@ -53,13 +53,14 @@ export class RegularRelation {
 
       // Walk queryObj terms
       const walkedQ = await queryUtils.walkAllKeys(queryObj, s);
+      
+
+      // Pattern merging for optimization
       await this.mergePatterns(queryObj, walkedQ, goalId);
 
       for (const pattern of this.getPatternsForGoal(goalId)) {
-        let s2 = s;
-        for await (const s3 of this.runPattern(s2, queryObj, pattern, walkedQ)) {
+        for await (const s3 of this.runPattern(s, queryObj, pattern, walkedQ)) {
           yield s3;
-          if(s3) s2 = s3;
         }
       }
 
@@ -74,9 +75,10 @@ export class RegularRelation {
     pattern: Pattern,
     walkedQ: Record<string, Term>
   ): AsyncGenerator<Subst, void, unknown> {
-    if (pattern.ran && pattern.rows.length === 0) {
-      return;
-    }
+    // TEMPORARY: Disable pattern.ran check to debug caching
+    // if (pattern.ran && pattern.rows.length === 0) {
+    //   return;
+    // }
 
     const { rows, cacheInfo } = await this.getPatternRows(pattern, queryObj, s, walkedQ);
     
@@ -113,7 +115,7 @@ export class RegularRelation {
           s
         );
         if (unifiedSubst) {
-          // Update patterns with newly grounded terms
+          // Pattern merging after successful unification
           const updatedWalkedQ = await queryUtils.walkAllKeys(queryObj, unifiedSubst);
           await this.mergePatterns(queryObj, updatedWalkedQ, pattern.goalIds[0]);
           yield unifiedSubst;
@@ -128,32 +130,36 @@ export class RegularRelation {
     s: Subst,
     walkedQ: Record<string, Term>
   ): Promise<{ rows: any[], cacheInfo: any }> {
-    // Try pattern cache first
-    if (pattern.ran) {
-      return {
-        rows: pattern.rows,
-        cacheInfo: {
-          type: 'pattern' 
-        }
-      };
-    }
+    // FIXED: Don't use pattern.ran cache for SQL relations as it ignores input substitutions
+    // This was causing conjunction bugs where the second substitution would get cached results
+    // from the first substitution instead of executing the proper query
+    // if (pattern.ran) {
+    //   return {
+    //     rows: pattern.rows,
+    //     cacheInfo: {
+    //       type: 'pattern' 
+    //     }
+    //   };
+    // }
 
-    // Check for matching patterns using optimized comparison
-    const matchingPattern = this.cache.findMatchingPattern(
-      this.getAllPatterns(),
-      pattern
-    );
+    // DISABLED: Pattern matching cache also causes conjunction issues
+    // This cache needs to be redesigned to properly handle different input substitutions
+    // Check for matching patterns in cache
+    // const matchingPattern = this.cache.findMatchingPattern(
+    //   this.getAllPatterns(),
+    //   pattern
+    // );
     
-    if (matchingPattern) {
-      const rows = this.cache.processCachedPatternResult(matchingPattern, pattern);
-      return {
-        rows,
-        cacheInfo: {
-          type: 'pattern',
-          matchingGoals: matchingPattern.goalIds 
-        }
-      };
-    }
+    // if (matchingPattern) {
+    //   const rows = this.cache.processCachedPatternResult(matchingPattern, pattern);
+    //   return {
+    //     rows,
+    //     cacheInfo: {
+    //       type: 'pattern',
+    //       matchingGoals: matchingPattern.goalIds 
+    //     }
+    //   };
+    // }
 
     // Execute database query
     return await this.executeQuery(pattern, queryObj, s);

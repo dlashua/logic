@@ -1,8 +1,6 @@
 import { describe, it, beforeEach } from 'vitest';
-import { lvar, resetVarCounter, walk, unify } from './core.ts'
-// Note: Optimizations are now integrated into core.ts
-// This test compares the current optimized core against a baseline
-import { compareBenchmarks } from './benchmark.ts';
+import { compareBenchmarks } from '../benchmark.ts';
+import { lvar, resetVarCounter, walk, unify } from './kernel.ts'
 
 describe('Optimization Tests', () => {
   beforeEach(() => {

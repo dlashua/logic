@@ -1,4 +1,5 @@
-import { Term, Subst, walk, isVar } from "../core.ts";
+import { Term, Subst } from "../core/types.ts";
+import { walk , isVar } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";

@@ -1,4 +1,5 @@
-import { Term, eq, or } from "../core.ts";
+import { Term } from "../core/types.ts";
+import { eq, or } from "../core/combinators.ts";
 import { Logger } from "../shared/logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { MemoryRelation } from "./memory-relation.ts";

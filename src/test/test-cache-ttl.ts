@@ -2,10 +2,8 @@
 
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
-import { 
-  query, 
-  Rel 
-} from "../core.ts";
+import { query } from "../query.ts";
+import { lift as Rel } from "../relations/control.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));

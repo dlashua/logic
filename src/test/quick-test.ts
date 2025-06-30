@@ -1,5 +1,5 @@
 import assert, { deepEqual, deepStrictEqual } from "node:assert";
-import { query } from "../core.ts";
+import { query } from "../query.ts";
 import {
   cousinOf,
   cousinsAgg,
@@ -26,7 +26,7 @@ import {
   kidOf,
   anyKidOf
 } from "../extended/familytree-rel.ts"
-import { membero } from "../relations-list.ts";
+import { membero } from "../relations/lists.ts";
 // import { QUERIES } from "./direct-sql.ts";
 // import { relDB } from "./familytree-sql-facts.ts";
 

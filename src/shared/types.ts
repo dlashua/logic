@@ -1,4 +1,4 @@
-import { Term, Subst } from "../core.ts";
+import { Term, Subst } from "../core/types.ts";
 
 export interface BaseConfig {
   readonly cache: CacheConfig;

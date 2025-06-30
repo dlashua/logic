@@ -1,4 +1,4 @@
-import { Term } from '../core.ts';
+import { Term } from '../core/types.ts';
 import { Pattern, SymmetricPattern } from './types.ts';
 
 export class PatternComparator {

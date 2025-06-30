@@ -1,16 +1,9 @@
-import {
-  Term,
-  lvar,
-  createLogicVarProxy ,
-  Goal,
-  lift,
-  and,
-  uniqueo,
-  eq,
-  not,
-  or,
-} from "../core.ts"
-import { collecto } from "../relations-agg.ts";
+import { Term, Goal } from "../core/types.ts";
+import { lvar } from "../core/kernel.ts";
+import { and, eq, or } from "../core/combinators.ts";
+import { createLogicVarProxy } from "../query.ts";
+import { lift, uniqueo, not } from "../relations/control.ts";
+import { collecto } from "../relations/aggregates.ts";
 // import { getCousinsOf } from "../test/direct-sql.ts";
 
 let parent_kid = (p: Term, k: Term): Goal => {

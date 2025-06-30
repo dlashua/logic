@@ -1,4 +1,5 @@
-import { Term, Subst, isVar } from "../core.ts";
+import { Term, Subst } from "../core/types.ts";
+import { isVar } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
@@ -40,7 +41,9 @@ export class MemoryObjRelation {
 
   private createGoal(queryObj: Record<string, Term>, goalId: number): GoalFunction {
     return async function* (this: MemoryObjRelation, s: Subst) {
-      this.logger.log("RUN_START", `Starting memory object relation goal ${goalId}`, { queryObj });
+      this.logger.log("RUN_START", `Starting memory object relation goal ${goalId}`, {
+        queryObj 
+      });
 
       const queryKeys = Object.keys(queryObj);
       const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
@@ -89,7 +92,10 @@ export class MemoryObjRelation {
             s
           );
           if (s1) {
-            this.logger.log("FACT_MATCH", "Object fact matched", { fact, queryObj });
+            this.logger.log("FACT_MATCH", "Object fact matched", {
+              fact,
+              queryObj 
+            });
             yield s1;
           }
         }
@@ -105,7 +111,10 @@ export class MemoryObjRelation {
             s
           );
           if (s1) {
-            this.logger.log("FACT_MATCH", "Indexed object fact matched", { fact, queryObj });
+            this.logger.log("FACT_MATCH", "Indexed object fact matched", {
+              fact,
+              queryObj 
+            });
             yield s1;
           }
         }
@@ -117,7 +126,9 @@ export class MemoryObjRelation {
 
   private addFact(factObj: Record<string, Term>): void {
     const factIndex = this.facts.length;
-    const fact: Record<string, Term> = { ...factObj };
+    const fact: Record<string, Term> = {
+      ...factObj 
+    };
     this.facts.push(fact);
 
     if (this.config.enableIndexing !== false) {
@@ -133,6 +144,8 @@ export class MemoryObjRelation {
       }
     }
 
-    this.logger.log("FACT_ADDED", `Added object fact at index ${factIndex}`, { fact });
+    this.logger.log("FACT_ADDED", `Added object fact at index ${factIndex}`, {
+      fact 
+    });
   }
 }

@@ -4,14 +4,12 @@ import {
   resetVarCounter,
   walk,
   unify,
-  eq,
-  and,
-  or,
-  query,
-  membero,
   logicList,
   arrayToLogicList
-} from './core.ts';
+} from './core/kernel.ts'
+import { eq, and, or } from './core/combinators.ts'
+import { query } from './query.ts';
+import { membero } from './relations/lists.ts';
 import { benchmark, formatBenchmarkResult, compareBenchmarks } from './benchmark.ts';
 
 describe('Performance Tests', () => {

@@ -5,9 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "vitest",
+    "test": "vitest run",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run",
+    "test:watch": "vitest",
     "quick-test": "tsx ./src/test/quick-test.ts"
   },
   "keywords": [],

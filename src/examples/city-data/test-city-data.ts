@@ -1,6 +1,8 @@
-import { query, and, gto } from "../../core.ts";
-import { arrayLength } from "../../relations-list.ts";
-import { aggregateVarMulti } from "../../relations-agg.ts";
+import { query } from "../../query.ts";
+import { and } from "../../core/combinators.ts";
+import { gto } from "../../relations/numeric.ts";
+import { lengtho } from "../../relations/lists.ts";
+import { group_by_collecto } from "../../relations/aggregates.ts";
 import {
   loadData,
   acquireData,
@@ -14,9 +16,6 @@ import {
 await acquireData();
 await loadData();
 
-const out = (d: unknown) => console.dir(d, {
-  depth: 100 
-})
 const timeit = async (name: string, fn: () => any) => {
   const start = Date.now();
   const res = await fn();
@@ -37,20 +36,20 @@ await timeit("logic", async () => {
     }))
     .where(
       ($) => [
-
-        aggregateVarMulti(
-          [$.state],
-          [$.city],
+        group_by_collecto(
+          $.in_state,
+          $.city,
           and(
             countrycode($.id, "US"),
-            state($.id, $.state),
+            state($.id, $.in_state),
             city($.id, $.city),
             population($.id, $.pop),
             gto($.pop, 10000),
           ),
+          $.state,
+          $.cities,
         ),
-        arrayLength($.city, $.city_cnt),
-      
+        lengtho($.cities, $.city_cnt),
       ])
     // 10,
 

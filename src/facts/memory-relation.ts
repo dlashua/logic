@@ -1,4 +1,5 @@
-import { Term, Subst, isVar, unify } from "../core.ts";
+import { Term, Subst } from "../core/types.ts";
+import { isVar , unify } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
@@ -38,7 +39,9 @@ export class MemoryRelation {
 
   private createGoal(query: Term[], goalId: number): GoalFunction {
     return async function* (this: MemoryRelation, s: Subst) {
-      this.logger.log("RUN_START", `Starting memory relation goal ${goalId}`, { query });
+      this.logger.log("RUN_START", `Starting memory relation goal ${goalId}`, {
+        query 
+      });
 
       const walkedQuery = await queryUtils.walkAllArray(query, s);
       
@@ -81,7 +84,10 @@ export class MemoryRelation {
         for (const fact of this.facts) {
           const s1 = await unificationUtils.unifyArrays(query, fact, s);
           if (s1) {
-            this.logger.log("FACT_MATCH", "Fact matched", { fact, query });
+            this.logger.log("FACT_MATCH", "Fact matched", {
+              fact,
+              query 
+            });
             yield s1;
           }
         }
@@ -92,7 +98,10 @@ export class MemoryRelation {
           const fact = this.facts[factIndex];
           const s1 = await unificationUtils.unifyArrays(query, fact, s);
           if (s1) {
-            this.logger.log("FACT_MATCH", "Indexed fact matched", { fact, query });
+            this.logger.log("FACT_MATCH", "Indexed fact matched", {
+              fact,
+              query 
+            });
             yield s1;
           }
         }
@@ -119,6 +128,8 @@ export class MemoryRelation {
       });
     }
 
-    this.logger.log("FACT_ADDED", `Added fact at index ${factIndex}`, { fact });
+    this.logger.log("FACT_ADDED", `Added fact at index ${factIndex}`, {
+      fact 
+    });
   }
 }

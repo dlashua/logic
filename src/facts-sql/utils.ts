@@ -1,6 +1,6 @@
 // SQL-specific utilities extending shared utilities
 import { queryUtils as baseQueryUtils, unificationUtils, patternUtils } from '../shared/utils.ts';
-import { Term } from '../core.ts';
+import { Term } from '../core/types.ts';
 import { WhereClause } from './types.ts';
 
 export const queryUtils = {

@@ -2,7 +2,7 @@ import { resolve } from "path";
 import { fileURLToPath } from 'url';
 import knex from "knex";
 import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
-import { Term } from "../core.ts";
+import { Term } from "../core/types.ts";
 import { makeFacts, makeFactsSym } from "../facts/facts-memory.ts";
 
 // FACT STORAGE

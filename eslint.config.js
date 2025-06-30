@@ -4,9 +4,13 @@ import importPlugin from 'eslint-plugin-import';
 import js from '@eslint/js';
 import stylistic from '@stylistic/eslint-plugin'
 import tseslint from "typescript-eslint";
-import { defineConfig } from "eslint/config";
+import { defineConfig, globalIgnores } from "eslint/config";
 
 export default defineConfig(
+  globalIgnores([
+    "./hold/**",
+    "./extra/**",
+  ]),
   js.configs.recommended,
   //@ts-expect-error
   tseslint.configs.stylistic,
@@ -39,6 +43,7 @@ export default defineConfig(
       "@typescript-eslint/prefer-for-of": ["off"],
 
       // leave these on
+      "lines-around-comment": ["error"],
       "import/no-unresolved": ["off"],
       "computed-property-spacing": ["error", "never"],
       "comma-dangle": ["error", {

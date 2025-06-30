@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import { Term } from "../core.ts";
+import { Term } from "../core/types.ts";
 import type { BaseConfig } from "../shared/types.ts";
 
 // Re-export shared types

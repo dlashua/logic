@@ -1,13 +1,9 @@
-import {
-  Term,
-  Subst,
-  isVar,
-  walk,
-  unify
-} from '../core.ts';
+import { Term, Subst } from '../core/types.ts';
+import { isVar , walk, unify } from "../core/kernel.ts";
 import { WhereClause } from './types.ts';
 
 export const queryUtils = {
+
   /**
    * Walk all keys of an object with a substitution and return a new object
    */
@@ -84,6 +80,7 @@ export const queryUtils = {
 };
 
 export const unificationUtils = {
+
   /**
    * Unify all selectCols in a row with walkedQ and subst
    */
@@ -137,6 +134,7 @@ export const unificationUtils = {
 };
 
 export const patternUtils = {
+
   /**
    * Check if all select columns are tags (have id property)
    */
@@ -221,6 +219,7 @@ export const patternUtils = {
 };
 
 export const indexUtils = {
+
   /**
    * Returns the intersection of two sets
    */

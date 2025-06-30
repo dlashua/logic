@@ -21,11 +21,31 @@ async function testFullScanKeys() {
   
   // Insert test data
   await relDB.db('test_people').insert([
-    { name: 'alice', city: 'boston', age: 25 },
-    { name: 'bob', city: 'boston', age: 30 },
-    { name: 'charlie', city: 'boston', age: 35 },
-    { name: 'diana', city: 'new_york', age: 28 },
-    { name: 'eve', city: 'new_york', age: 32 }
+    {
+      name: 'alice',
+      city: 'boston',
+      age: 25 
+    },
+    {
+      name: 'bob',
+      city: 'boston',
+      age: 30 
+    },
+    {
+      name: 'charlie',
+      city: 'boston',
+      age: 35 
+    },
+    {
+      name: 'diana',
+      city: 'new_york',
+      age: 28 
+    },
+    {
+      name: 'eve',
+      city: 'new_york',
+      age: 32 
+    }
   ]);
   
   console.log("\n1. Testing regular relation (no fullScanKeys):");
@@ -34,7 +54,10 @@ async function testFullScanKeys() {
   // First query - should execute normal query
   console.log("First query for boston people:");
   let count = 0;
-  for await (const result of regularPeople({ city: 'boston', name: 'alice' })(new Map())) {
+  for await (const result of regularPeople({
+    city: 'boston',
+    name: 'alice' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -42,7 +65,9 @@ async function testFullScanKeys() {
   
   console.log("\n2. Testing fullScanKeys relation:");
   // Create relation with fullScanKeys for 'city'
-  const fullScanPeople = relDB.rel('test_people', { fullScanKeys: ['city'] });
+  const fullScanPeople = relDB.rel('test_people', {
+    fullScanKeys: ['city']
+  });
   
   // Reset query counter
   const initialQueryCount = relDB.realQueries.length;
@@ -50,7 +75,10 @@ async function testFullScanKeys() {
   // First query - should execute full scan for city='boston'
   console.log("First fullScan query for boston people:");
   count = 0;
-  for await (const result of fullScanPeople({ city: 'boston', name: 'alice' })(new Map())) {
+  for await (const result of fullScanPeople({
+    city: 'boston',
+    name: 'alice' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -60,7 +88,10 @@ async function testFullScanKeys() {
   // Second query with same city - should hit cache
   console.log("\nSecond fullScan query for boston people (different name):");
   count = 0;
-  for await (const result of fullScanPeople({ city: 'boston', name: 'bob' })(new Map())) {
+  for await (const result of fullScanPeople({
+    city: 'boston',
+    name: 'bob' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -70,7 +101,10 @@ async function testFullScanKeys() {
   // Third query with different city - should execute new full scan
   console.log("\nThird fullScan query for new_york people:");
   count = 0;
-  for await (const result of fullScanPeople({ city: 'new_york', name: 'diana' })(new Map())) {
+  for await (const result of fullScanPeople({
+    city: 'new_york',
+    name: 'diana' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);

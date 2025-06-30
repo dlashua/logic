@@ -2,7 +2,8 @@ import { resolve } from "path";
 import { fileURLToPath } from 'url';
 import { set_parent_kid, set_relationship } from "../extended/familytree-rel.ts";
 // import { makeRelDB } from "../facts-sql.ts";
-import { Term, lift } from "../core.ts"
+import { Term } from "../core/types.ts";
+import { lift } from "../relations/control.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));

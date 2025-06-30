@@ -2,29 +2,28 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   lvar,
   resetVarCounter,
-  logicList,
-  logicListToArray,
   walk,
-  eq,
-  and
-} from './core.ts';
+  logicListToArray,
+  logicList
+} from '../core/kernel.ts'
+import { eq, and } from '../core/combinators.ts';
 import {
-  arrayLength,
+  lengtho,
   permuteo,
   mapo,
   removeFirsto,
   alldistincto
-} from './relations-list.ts';
+} from "./lists.ts"
 
 describe('List Relations', () => {
   beforeEach(() => {
     resetVarCounter();
   });
 
-  describe('arrayLength', () => {
+  describe('lengtho', () => {
     it('should unify array length with number', async () => {
       const len = lvar('len');
-      const goal = arrayLength([1, 2, 3], len);
+      const goal = lengtho([1, 2, 3], len);
       const s = new Map();
       
       const results = [];
@@ -38,7 +37,7 @@ describe('List Relations', () => {
     it('should work with logic lists', async () => {
       const len = lvar('len');
       const list = logicList(1, 2, 3, 4);
-      const goal = arrayLength(list, len);
+      const goal = lengtho(list, len);
       const s = new Map();
       
       const results = [];
@@ -51,7 +50,7 @@ describe('List Relations', () => {
 
     it('should work with empty arrays', async () => {
       const len = lvar('len');
-      const goal = arrayLength([], len);
+      const goal = lengtho([], len);
       const s = new Map();
       
       const results = [];
@@ -66,7 +65,7 @@ describe('List Relations', () => {
       const arr = lvar('arr');
       const goal = and(
         eq(arr, [1, 2, 3]),
-        arrayLength(arr, 3)
+        lengtho(arr, 3)
       );
       const s = new Map();
       
@@ -79,7 +78,7 @@ describe('List Relations', () => {
     });
 
     it('should fail for wrong length', async () => {
-      const goal = arrayLength([1, 2, 3], 5);
+      const goal = lengtho([1, 2, 3], 5);
       const s = new Map();
       
       const results = [];

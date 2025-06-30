@@ -1,31 +1,25 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { Term, Subst } from './core/types.ts';
 import {
   lvar,
   resetVarCounter,
-  nil,
-  cons,
-  arrayToLogicList,
-  logicList,
-  isVar,
+  walk,
+  unify,
   isCons,
   isNil,
   isLogicList,
-  walk,
-  unify,
-  eq,
-  fresh,
-  and,
-  or,
-  query,
-  membero,
-  firsto,
-  resto,
-  appendo,
-  logicListToArray,
-  gto,
-  not,
-  neqo
-} from './core.ts';
+  isVar,
+  arrayToLogicList,
+  logicList,
+  nil,
+  cons,
+  logicListToArray
+} from './core/kernel.ts'
+import { eq, fresh, and, or } from './core/combinators.ts';
+import { query } from './query.ts';
+import { membero, firsto, resto, appendo } from './relations/lists.ts';
+import { gto } from './relations/numeric.ts';
+import { not, neqo } from './relations/control.ts';
 
 describe('Core Logic Engine', () => {
   beforeEach(() => {

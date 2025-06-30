@@ -1,28 +1,111 @@
+import { Goal, LogicList, Subst, Term } from "../core/types.ts"
 import {
-  cons,
-  isCons,
-  isNil,
-  isLogicList,
+  walk,
+  unify,
   lvar,
   nil,
-  walk,
-  and,
-  eq,
-  Goal,
-  logicListToArray,
-  unify,
-} from "./core.ts"
-import type { Term, Subst } from "./core.ts";
+  cons,
+  isCons,
+  isLogicList,
+  isNil,
+  logicListToArray
+} from "../core/kernel.ts"
+import { and, eq } from "../core/combinators.ts";
 
-// Re-export the core list functions for backward compatibility
-export { membero, firsto, resto, appendo } from "./core.ts";
+/**
+ * A goal that succeeds if `x` is a member of the logic `list`.
+ * Optimized for both arrays and logic lists.
+ */
+export function membero(x: Term, list: Term): Goal {
+  return async function* (s) {
+    const l = await walk(list, s);
+    
+    // Fast path for arrays
+    if (Array.isArray(l)) {
+      for (const item of l) {
+        const s2 = await unify(x, item, s);
+        if (s2) yield s2;
+      }
+      return;
+    }
+    
+    // Logic list traversal with iterative approach when possible
+    if (l && typeof l === "object" && "tag" in l) {
+      if ((l as any).tag === "cons") {
+        const s1 = await unify(x, (l as any).head, s);
+        if (s1) yield s1;
+        // Recursive call for tail
+        for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
+      }
+    }
+  };
+}
+
+/**
+ * A goal that succeeds if `h` is the head of the logic list `l`.
+ */
+export function firsto(x: Term, xs: Term): Goal {
+  return async function* (s) {
+    const l = await walk(xs, s);
+    if (isCons(l)) {
+      const consNode = l as { tag: "cons"; head: Term; tail: Term };
+      const s1 = await unify(x, consNode.head, s);
+      if (s1) yield s1;
+    }
+  };
+}
+
+/**
+ * A goal that succeeds if `t` is the tail of the logic list `l`.
+ */
+export function resto(xs: Term, tail: Term): Goal {
+  return async function* (s) {
+    const l = await walk(xs, s);
+    if (isCons(l)) {
+      const consNode = l as { tag: "cons"; head: Term; tail: Term };
+      const s1 = await unify(tail, consNode.tail, s);
+      if (s1) yield s1;
+    }
+  };
+}
+
+/**
+ * A goal that succeeds if logic list `zs` is the result of appending
+ * logic list `ys` to `xs`.
+ */
+export function appendo(xs: Term, ys: Term, zs: Term): Goal {
+  return async function* (s) {
+    const xsVal = await walk(xs, s);
+    if (isCons(xsVal)) {
+      const consNode = xsVal as { tag: "cons"; head: Term; tail: Term };
+      const head = consNode.head;
+      const tail = consNode.tail;
+      const rest = lvar();
+      const s1 = await unify(
+        zs,
+        {
+          tag: "cons",
+          head,
+          tail: rest,
+        },
+        s,
+      );
+      if (s1) {
+        for await (const s2 of appendo(tail, ys, rest)(s1)) yield s2;
+      }
+    } else if (isNil(xsVal)) {
+      const s1 = await unify(ys, zs, s);
+      if (s1) yield s1;
+    }
+  };
+}
 
 /**
  * A goal that unifies the length of an array or logic list with a numeric value.
  * @param arrayOrList The array or logic list to measure
  * @param length The length to unify with
  */
-export function arrayLength(arrayOrList: Term, length: Term): Goal {
+export function lengtho(arrayOrList: Term, length: Term): Goal {
   return async function* arrayLengthGoal(s: Subst) {
     const walkedArray = await walk(arrayOrList, s);
     const walkedLength = await walk(length, s);
@@ -58,7 +141,7 @@ export function permuteo(xs: Term, ys: Term): Goal {
       return;
     }
     if (isCons(xsVal)) {
-      const arr = logicListToArray(xsVal);
+      const arr = logicListToArray(xsVal as LogicList);
       for (const head of arr) {
         const rest = lvar();
         for await (const s1 of and(
@@ -163,3 +246,5 @@ export function alldistincto(xs: Term): Goal {
     if (allDistinct) yield s;
   };
 }
+
+

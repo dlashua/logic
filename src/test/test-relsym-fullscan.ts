@@ -21,11 +21,31 @@ async function testRelSymFullScanKeys() {
   
   // Insert test data - symmetric relationships
   await relDB.db('connections').insert([
-    { person_a: 'alice', person_b: 'bob', type: 'friend' },
-    { person_a: 'alice', person_b: 'charlie', type: 'friend' },
-    { person_a: 'bob', person_b: 'diana', type: 'colleague' },
-    { person_a: 'charlie', person_b: 'eve', type: 'friend' },
-    { person_a: 'diana', person_b: 'eve', type: 'colleague' }
+    {
+      person_a: 'alice',
+      person_b: 'bob',
+      type: 'friend' 
+    },
+    {
+      person_a: 'alice',
+      person_b: 'charlie',
+      type: 'friend' 
+    },
+    {
+      person_a: 'bob',
+      person_b: 'diana',
+      type: 'colleague' 
+    },
+    {
+      person_a: 'charlie',
+      person_b: 'eve',
+      type: 'friend' 
+    },
+    {
+      person_a: 'diana',
+      person_b: 'eve',
+      type: 'colleague' 
+    }
   ]);
   
   console.log("\n1. Testing regular relSym (no fullScanKeys):");
@@ -34,7 +54,10 @@ async function testRelSymFullScanKeys() {
   // First query - should execute normal symmetric query
   console.log("First symmetric query for alice's connections:");
   let count = 0;
-  for await (const result of regularConnections({ person_a: 'alice', person_b: 'bob' })(new Map())) {
+  for await (const result of regularConnections({
+    person_a: 'alice',
+    person_b: 'bob' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -42,7 +65,9 @@ async function testRelSymFullScanKeys() {
   
   console.log("\n2. Testing relSym with fullScanKeys:");
   // Create symmetric relation with fullScanKeys for 'person_a'
-  const fullScanConnections = relDB.relSym('connections', ['person_a', 'person_b'], { fullScanKeys: ['person_a'] });
+  const fullScanConnections = relDB.relSym('connections', ['person_a', 'person_b'], {
+    fullScanKeys: ['person_a']
+  });
   
   // Reset query counter
   const initialQueryCount = relDB.realQueries.length;
@@ -50,7 +75,10 @@ async function testRelSymFullScanKeys() {
   // First query - should execute full scan for person_a='alice' (both directions)
   console.log("First fullScan symmetric query for alice:");
   count = 0;
-  for await (const result of fullScanConnections({ person_a: 'alice', person_b: 'bob' })(new Map())) {
+  for await (const result of fullScanConnections({
+    person_a: 'alice',
+    person_b: 'bob' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -60,7 +88,10 @@ async function testRelSymFullScanKeys() {
   // Second query with same person_a - should hit cache
   console.log("\nSecond fullScan symmetric query for alice (different person_b):");
   count = 0;
-  for await (const result of fullScanConnections({ person_a: 'alice', person_b: 'charlie' })(new Map())) {
+  for await (const result of fullScanConnections({
+    person_a: 'alice',
+    person_b: 'charlie' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -70,7 +101,10 @@ async function testRelSymFullScanKeys() {
   // Third query with different person_a - should execute new full scan
   console.log("\nThird fullScan symmetric query for bob:");
   count = 0;
-  for await (const result of fullScanConnections({ person_a: 'bob', person_b: 'diana' })(new Map())) {
+  for await (const result of fullScanConnections({
+    person_a: 'bob',
+    person_b: 'diana' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);
@@ -80,7 +114,10 @@ async function testRelSymFullScanKeys() {
   // Fourth query using person_b with cached person_a - should still hit cache
   console.log("\nFourth query with cached person (reversed direction):");
   count = 0;
-  for await (const result of fullScanConnections({ person_a: 'charlie', person_b: 'alice' })(new Map())) {
+  for await (const result of fullScanConnections({
+    person_a: 'charlie',
+    person_b: 'alice' 
+  })(new Map())) {
     count++;
   }
   console.log(`Found ${count} results`);

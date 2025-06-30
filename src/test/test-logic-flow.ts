@@ -1,12 +1,7 @@
-import {
-  Subst,
-  Term,
-  walk,
-  eq,
-  and,
-  or,
-  createLogicVarProxy
-} from "../core.ts"
+import { Subst, Term } from "../core/types.ts";
+import { walk } from "../core/kernel.ts";
+import { eq, and, or } from "../core/combinators.ts";
+import { createLogicVarProxy } from "../query.ts";
 
 const log = console.log;
 const { proxy: $ } = createLogicVarProxy("test_");

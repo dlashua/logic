@@ -71,13 +71,13 @@ export class RegularRelationWithMerger {
       // Pattern processing is now synchronous - no need to wait
 
       // Get results from query merger
-      let mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
+      let mergedResults = await this.queryMerger.getResultsForGoal(executionId);
       
       if (!mergedResults) {
         // Goal may have been cleaned up - re-add pattern and try again
         this.logger.log("GOAL_RESTARTING", `[Goal ${baseGoalId}] Execution ${executionId} restarting (likely cleaned up)`);
         await this.queryMerger.addPatternWithGrounding(executionId, this.table, queryObj, selectCols, whereCols);
-        mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
+        mergedResults = await this.queryMerger.getResultsForGoal(executionId);
         
         if (!mergedResults) {
           this.logger.log("GOAL_NO_RESULTS", `[Goal ${baseGoalId}] Execution ${executionId} no results after restart`);

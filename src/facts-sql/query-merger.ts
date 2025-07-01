@@ -30,6 +30,7 @@ export interface MergedQuery {
 }
 
 type JoinVars = { varId: string; columns: { table: string; column: string; goalId: number; type: 'select' | 'where' }[] }[];
+type ProcessingState = 'IDLE' | 'SCHEDULED' | 'RUNNING';
 
 export class QueryMerger {
   private pendingPatterns = new Map<number, QueryPattern>();
@@ -37,6 +38,8 @@ export class QueryMerger {
   private nextMergedQueryId = 1;
   private readonly mergeDelayMs: number;
   private mergeTimer: NodeJS.Timeout | null = null;
+  private processingState: ProcessingState = 'IDLE';
+
   private processedRows = new Map<number, Set<number>>(); // goalId -> Set of processed row indices
   private static globalGoalId = 1; // Global goal ID counter across all relations
   private patternReadyCallbacks = new Map<number, () => void>(); // goalId -> callback
@@ -231,16 +234,15 @@ export class QueryMerger {
 
   /**
    * Private helper to create, store, and log a new pattern.
-   * This consolidates the logic from the public `add*` methods.
    */
-  private async _createAndAddPattern(
+  private _createAndAddPattern(
     goalId: number,
     table: string,
     queryObj: Record<string, Term>,
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>,
     options: { isSymmetric?: boolean; symmetricKeys?: [string, string] } = {}
-  ): Promise<void> {
+  ): void {
     const varIds = this.patternProcessor.extractVarIds(queryObj);
 
     const pattern: QueryPattern = {
@@ -270,73 +272,87 @@ export class QueryMerger {
     }
     this.logger.log(logType, `[Goal ${goalId}] Pattern created for table ${table}`, logPayload);
 
-    this.scheduleMergeProcessing();
+    this._scheduleProcessing();
   }
 
   /**
    * Add a new query pattern for potential merging.
    */
-  async addPattern(
+  addPattern(
     goalId: number,
     table: string,
     queryObj: Record<string, Term>
-  ): Promise<void> {
+  ): void {
     const { selectCols, whereCols } = this.patternProcessor.separateQueryColumns(queryObj);
-    await this._createAndAddPattern(goalId, table, queryObj, selectCols, whereCols);
+    this._createAndAddPattern(goalId, table, queryObj, selectCols, whereCols);
   }
 
   /**
    * Add a new query pattern with explicit grounding information.
    */
-  async addPatternWithGrounding(
+  addPatternWithGrounding(
     goalId: number,
     table: string,
     originalQueryObj: Record<string, Term>,
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
-  ): Promise<void> {
-    await this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols);
+  ): void {
+    this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols);
   }
 
   /**
    * Add a symmetric query pattern with explicit grounding information.
    */
-  async addSymmetricPatternWithGrounding(
+  addSymmetricPatternWithGrounding(
     goalId: number,
     table: string,
     keys: [string, string],
     originalQueryObj: Record<string, Term>,
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
-  ): Promise<void> {
-    await this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols, {
+  ): void {
+    this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols, {
       isSymmetric: true,
       symmetricKeys: keys,
     });
   }
   
-
   /**
-   * Get merged query results for a specific goal
+   * Retrieves results for a goal, waiting for them to be processed if necessary.
+   * This version includes a "fast path" to trigger immediate processing if needed.
    */
-  async getResultsForGoal(goalId: number, s: Subst): Promise<any[] | null> {
-    // Find which merged query contains this goal
+  async getResultsForGoal(goalId: number): Promise<any[] | null> {
+    // 1. Check if results are already available.
     for (const mergedQuery of this.mergedQueries.values()) {
-      const pattern = mergedQuery.patterns.find(p => p.goalId === goalId);
-      if (pattern && mergedQuery.results) {
-        // Simply return the results - grounding is handled at execution time now
-        return mergedQuery.results;
+      if (mergedQuery.patterns.some(p => p.goalId === goalId)) {
+        return mergedQuery.results || null;
+      }
+    }
+
+    // 2. Check if the pattern is pending and can be processed immediately.
+    const pattern = this.pendingPatterns.get(goalId);
+    if (pattern && !pattern.locked) {
+      // If idle or only scheduled for a delayed run, we can run immediately.
+      if (this.processingState === 'IDLE' || this.processingState === 'SCHEDULED') {
+        await this._runProcessingLoop(true); // `true` indicates an immediate, forced run.
+      }
+    }
+
+    // 3. Now that we've potentially triggered a run, wait for it to complete.
+    const isReady = await this.waitForPatternReady(goalId);
+    if (!isReady) {
+      this.logger.log("GET_RESULTS_TIMEOUT", `[Goal ${goalId}] Timed out waiting for pattern to be ready.`);
+      return null;
+    }
+
+    // 4. After waiting, the results should be available.
+    for (const mergedQuery of this.mergedQueries.values()) {
+      if (mergedQuery.patterns.some(p => p.goalId === goalId)) {
+        return mergedQuery.results || null;
       }
     }
     
-    // Check if pattern is still pending
-    const pattern = this.pendingPatterns.get(goalId);
-    if (pattern && !pattern.locked) {
-      // Force processing of pending patterns
-      await this.processPendingPatterns();
-      return this.getResultsForGoal(goalId, s);
-    }
-    
+    this.logger.log("GET_RESULTS_NOT_FOUND", `[Goal ${goalId}] Results not found after pattern was ready.`);
     return null;
   }
 
@@ -388,52 +404,63 @@ export class QueryMerger {
     }
   }
 
-  
-
-  private scheduleMergeProcessing(): void {
-    if (this.mergeTimer) {
-      return; // Already scheduled
+  /**
+   * Schedules a processing run if one is not already scheduled.
+   */
+  private _scheduleProcessing(): void {
+    if (this.processingState !== 'IDLE') {
+      return; // A run is already scheduled or in progress.
     }
     
+    this.processingState = 'SCHEDULED';
     this.mergeTimer = setTimeout(() => {
       this.mergeTimer = null;
-      this.processPendingPatterns();
+      this._runProcessingLoop(false); // `false` indicates a normal, timed run.
     }, this.mergeDelayMs);
   }
-
+  
   /**
-   * Force immediate processing of pending patterns without delay
+   * The main processing loop, protected by the state machine.
    */
-  private forceProcessPendingPatterns(): Promise<void> {
-    if (this.mergeTimer) {
+  private async _runProcessingLoop(isForced: boolean): Promise<void> {
+    // If forced, cancel any pending timed run.
+    if (isForced && this.mergeTimer) {
       clearTimeout(this.mergeTimer);
       this.mergeTimer = null;
     }
-    return this.processPendingPatterns();
-  }
-
-  
-
-  private async processPendingPatterns(): Promise<void> {
-    const patterns = Array.from(this.pendingPatterns.values())
-      .filter(p => !p.locked);
     
-    if (patterns.length === 0) {
+    // Do not run if another process is already running.
+    if (this.processingState === 'RUNNING') {
       return;
     }
 
-    // Find merge groups across ALL patterns (not just by table)
-    const mergeGroups = this.patternProcessor.findMergeGroups(patterns);
+    this.processingState = 'RUNNING';
+    this.logger.log("PROCESSING_LOOP_START", "Starting pattern processing loop.", {
+      isForced 
+    });
+
+    const patternsToProcess = Array.from(this.pendingPatterns.values())
+      .filter(p => !p.locked);
     
-    // Process each group of patterns
-    for (const group of mergeGroups) {
-      await this._processPatternGroup(group);
+    if (patternsToProcess.length > 0) {
+      const mergeGroups = this.patternProcessor.findMergeGroups(patternsToProcess);
+      
+      for (const group of mergeGroups) {
+        await this._processPatternGroup(group);
+      }
+    }
+
+    this.logger.log("PROCESSING_LOOP_END", "Finished pattern processing loop.");
+    this.processingState = 'IDLE';
+
+    // If new patterns arrived while we were busy, schedule a new run.
+    if (this.pendingPatterns.size > 0) {
+      this._scheduleProcessing();
     }
   }
 
   /**
-   * Processes a group of one or more patterns, handling single, same-table,
-   * and cross-table (JOIN) scenarios.
+   * Processes a group of one or more patterns.
    */
   private async _processPatternGroup(patterns: QueryPattern[]): Promise<void> {
     patterns.forEach(p => p.locked = true);
@@ -510,8 +537,7 @@ export class QueryMerger {
   }
 
   /**
-   * Builds and executes a query (single table, symmetric, or join) and returns the results.
-   * This method consolidates the logic from the previous executeQuery and executeJoinQuery methods.
+   * Builds and executes a query.
    */
   private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
     const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);

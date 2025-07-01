@@ -38,6 +38,13 @@ export class QueryMerger {
   private patternReadyCallbacks = new Map<number, () => void>(); // goalId -> callback
   
   private queries: string[] = [];
+  
+  // Memory management settings
+  private cleanupTimer: NodeJS.Timeout | null = null;
+  private readonly maxGoalAge = 5 * 60 * 1000; // 5 minutes (goals can be reused but will restart)
+  private readonly cleanupIntervalMs = 2 * 60 * 1000; // 2 minutes
+  private readonly MAX_GOAL_ID = 1000000; // Reset after 1M goals
+  private memoryMonitorTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private logger: Logger,
@@ -45,6 +52,8 @@ export class QueryMerger {
     mergeDelayMs = 50
   ) {
     this.mergeDelayMs = mergeDelayMs;
+    this.startCleanupTimer();
+    this.startMemoryMonitor();
   }
 
   public getQueries(): string[] {
@@ -60,7 +69,158 @@ export class QueryMerger {
   }
 
   public getNextGoalId(): number {
-    return QueryMerger.globalGoalId++;
+    const id = QueryMerger.globalGoalId++;
+    
+    // Reset goal ID if it gets too large to prevent overflow
+    if (QueryMerger.globalGoalId > this.MAX_GOAL_ID) {
+      QueryMerger.globalGoalId = 1;
+      this.logger.log('GOAL_ID_RESET', 'Goal ID counter reset to prevent overflow');
+    }
+    
+    return id;
+  }
+
+  private startCleanupTimer(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
+    
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupOldGoals();
+    }, this.cleanupIntervalMs);
+  }
+
+  private startMemoryMonitor(): void {
+    if (this.memoryMonitorTimer) {
+      clearInterval(this.memoryMonitorTimer);
+    }
+    
+    this.memoryMonitorTimer = setInterval(() => {
+      this.logMemoryStats();
+    }, 60 * 1000); // Every minute
+  }
+
+  private cleanupOldGoals(): void {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    // Clean up old patterns
+    for (const [goalId, pattern] of this.pendingPatterns.entries()) {
+      if (now - pattern.timestamp > this.maxGoalAge) {
+        this.pendingPatterns.delete(goalId);
+        cleaned++;
+      }
+    }
+    
+    // Clean up old processed rows
+    for (const [goalId, _] of this.processedRows.entries()) {
+      const pattern = this.pendingPatterns.get(goalId);
+      if (!pattern || now - pattern.timestamp > this.maxGoalAge) {
+        this.processedRows.delete(goalId);
+        cleaned++;
+      }
+    }
+    
+    // Clean up old callbacks
+    for (const goalId of this.patternReadyCallbacks.keys()) {
+      const pattern = this.pendingPatterns.get(goalId);
+      if (!pattern || now - pattern.timestamp > this.maxGoalAge) {
+        this.patternReadyCallbacks.delete(goalId);
+        cleaned++;
+      }
+    }
+    
+    // Clean up old merged queries (check if any patterns reference them)
+    for (const [queryId, mergedQuery] of this.mergedQueries.entries()) {
+      const hasActivePatterns = mergedQuery.patterns.some(p => 
+        this.pendingPatterns.has(p.goalId)
+      );
+      if (!hasActivePatterns) {
+        this.mergedQueries.delete(queryId);
+        cleaned++;
+      }
+    }
+    
+    if (cleaned > 0) {
+      this.logger.log('QUERY_MERGER_CLEANUP', `Cleaned ${cleaned} old goal entries`);
+    }
+  }
+
+  private logMemoryStats(): void {
+    const memUsage = process.memoryUsage();
+    const stats = {
+      heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+      pendingPatterns: this.pendingPatterns.size,
+      mergedQueries: this.mergedQueries.size,
+      processedRows: this.processedRows.size,
+      patternCallbacks: this.patternReadyCallbacks.size,
+      currentGoalId: QueryMerger.globalGoalId
+    };
+    
+    this.logger.log('MEMORY_STATS', 'Memory usage', stats);
+    
+    // Warning for high memory usage
+    if (memUsage.heapUsed > 500 * 1024 * 1024) { // 500MB warning
+      this.logger.log('MEMORY_WARNING', `High memory usage detected: ${stats.heapUsed}`);
+    }
+    
+    // Warning for high goal counts
+    if (this.pendingPatterns.size > 1000) {
+      this.logger.log('GOAL_COUNT_WARNING', `High pending pattern count: ${this.pendingPatterns.size}`);
+    }
+  }
+
+  // Note: Goals are not marked as "completed" since async generators can be resumed
+  // multiple times. Instead, we rely on time-based cleanup to remove old goal data.
+
+  // Force cleanup now (useful for testing or manual cleanup)
+  public forceCleanup(): void {
+    this.cleanupOldGoals();
+  }
+
+  // Get current state statistics
+  public getStats(): {
+    pendingPatterns: number;
+    mergedQueries: number;
+    processedRows: number;
+    patternCallbacks: number;
+    currentGoalId: number;
+  } {
+    return {
+      pendingPatterns: this.pendingPatterns.size,
+      mergedQueries: this.mergedQueries.size,
+      processedRows: this.processedRows.size,
+      patternCallbacks: this.patternReadyCallbacks.size,
+      currentGoalId: QueryMerger.globalGoalId
+    };
+  }
+
+  // Destroy the query merger and cleanup timers
+  public destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+    
+    if (this.memoryMonitorTimer) {
+      clearInterval(this.memoryMonitorTimer);
+      this.memoryMonitorTimer = null;
+    }
+    
+    if (this.mergeTimer) {
+      clearTimeout(this.mergeTimer);
+      this.mergeTimer = null;
+    }
+    
+    // Clear all data
+    this.pendingPatterns.clear();
+    this.mergedQueries.clear();
+    this.processedRows.clear();
+    this.patternReadyCallbacks.clear();
+    this.queries.length = 0;
+    
+    this.logger.log('QUERY_MERGER_DESTROYED', 'QueryMerger destroyed and cleaned up');
   }
 
   /**

@@ -103,7 +103,7 @@ export class SymmetricRelationWithMerger {
           }
         }
         
-        this.logger.log("SYMMETRIC_GOAL_COMPLETE", `[Goal ${baseGoalId}] Execution ${executionId} complete using cache, yielded ${yielded} results`, {
+        this.logger.log("SYMMETRIC_GOAL_EXECUTION_FINISHED", `[Goal ${baseGoalId}] Execution ${executionId} finished using cache, yielded ${yielded} results`, {
           goalId: baseGoalId,
           executionId,
           yieldedCount: yielded
@@ -119,11 +119,18 @@ export class SymmetricRelationWithMerger {
       // Pattern processing is now synchronous - no need to wait
 
       // Get results from query merger
-      const mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
+      let mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
       
       if (!mergedResults) {
-        this.logger.log("SYMMETRIC_GOAL_NO_RESULTS", `[Goal ${baseGoalId}] Execution ${executionId} no results from query merger`);
-        return;
+        // Goal may have been cleaned up - re-add pattern and try again
+        this.logger.log("SYMMETRIC_GOAL_RESTARTING", `[Goal ${baseGoalId}] Execution ${executionId} restarting (likely cleaned up)`);
+        await this.queryMerger.addSymmetricPatternWithGrounding(executionId, this.table, this.keys, queryObj, selectCols, whereCols);
+        mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
+        
+        if (!mergedResults) {
+          this.logger.log("SYMMETRIC_GOAL_NO_RESULTS", `[Goal ${baseGoalId}] Execution ${executionId} no results after restart`);
+          return;
+        }
       }
 
       // Process results and yield matching substitutions with symmetric logic
@@ -153,7 +160,7 @@ export class SymmetricRelationWithMerger {
         }
       }
       
-      this.logger.log("SYMMETRIC_GOAL_COMPLETE", `[Goal ${baseGoalId}] Execution ${executionId} complete, yielded ${yielded} results`, {
+      this.logger.log("SYMMETRIC_GOAL_EXECUTION_FINISHED", `[Goal ${baseGoalId}] Execution ${executionId} finished, yielded ${yielded} results`, {
         goalId: baseGoalId,
         executionId,
         yieldedCount: yielded

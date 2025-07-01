@@ -5,6 +5,9 @@ export class ConfigurationManager {
     return {
       cache: {
         patternCacheEnabled: true,
+        maxSize: 10000,
+        ttlMs: 30 * 60 * 1000, // 30 minutes
+        cleanupIntervalMs: 5 * 60 * 1000, // 5 minutes
       },
       logging: {
         enabled: false,

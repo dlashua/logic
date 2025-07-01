@@ -7,6 +7,9 @@ export interface BaseConfig {
 
 export interface CacheConfig {
   readonly patternCacheEnabled: boolean;
+  readonly maxSize?: number;
+  readonly ttlMs?: number;
+  readonly cleanupIntervalMs?: number;
 }
 
 export interface LogConfig {

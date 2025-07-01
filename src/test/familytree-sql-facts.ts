@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 import { FamilytreeRelations } from "../extended/familytree-rel.ts";
 // import { makeRelDB } from "../facts-sql.ts";
 import { Term } from "../core/types.ts";
-import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
+import { makeRelDB } from "../facts-sql/index.ts";
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 

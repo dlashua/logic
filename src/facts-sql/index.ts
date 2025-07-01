@@ -1,10 +1,11 @@
-import type { Knex } from "knex";
 import knex from "knex";
+import type { Knex } from "knex";
 import { ConfigurationManager } from "../shared/config.ts";
 import { Logger } from "../shared/logger.ts";
+import type { BaseConfig as Configuration } from "../shared/types.ts";
 import { QueryMerger } from "./query-merger.ts";
-import { RelationFactoryWithMerger } from "./relation-factory-with-merger.ts";
-import type { Configuration } from "./types.ts";
+import { RelationFactoryWithMerger } from "./factory.ts";
+
 
 export const makeRelDB = async (
   knex_connect_options: Knex.Config,
@@ -14,13 +15,13 @@ export const makeRelDB = async (
 ) => {
   opts ??= {};
   const db = knex(knex_connect_options);
-  
+
   // Create configuration
   const config = ConfigurationManager.create(configOverrides);
-  
+
   // Create core dependencies
   const logger = new Logger(config.logging);
-  
+
   // Create the query merger
   const queryMerger = new QueryMerger(
     logger,

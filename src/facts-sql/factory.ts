@@ -2,11 +2,9 @@ import type { Term, Goal } from "../core/types.ts";
 import { Logger } from "../shared/logger.ts";
 import { or } from "../core/combinators.ts";
 import { QueryMerger } from "./query-merger.ts";
-import { RegularRelationWithMerger } from "./regular-relation-with-merger.ts";
-import { SymmetricRelationWithMerger } from "./symmetric-relation-with-merger.ts";
+import { RegularRelationWithMerger } from "./relation.ts";
+import { SymmetricRelationWithMerger } from "./symmetric-relation.ts";
 import type { RelationOptions } from "./types.ts";
-import { RegularRelation } from "./regular-relation.ts";
-import { SymmetricRelation } from "./symmetric-relation.ts";
 
 export class RelationFactoryWithMerger {
   constructor(

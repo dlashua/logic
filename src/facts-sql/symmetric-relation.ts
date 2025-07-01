@@ -79,38 +79,8 @@ export class SymmetricRelationWithMerger {
         return; // Don't yield anything for self-relations
       }
       
-      // STEP 3: Check if we can reuse existing cached results from query merger
-      const existingResults = await this.queryMerger.checkForExistingResults(this.table, walkedQuery, queryObj);
-      if (existingResults) {
-        this.logger.log("SYMMETRIC_REUSING_CACHED_RESULTS", `[Goal ${baseGoalId}] Execution ${executionId} reusing cached results`, {
-          goalId: baseGoalId,
-          executionId,
-          cachedRowCount: existingResults.length
-        });
-        
-        let yielded = 0;
-        for (const row of existingResults) {
-          const unifiedSubst = await this.unifyRowWithSymmetricQuery(row, queryObj, s);
-          if (unifiedSubst) {
-            yielded++;
-            this.logger.log("SYMMETRIC_SUBST_YIELDED", `[Goal ${baseGoalId}] Execution ${executionId} yielded substitution from cache`, {
-              goalId: baseGoalId,
-              executionId,
-              row,
-              substitution: Object.fromEntries(unifiedSubst.entries())
-            });
-            yield unifiedSubst;
-          }
-        }
-        
-        this.logger.log("SYMMETRIC_GOAL_EXECUTION_FINISHED", `[Goal ${baseGoalId}] Execution ${executionId} finished using cache, yielded ${yielded} results`, {
-          goalId: baseGoalId,
-          executionId,
-          yieldedCount: yielded
-        });
-        return;
-      }
-      
+      // STEP 3: (Cache check removed)
+
       // STEP 4: Execute new symmetric query with current grounding information
       // Convert symmetric query to a regular relation pattern for the query merger
       // But mark it as symmetric so the query builder knows to use OR logic

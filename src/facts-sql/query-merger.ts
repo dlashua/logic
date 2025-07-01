@@ -336,28 +336,7 @@ export class QueryMerger {
     this.scheduleMergeProcessing();
   }
 
-  /**
-   * Check if we already have cached results that can satisfy this query
-   * Simplified for better performance
-   */
-  async checkForExistingResults(
-    table: string, 
-    walkedQuery: Record<string, Term>,
-    originalQuery: Record<string, Term>
-  ): Promise<any[] | null> {
-    // Skip cache lookup for now - the caching logic is complex and may be causing slowdowns
-    // TODO: Implement simpler cache mechanism if needed
-    return null;
-  }
   
-  // Simplified cache condition checking - removed for performance
-  // private canQuerySatisfyConditions() - removed
-  
-  // Simplified result filtering and remapping - removed for performance
-  // private filterAndRemapCachedResults() - removed
-  
-  // Simplified column value lookup - removed for performance
-  // private findColumnValueInRow() - removed
 
   /**
    * Get merged query results for a specific goal
@@ -476,95 +455,7 @@ export class QueryMerger {
     return this.processPendingPatterns();
   }
 
-  /**
-   * Check for existing compatible patterns and merge with them, or process individually
-   */
-  private async checkAndMergeWithExisting(goalId: number): Promise<void> {
-    const pattern = this.pendingPatterns.get(goalId);
-    if (!pattern) return;
-
-    // Find other pending patterns that could be merged with this one
-    const compatiblePatterns = [];
-    for (const otherPattern of this.pendingPatterns.values()) {
-      if (otherPattern.goalId === goalId || otherPattern.locked) {
-        continue;
-      }
-      
-      // Check if patterns are compatible for merging
-      if (this.arePatternsMergeable(pattern, otherPattern)) {
-        compatiblePatterns.push(otherPattern);
-      }
-    }
-
-    if (compatiblePatterns.length > 0) {
-      // Found compatible patterns - merge them together
-      const allPatterns = [pattern, ...compatiblePatterns];
-      this.logger.log("SMART_MERGE_FOUND", `Found ${compatiblePatterns.length} compatible patterns for goal ${goalId}`, {
-        mainGoalId: goalId,
-        compatibleGoalIds: compatiblePatterns.map(p => p.goalId),
-        tables: allPatterns.map(p => p.table),
-        varIds: allPatterns.map(p => Array.from(p.varIds))
-      });
-
-      // Process all patterns together
-      const mergeGroups = this.findMergeGroups(allPatterns);
-      for (const group of mergeGroups) {
-        if (group.length === 1) {
-          await this.processSinglePattern(group[0]);
-        } else {
-          const tables = new Set(group.map(p => p.table));
-          if (tables.size === 1) {
-            await this.processSameTableMergedPatterns(Array.from(tables)[0], group);
-          } else {
-            await this.processCrossTableMergedPatterns(group);
-          }
-        }
-      }
-    } else {
-      // No compatible patterns - process individually
-      await this.forceProcessPendingPatterns();
-    }
-  }
-
-  /**
-   * Check if two patterns can be merged (same table, shared variables, compatible structure)
-   */
-  private arePatternsMergeable(pattern1: QueryPattern, pattern2: QueryPattern): boolean {
-    // Must be same table
-    if (pattern1.table !== pattern2.table) {
-      return false;
-    }
-
-    // Must share at least one variable
-    const sharedVars = Array.from(pattern1.varIds).filter(varId => pattern2.varIds.has(varId));
-    if (sharedVars.length === 0) {
-      return false;
-    }
-
-    // Both patterns should have compatible WHERE constraints
-    // (For now, we'll be conservative and only merge if WHERE constraints are identical)
-    const pattern1WhereKeys = Object.keys(pattern1.whereCols).sort();
-    const pattern2WhereKeys = Object.keys(pattern2.whereCols).sort();
-    
-    if (pattern1WhereKeys.length !== pattern2WhereKeys.length) {
-      return false;
-    }
-
-    for (let i = 0; i < pattern1WhereKeys.length; i++) {
-      const key1 = pattern1WhereKeys[i];
-      const key2 = pattern2WhereKeys[i];
-      
-      if (key1 !== key2) {
-        return false;
-      }
-      
-      if (pattern1.whereCols[key1] !== pattern2.whereCols[key2]) {
-        return false;
-      }
-    }
-
-    return true;
-  }
+  
 
   private async processPendingPatterns(): Promise<void> {
     const patterns = Array.from(this.pendingPatterns.values())
@@ -1250,104 +1141,7 @@ export class QueryMerger {
     return varIds;
   }
 
-  /**
-   * Re-evaluate query columns with current substitution to move grounded terms to WHERE clause
-   */
-  private async separateQueryColumnsWithSubstitution(queryObj: Record<string, Term>, s: Subst): Promise<{
-    selectCols: Record<string, Term>;
-    whereCols: Record<string, Term>;
-  }> {
-    const selectCols: Record<string, Term> = {};
-    const whereCols: Record<string, Term> = {};
-
-    for (const [key, value] of Object.entries(queryObj)) {
-      // Walk the term with current substitution to see if it's grounded
-      const walkedValue = await walk(value, s);
-      
-      if (isVar(walkedValue)) {
-        // Still a variable after walking - goes in SELECT
-        selectCols[key] = walkedValue;
-      } else {
-        // Grounded to a concrete value - goes in WHERE
-        whereCols[key] = walkedValue;
-      }
-    }
-
-    return {
-      selectCols,
-      whereCols 
-    };
-  }
   
-  /**
-   * Execute a specific query for a pattern with grounded terms
-   */
-  private async executeSpecificQuery(
-    pattern: QueryPattern, 
-    selectCols: Record<string, Term>,
-    whereCols: Record<string, Term>
-  ): Promise<any[]> {
-    const { table } = pattern;
-    
-    // Build where clauses from grounded terms
-    const whereClauses = Object.entries(whereCols).map(([column, value]) => ({
-      column,
-      value
-    }));
-    
-    // Build SELECT clause with variable ID aliases
-    // Include both SELECT columns and WHERE columns that are still variables in the original query
-    const selectColumns = [];
-    
-    // Add SELECT columns (variables)
-    for (const [column, term] of Object.entries(selectCols)) {
-      if (isVar(term)) {
-        selectColumns.push(`${column} AS ${term.id}`);
-      }
-    }
-    
-    // Add WHERE columns that correspond to variables in the original query
-    // (these are grounded now but we still need them in the result for unification)
-    for (const [column, value] of Object.entries(whereCols)) {
-      // Check if this column had a variable in the original pattern
-      const originalTerm = pattern.queryObj[column];
-      if (isVar(originalTerm)) {
-        // Include the grounded value as a literal in SELECT
-        const literalValue = typeof value === 'string' ? `'${value}'` : value;
-        selectColumns.push(`${literalValue} AS ${originalTerm.id}`);
-      }
-    }
-    
-    // Build SQL manually to include aliases and WHERE conditions
-    let sql = `SELECT ${selectColumns.join(', ')} FROM ${table}`;
-    if (whereClauses.length > 0) {
-      const whereClause = whereClauses.map(({ column, value }) => 
-        `${column} = ${typeof value === 'string' ? `'${value}'` : value}`
-      ).join(' AND ');
-      sql += ` WHERE ${whereClause}`;
-    }
-    
-    this.logger.log("SPECIFIC_QUERY_EXECUTING", `Executing specific query with grounded terms`, {
-      sql 
-    });
-    
-    // Execute the query
-    const rows = await this.db.raw(sql);
-    const results = rows;
-    
-    // Add to query tracking arrays
-    this.queries.push(sql);
-    
-    this.logger.log("DB_QUERY_EXECUTED", `Specific query executed for goal ${pattern.goalId}`, {
-      goalId: pattern.goalId,
-      table,
-      sql,
-      rowCount: results.length,
-      rows: results
-    });
-    
-    return results;
-  }
 
   /**
    * Get processed row indices for a specific goal
@@ -1400,38 +1194,5 @@ export class QueryMerger {
     }
   }
 
-  /**
-   * Convert array rows to objects using column names from SELECT
-   */
-  private convertArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
-    if (rows.length === 0) return [];
-    
-    // Parse column aliases from SELECT clause
-    const columnNames = selectCols.map(col => {
-      const asIndex = col.lastIndexOf(' AS ');
-      return asIndex > -1 ? col.substring(asIndex + 4) : col;
-    });
-    
-    return rows.map(row => {
-      const obj: any = {};
-      for (let i = 0; i < Math.min(row.length, columnNames.length); i++) {
-        obj[columnNames[i]] = row[i];
-      }
-      return obj;
-    });
-  }
-
-  /**
-   * Convert symmetric query array rows to objects
-   */
-  private convertSymmetricArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
-    return this.convertArrayRowsToObjects(rows, selectCols);
-  }
-
-  /**
-   * Convert JOIN query array rows to objects
-   */
-  private convertJoinArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
-    return this.convertArrayRowsToObjects(rows, selectCols);
-  }
+  
 }

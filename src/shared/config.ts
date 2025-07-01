@@ -9,31 +9,14 @@ export class ConfigurationManager {
       logging: {
         enabled: false,
         ignoredIds: new Set([
-          "MULTIPLE_ROWS_SELECTCOLS_UNCHANGED",
-          "PATTERN_ROWS_UPDATED",
-          "MERGING_PATTERNS",
-          "GROUNDING_SELECT_COL",
-          "RUN_START",
-          "PATTERN_CACHE_HIT",
-          "ROW_CACHE_HIT",
-          "QUERY_CACHE_HIT",
-          "DB_QUERY",
-          "ROW_CACHE_SET",
-          "CACHE_HIT",
-          "MATCHED_PATTERNS",
-          "UNMATCHED_QUERYOBJ",
-          "MERGE_PATTERNS_START",
-          "SKIPPED_PATTERN",
-          "MERGE_PATTERNS_END",
-          "RUN_END",
-          "PATTERNS AFTER",
-          "RAN FALSE PATTERNS",
-          "PATTERNS BEFORE",
-          "FINAL PATTERNS",
-          "FINAL PATTERNS SYM",
-          "MEMORY_SCAN",
-          "INDEX_LOOKUP",
-          "FACT_MATCH"
+          // "JOIN_QUERY_EXECUTING",
+
+          // "GOAL_COMPLETE",
+          // "CHECKING_MERGE_CANDIDATES",
+          // "MERGE_CANDIDATE_CHECK",
+          // "MERGE_DETECTION_START",
+          // "RELATION_CREATED",
+
         ]),
         criticalIds: new Set(["SELECTCOLS MISMATCH PATTERNS"])
       }

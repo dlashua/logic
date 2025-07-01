@@ -12,7 +12,10 @@ export class Logger {
     const prefix = this.config.criticalIds.has(id) ? '[CRITICAL]' : '[INFO]';
     
     if (data !== undefined) {
-      console.log(`${timestamp} ${prefix} [${id}] ${message}`, data);
+      console.log(`${timestamp} ${prefix} [${id}] ${message}`);
+      console.dir(data, {
+        depth: null 
+      });
     } else {
       console.log(`${timestamp} ${prefix} [${id}] ${message}`);
     }

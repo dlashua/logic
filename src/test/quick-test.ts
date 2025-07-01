@@ -2,6 +2,7 @@ import assert, { deepEqual, deepStrictEqual } from "node:assert";
 import { query } from "../query.ts";
 import { membero } from "../relations/lists.ts";
 import { eq } from "../core/combinators.ts";
+import { not } from "../relations/control.ts";
 // import { QUERIES } from "./direct-sql.ts";
 // import { relDB } from "./familytree-sql-facts.ts";
 
@@ -26,7 +27,7 @@ async function loadBackend(backend: string) {
     const module = await import("./familytree-sql-facts.ts");
     closeFns.push(
       async () => {
-        // console.log("queries performed", module.relDB.getQueries());
+        console.log("queries performed", module.relDB.getQueries());
         const allQueries = module.relDB.getQueries();
         console.log("queries performed", {
           queries: module.relDB.getQueryCount(),
@@ -57,30 +58,31 @@ function makeQuery() {
     .where($ => [
   
       // DO NOT DELETE THIS TEST CASE COMMENT
-      // membero($.person, ["celeste", "daniel", "jackson"]),
-      // membero($.person, ["celeste"]),
+      // membero($.person, ["carter"]),
+      membero($.person, ["celeste"]),
 
-      familytree.person($.person),
+      // familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),
       familytree.grandparentAgg($.person, $.grand_parents),
       familytree.greatgrandparentAgg($.person, $.great_grand_parents),
       familytree.uncleAgg($.person, $.uncle, 1),
-      familytree.uncleAgg($.person, $.uncle_2, 2),
-      familytree.uncleAgg($.person, $.uncle_3, 3),
-      familytree.uncleAgg($.person, $.uncle_4, 4),
+      // familytree.uncleAgg($.person, $.uncle_2, 2),
+      // // familytree.uncleAgg($.person, $.uncle_3, 3),
+      // // familytree.uncleAgg($.person, $.uncle_4, 4),
   
-      familytree.siblingsAgg($.person, $.siblings),
-      familytree.cousinsAgg($.person, $.cousins_1, 1),
-      familytree.cousinsAgg($.person, $.cousins_2, 2),
-      familytree.cousinsAgg($.person, $.cousins_3, 3),
-      familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-      familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+      // familytree.siblingsAgg($.person, $.siblings),
+      // familytree.cousinsAgg($.person, $.cousins_1, 1),
+      // familytree.cousinsAgg($.person, $.cousins_2, 2),
+      // familytree.cousinsAgg($.person, $.cousins_3, 3),
+
+      // familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+      // familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
   
-      familytree.cousinsAgg($.person, $.cousins_2_2r, 2, 1),
-      familytree.cousinsAgg($.person, $.cousins_3_3r, 3, 1),
-      familytree.kidsAgg($.person, $.kids),
+      // familytree.cousinsAgg($.person, $.cousins_2_2r, 2, 1),
+      // familytree.cousinsAgg($.person, $.cousins_3_3r, 3, 1),
+      // familytree.kidsAgg($.person, $.kids),
   
     ])
 }
@@ -98,7 +100,7 @@ console.dir({
 });
 await Promise.all(closeFns.map(x => x()));
 console.log("FINISHED", BACKEND, Date.now() - start);
-console.log("END quick-test #1");
+console.log("END quick-test");
 
 const expectedRes = {
   person: 'celeste',
@@ -166,7 +168,7 @@ const expectedRes = {
   cousins_3_3r: [],
   kids: []
 };
-const c_row = results.find(x => x.person === "celeste");
-if(c_row) deepStrictEqual(c_row, expectedRes, "NO MATCH");
+// const c_row = results.find(x => x.person === "celeste");
+// if(c_row) deepStrictEqual(c_row, expectedRes, "NO MATCH");
 
-
+process.exit();

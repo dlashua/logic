@@ -8,8 +8,8 @@ import { memoize } from "../shared/memoize.ts";
 // import { getCousinsOf } from "../test/direct-sql.ts";
 
 export class FamilytreeRelations {
-  private parent_kid: (p: Term<string>, k: Term<string>) => Goal;
-  private relationship: (a: Term<string|number>, b: Term<string|number>) => Goal;
+  parent_kid: (p: Term<string>, k: Term<string>) => Goal;
+  relationship: (a: Term<string|number>, b: Term<string|number>) => Goal;
 
   constructor(
     parent_kid: (p: Term<string>, k: Term<string>) => Goal,

@@ -4,6 +4,8 @@ import { FamilytreeRelations } from "../extended/familytree-rel.ts";
 // import { makeRelDB } from "../facts-sql.ts";
 import { Term } from "../core/types.ts";
 import { makeRelDB } from "../facts-sql/facts-sql-refactored.ts";
+// import { makeRelDBWithMerger as makeRelDB } from "../facts-sql/facts-sql-with-merger.ts";
+
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 

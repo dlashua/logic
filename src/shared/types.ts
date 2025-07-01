@@ -24,8 +24,6 @@ export interface QueryResult<T = any> {
 
 export type CacheType = 'pattern' | 'row' | 'query';
 
-export type GoalFunction = (s: Subst) => AsyncGenerator<Subst, void, unknown>;
-
 export interface WhereClause {
   readonly column: string;
   readonly value: Term;

@@ -2,9 +2,9 @@ import type { Knex } from "knex";
 import knex from "knex";
 import { ConfigurationManager } from "../shared/config.ts";
 import { Logger } from "../shared/logger.ts";
-import { QueryBuilder } from "./query-builder.ts";
+import { QueryMerger } from "./query-merger.ts";
 import { RelationFactoryWithMerger } from "./relation-factory-with-merger.ts";
-import { Configuration } from "./types.ts";
+import type { Configuration } from "./types.ts";
 
 export const makeRelDB = async (
   knex_connect_options: Knex.Config,
@@ -20,33 +20,23 @@ export const makeRelDB = async (
   
   // Create core dependencies
   const logger = new Logger(config.logging);
-  const queryBuilder = new QueryBuilder(db);
   
-  // Query logging arrays
-  const queries: string[] = [];
-  const realQueries: string[] = [];
-  
-  // Create relation factory with merger
-  const relationFactory = new RelationFactoryWithMerger({
-    db,
+  // Create the query merger
+  const queryMerger = new QueryMerger(
     logger,
-    queryBuilder,
-    queries,
-    realQueries,
-  }, mergeDelayMs);
+    db,
+    mergeDelayMs
+  );
+
+  // Create relation factory with the merger
+  const mergerRelationFactory = new RelationFactoryWithMerger(logger, queryMerger);
 
   return {
-    rel: relationFactory.createRelation.bind(relationFactory),
-    relSym: relationFactory.createSymmetricRelation.bind(relationFactory),
+    rel: mergerRelationFactory.createRelation.bind(mergerRelationFactory),
+    relSym: mergerRelationFactory.createSymmetricRelation.bind(mergerRelationFactory),
     db,
-    queries,
-    realQueries,
-    // Safe query management methods
-    getQueries: () => [...realQueries], // Return copy to prevent mutation
-    clearQueries: () => {
-      queries.length = 0;
-      realQueries.length = 0;
-    },
-    getQueryCount: () => realQueries.length,
+    getQueries: () => queryMerger.getQueries(),
+    clearQueries: () => queryMerger.clearQueries(),
+    getQueryCount: () => queryMerger.getQueryCount(),
   };
 };

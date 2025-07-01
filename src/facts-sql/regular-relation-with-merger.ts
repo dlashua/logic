@@ -1,9 +1,9 @@
-import { Term, Subst } from "../core/types.ts";
+import type { Term, Subst, Goal } from "../core/types.ts";
 import { unify, isVar, walk } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
-import { QueryMerger } from "./query-merger.ts";
+import type { QueryMerger } from "./query-merger.ts";
 import { patternUtils } from "./utils.ts";
-import { GoalFunction, RelationOptions } from "./types.ts";
+import { RelationOptions } from "./types.ts";
 
 export class RegularRelationWithMerger {
   
@@ -11,14 +11,13 @@ export class RegularRelationWithMerger {
     private table: string,
     private logger: Logger,
     private queryMerger: QueryMerger,
-    private getNextGoalId: () => number,
     options?: RelationOptions,
   ) {
     this.logger.log("RELATION_CREATED", `Created RegularRelationWithMerger for table: ${table}`);
   }
 
-  createGoal(queryObj: Record<string, Term>): GoalFunction {
-    const baseGoalId = this.getNextGoalId();
+  createGoal(queryObj: Record<string, Term>): Goal {
+    const baseGoalId = this.queryMerger.getNextGoalId();
     
     this.logger.log("GOAL_CREATED", `[Goal ${baseGoalId}] Logic query created for table ${this.table}`, {
       goalId: baseGoalId,
@@ -35,7 +34,7 @@ export class RegularRelationWithMerger {
 
     return async function* factsSql(this: RegularRelationWithMerger, s: Subst) {
       // Generate unique execution ID for this specific execution
-      const executionId = this.getNextGoalId();
+      const executionId = this.queryMerger.getNextGoalId();
       
       // STEP 1: Walk all variables in queryObj to see what's actually grounded
       const walkedQuery: Record<string, Term> = {};

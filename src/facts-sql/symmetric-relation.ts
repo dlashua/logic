@@ -1,16 +1,10 @@
-import { Term, Subst } from "../core/types.ts"
+import type { Goal, Term, Subst } from "../core/types.ts"
 import { walk, unify , isVar } from "../core/kernel.ts"
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { patternUtils } from "./utils.ts";
-import { 
-  SymmetricPattern, 
-  GoalFunction, 
-  RelationOptions, 
-  FullScanCache, 
-  CacheEntry 
-} from "./types.ts";
+import { SymmetricPattern, RelationOptions, FullScanCache, CacheEntry } from "./types.ts"
 
 export class SymmetricRelation {
   private fullScanCache: FullScanCache = {};
@@ -38,7 +32,7 @@ export class SymmetricRelation {
     this.cacheTTL = options?.cacheTTL ?? 1000; // Default 3 seconds
   }
 
-  createGoal(queryObj: Record<string, Term<string | number>>): GoalFunction {
+  createGoal(queryObj: Record<string, Term<string | number>>): Goal {
     const goalId = this.generateGoalId();
     
     // Create and add pattern

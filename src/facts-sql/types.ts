@@ -9,7 +9,6 @@ export type {
   LogConfig, 
   QueryResult, 
   CacheType, 
-  GoalFunction,
   QueryParts,
   WhereClause 
 } from "../shared/types.ts";

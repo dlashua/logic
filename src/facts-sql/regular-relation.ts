@@ -1,16 +1,10 @@
-import { Term, Subst } from "../core/types.ts";
+import type { Term, Subst, Goal } from "../core/types.ts";
 import { walk, isVar } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { queryUtils, unificationUtils, patternUtils } from "./utils.ts";
-import { 
-  Pattern, 
-  GoalFunction, 
-  RelationOptions, 
-  FullScanCache, 
-  CacheEntry 
-} from "./types.ts";
+import { Pattern, RelationOptions, FullScanCache, CacheEntry } from "./types.ts"
 
 export class RegularRelation {
   private fullScanCache: FullScanCache = {};
@@ -37,7 +31,7 @@ export class RegularRelation {
     this.cacheTTL = options?.cacheTTL ?? 1000; // Default 3 seconds
   }
 
-  createGoal(queryObj: Record<string, Term>): GoalFunction {
+  createGoal(queryObj: Record<string, Term>): Goal {
     const goalId = this.generateGoalId();
     
     // Create and add pattern

@@ -1,8 +1,8 @@
-import { Term, Subst } from "../core/types.ts";
+import type { Goal, Term, Subst } from "../core/types.ts";
 import { unify, isVar, walk } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryMerger } from "./query-merger.ts";
-import { GoalFunction, RelationOptions } from "./types.ts";
+import { RelationOptions } from "./types.ts";
 
 export class SymmetricRelationWithMerger {
   
@@ -11,14 +11,13 @@ export class SymmetricRelationWithMerger {
     private keys: [string, string],
     private logger: Logger,
     private queryMerger: QueryMerger,
-    private getNextGoalId: () => number,
     private options?: RelationOptions,
   ) {
     this.logger.log("SYMMETRIC_RELATION_CREATED", `Created SymmetricRelationWithMerger for table: ${table} with keys: ${keys.join(', ')}`);
   }
 
-  createGoal(queryObj: Record<string, Term>): GoalFunction {
-    const baseGoalId = this.getNextGoalId();
+  createGoal(queryObj: Record<string, Term>): Goal {
+    const baseGoalId = this.queryMerger.getNextGoalId();
     
     // Validate that we only have the two symmetric keys
     const queryKeys = Object.keys(queryObj);
@@ -40,7 +39,7 @@ export class SymmetricRelationWithMerger {
 
     return async function* symmetricFactsSql(this: SymmetricRelationWithMerger, s: Subst) {
       // Generate unique execution ID for this specific execution
-      const executionId = this.getNextGoalId();
+      const executionId = this.queryMerger.getNextGoalId();
       
       // STEP 1: Walk all variables in queryObj to see what's actually grounded
       const walkedQuery: Record<string, Term> = {};

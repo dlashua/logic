@@ -2,7 +2,6 @@ import type { Knex } from "knex";
 import { Term, Subst, Var } from "../core/types.ts";
 import { isVar, walk } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
-import { QueryBuilder } from "./query-builder.ts";
 
 export interface QueryPattern {
   goalId: number;
@@ -35,16 +34,32 @@ export class QueryMerger {
   private readonly mergeDelayMs: number;
   private mergeTimer: NodeJS.Timeout | null = null;
   private processedRows = new Map<number, Set<number>>(); // goalId -> Set of processed row indices
+  private static globalGoalId = 1; // Global goal ID counter across all relations
   
+  private queries: string[] = [];
+
   constructor(
     private logger: Logger,
-    private queryBuilder: QueryBuilder,
     private db: Knex,
-    private queries: string[],
-    private realQueries: string[],
     mergeDelayMs = 100
   ) {
     this.mergeDelayMs = mergeDelayMs;
+  }
+
+  public getQueries(): string[] {
+    return [...this.queries];
+  }
+
+  public clearQueries(): void {
+    this.queries.length = 0;
+  }
+
+  public getQueryCount(): number {
+    return this.queries.length;
+  }
+
+  public getNextGoalId(): number {
+    return QueryMerger.globalGoalId++;
   }
 
   /**
@@ -732,7 +747,6 @@ export class QueryMerger {
     
     // Add to query tracking arrays
     this.queries.push(sql);
-    this.realQueries.push(sql);
     
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Database query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),
@@ -802,7 +816,6 @@ export class QueryMerger {
     
     // Add to query tracking arrays
     this.queries.push(sql);
-    this.realQueries.push(sql);
     
     this.logger.log("DB_SYMMETRIC_QUERY_EXECUTED", `Symmetric query executed`, {
       goalId: symmetricPattern.goalId,
@@ -813,12 +826,6 @@ export class QueryMerger {
       rows: results
     });
     
-    return results;
-  }
-
-  private filterResultsForPattern(results: any[], pattern: QueryPattern, s: Subst): any[] {
-    // For now, return all results - individual pattern filtering will be done
-    // by the calling relation when it processes the results
     return results;
   }
 
@@ -925,7 +932,7 @@ export class QueryMerger {
 
   private async executeJoinQuery(
     mergedQuery: MergedQuery, 
-    joinVars: { varId: string; columns: { table: string; column: string }[] }[]
+    joinVars: { varId: string; columns: { table: string; column: string; goalId: number; type: 'select' | 'where' }[] }[]
   ): Promise<any[]> {
     // Handle self-joins by creating table aliases
     const tableAliases = this.createTableAliases(mergedQuery.patterns);
@@ -967,7 +974,6 @@ export class QueryMerger {
     
     // Add to query tracking arrays
     this.queries.push(sql);
-    this.realQueries.push(sql);
     
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] JOIN query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),
@@ -1227,7 +1233,6 @@ export class QueryMerger {
     
     // Add to query tracking arrays
     this.queries.push(sql);
-    this.realQueries.push(sql);
     
     this.logger.log("DB_QUERY_EXECUTED", `Specific query executed for goal ${pattern.goalId}`, {
       goalId: pattern.goalId,

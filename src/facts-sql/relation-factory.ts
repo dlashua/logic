@@ -1,11 +1,11 @@
 import type { Knex } from "knex";
-import { Term, Subst } from "../core/types.ts";
+import type { Goal, Term } from "../core/types.ts";
 import { Logger } from "../shared/logger.ts";
 import { QueryCache } from "./cache.ts";
 import { QueryBuilder } from "./query-builder.ts";
 import { RegularRelation } from "./regular-relation.ts";
 import { SymmetricRelation } from "./symmetric-relation.ts";
-import { GoalFunction, RelationOptions } from "./types.ts";
+import { RelationOptions } from "./types.ts";
 
 export interface RelationFactoryDependencies {
   db: Knex;
@@ -30,7 +30,7 @@ export class RelationFactory {
       options,
     );
 
-    return (queryObj: Record<string, Term>): GoalFunction => {
+    return (queryObj: Record<string, Term>): Goal => {
       return relation.createGoal(queryObj);
     };
   }
@@ -47,7 +47,7 @@ export class RelationFactory {
       options,
     );
 
-    return (queryObj: Record<string, Term<string | number>>): GoalFunction => {
+    return (queryObj: Record<string, Term<string | number>>): Goal => {
       return relation.createGoal(queryObj);
     };
   }

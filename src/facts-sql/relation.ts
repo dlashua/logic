@@ -33,7 +33,7 @@ export class RegularRelationWithMerger {
     // DON'T add pattern to merger yet - wait until execution time to check grounding
 
     return async function* factsSql(this: RegularRelationWithMerger, s: Subst) {
-      // Generate unique execution ID for this specific execution
+      // Generate unique execution ID for this specific execution of the goal
       const executionId = this.queryMerger.getNextGoalId();
       
       // STEP 1: Walk all variables in queryObj to see what's actually grounded
@@ -96,21 +96,9 @@ export class RegularRelationWithMerger {
       
       // STEP 3: Execute new query with current grounding information
       // Add pattern to merger with original query structure but current grounding info
-      this.queryMerger.addPatternWithGrounding(executionId, this.table, queryObj, selectCols, whereCols);
+      await this.queryMerger.addPatternWithGrounding(executionId, this.table, queryObj, selectCols, whereCols);
       
-      // Wait for pattern to be processed
-      let attempts = 0;
-      const maxAttempts = 50;
-      
-      while (!this.queryMerger.isPatternReady(executionId) && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      if (!this.queryMerger.isPatternReady(executionId)) {
-        this.logger.log("GOAL_TIMEOUT", `[Goal ${baseGoalId}] Execution ${executionId} timed out waiting for pattern processing`);
-        return;
-      }
+      // Pattern processing is now synchronous - no need to wait
 
       // Get results from query merger
       const mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);
@@ -122,6 +110,14 @@ export class RegularRelationWithMerger {
 
       // Process results and yield matching substitutions
       const processedRows = await this.queryMerger.getProcessedRowsForGoal(executionId);
+      
+      this.logger.log("PROCESSING_RESULTS", `[Goal ${baseGoalId}] Execution ${executionId} processing ${mergedResults.length} rows`, {
+        goalId: baseGoalId,
+        executionId,
+        totalRows: mergedResults.length,
+        sampleRow: mergedResults[0],
+        queryObj
+      });
       
       let yielded = 0;
       for (let i = 0; i < mergedResults.length; i++) {
@@ -144,6 +140,13 @@ export class RegularRelationWithMerger {
             substitution: Object.fromEntries(unifiedSubst.entries())
           });
           yield unifiedSubst;
+        } else {
+          this.logger.log("UNIFICATION_FAILED", `[Goal ${baseGoalId}] Execution ${executionId} unification failed`, {
+            goalId: baseGoalId,
+            executionId,
+            row,
+            queryObj
+          });
         }
       }
       
@@ -160,25 +163,15 @@ export class RegularRelationWithMerger {
     queryObj: Record<string, Term>,
     s: Subst
   ): Promise<Subst | null> {
-    // Separate select and where columns
-    const { selectCols } = patternUtils.separateQueryColumns(queryObj);
-    
-    // Skip where column verification - the SQL query already filtered by these constraints
-    // and the result set may not include these columns in the SELECT
-    
-    // For select columns, unify with the row values
+    // Optimized unification - directly match variable IDs with row values
     let resultSubst = s;
-    for (const [col, term] of Object.entries(selectCols)) {
+    
+    for (const [col, term] of Object.entries(queryObj)) {
       if (isVar(term)) {
-        // For JOIN results, columns are aliased to the variable ID for precise mapping
+        // Direct lookup using variable ID (columns are aliased to variable IDs in SQL)
         const rowValue = row[term.id];
         
         if (rowValue === undefined) {
-          this.logger.log("UNIFY_WARNING", `Variable ${term.id} not found in result row`, {
-            variable: term.id,
-            column: col,
-            availableColumns: Object.keys(row)
-          });
           return null; // Variable not found in result set
         }
         

@@ -38,7 +38,7 @@ export class SymmetricRelationWithMerger {
     });
 
     return async function* symmetricFactsSql(this: SymmetricRelationWithMerger, s: Subst) {
-      // Generate unique execution ID for this specific execution
+      // Generate unique execution ID for this specific execution of the goal  
       const executionId = this.queryMerger.getNextGoalId();
       
       // STEP 1: Walk all variables in queryObj to see what's actually grounded
@@ -114,21 +114,9 @@ export class SymmetricRelationWithMerger {
       // STEP 4: Execute new symmetric query with current grounding information
       // Convert symmetric query to a regular relation pattern for the query merger
       // But mark it as symmetric so the query builder knows to use OR logic
-      this.queryMerger.addSymmetricPatternWithGrounding(executionId, this.table, this.keys, queryObj, selectCols, whereCols);
+      await this.queryMerger.addSymmetricPatternWithGrounding(executionId, this.table, this.keys, queryObj, selectCols, whereCols);
       
-      // Wait for pattern to be processed
-      let attempts = 0;
-      const maxAttempts = 50;
-      
-      while (!this.queryMerger.isPatternReady(executionId) && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      if (!this.queryMerger.isPatternReady(executionId)) {
-        this.logger.log("SYMMETRIC_GOAL_TIMEOUT", `[Goal ${baseGoalId}] Execution ${executionId} timed out waiting for pattern processing`);
-        return;
-      }
+      // Pattern processing is now synchronous - no need to wait
 
       // Get results from query merger
       const mergedResults = await this.queryMerger.getResultsForGoal(executionId, s);

@@ -35,13 +35,14 @@ export class QueryMerger {
   private mergeTimer: NodeJS.Timeout | null = null;
   private processedRows = new Map<number, Set<number>>(); // goalId -> Set of processed row indices
   private static globalGoalId = 1; // Global goal ID counter across all relations
+  private patternReadyCallbacks = new Map<number, () => void>(); // goalId -> callback
   
   private queries: string[] = [];
 
   constructor(
     private logger: Logger,
     private db: Knex,
-    mergeDelayMs = 100
+    mergeDelayMs = 10
   ) {
     this.mergeDelayMs = mergeDelayMs;
   }
@@ -65,11 +66,11 @@ export class QueryMerger {
   /**
    * Add a new query pattern for potential merging
    */
-  addPattern(
+  async addPattern(
     goalId: number,
     table: string,
     queryObj: Record<string, Term>
-  ): void {
+  ): Promise<void> {
     const { selectCols, whereCols } = this.separateQueryColumns(queryObj);
     const varIds = this.extractVarIds(queryObj);
     
@@ -93,20 +94,20 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Schedule merge processing if not already scheduled
-    this.scheduleMergeProcessing();
+    // Force immediate processing for better performance - await to ensure completion
+    await this.forceProcessPendingPatterns();
   }
 
   /**
    * Add a new query pattern with explicit grounding information (for execution-time grounding)
    */
-  addPatternWithGrounding(
+  async addPatternWithGrounding(
     goalId: number,
     table: string,
     originalQueryObj: Record<string, Term>,
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
-  ): void {
+  ): Promise<void> {
     const varIds = this.extractVarIds(originalQueryObj);
     
     const pattern: QueryPattern = {
@@ -130,21 +131,21 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Schedule merge processing if not already scheduled
-    this.scheduleMergeProcessing();
+    // Force immediate processing for better performance - await to ensure completion
+    await this.forceProcessPendingPatterns();
   }
 
   /**
    * Add a symmetric query pattern with explicit grounding information (for execution-time grounding)
    */
-  addSymmetricPatternWithGrounding(
+  async addSymmetricPatternWithGrounding(
     goalId: number,
     table: string,
     keys: [string, string],
     originalQueryObj: Record<string, Term>,
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
-  ): void {
+  ): Promise<void> {
     const varIds = this.extractVarIds(originalQueryObj);
     
     const pattern: QueryPattern = {
@@ -171,227 +172,32 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Schedule merge processing if not already scheduled
-    this.scheduleMergeProcessing();
+    // Force immediate processing for better performance - await to ensure completion
+    await this.forceProcessPendingPatterns();
   }
 
   /**
    * Check if we already have cached results that can satisfy this query
+   * Simplified for better performance
    */
   async checkForExistingResults(
     table: string, 
     walkedQuery: Record<string, Term>,
     originalQuery: Record<string, Term>
   ): Promise<any[] | null> {
-    const { selectCols, whereCols } = this.separateQueryColumns(walkedQuery);
-    const varIds = this.extractVarIds(originalQuery);
-    
-    this.logger.log("CHECK_EXISTING_RESULTS", `Checking for existing results for table ${table}`, {
-      table,
-      selectCols: Object.keys(selectCols),
-      whereCols: Object.keys(whereCols),
-      varIds: Array.from(varIds),
-      existingQueries: Array.from(this.mergedQueries.keys())
-    });
-    
-    // Look for existing merged queries for this table that contain all the data we need
-    for (const mergedQuery of this.mergedQueries.values()) {
-      if (mergedQuery.table !== table || !mergedQuery.results) {
-        continue;
-      }
-      
-      // Check if this merged query can satisfy our WHERE conditions AND variable context
-      const canSatisfy = this.canQuerySatisfyConditions(mergedQuery, whereCols, varIds);
-      
-      if (canSatisfy) {
-        this.logger.log("FOUND_SATISFYING_CACHE", `Found cached query that can satisfy new query`, {
-          cachedQueryId: mergedQuery.id,
-          cachedWhereCols: Object.keys(mergedQuery.combinedWhereCols),
-          newWhereCols: Object.keys(whereCols),
-          cachedRowCount: mergedQuery.results.length
-        });
-        
-        // Filter and remap the cached results to match our query structure
-        return this.filterAndRemapCachedResults(mergedQuery.results, whereCols, selectCols, originalQuery);
-      }
-    }
-    
+    // Skip cache lookup for now - the caching logic is complex and may be causing slowdowns
+    // TODO: Implement simpler cache mechanism if needed
     return null;
   }
   
-  /**
-   * Check if a cached query can satisfy the given WHERE conditions and variable context
-   */
-  private canQuerySatisfyConditions(
-    mergedQuery: MergedQuery, 
-    whereCols: Record<string, Term>,
-    varIds?: Set<string>
-  ): boolean {
-    // Case 1: Cached query has no WHERE conditions (full table scan) - can satisfy any query
-    if (Object.keys(mergedQuery.combinedWhereCols).length === 0) {
-      return true;
-    }
-    
-    // Case 2: New query has no WHERE conditions but cached query does - cannot satisfy
-    if (Object.keys(whereCols).length === 0) {
-      return false;
-    }
-    
-    // Case 3: Check if cached query's WHERE conditions are EXACTLY the same as new query
-    // We need to be much more strict here to avoid the aggressive caching bug
-    
-    const cachedWhereKeys = Object.keys(mergedQuery.combinedWhereCols).sort();
-    const newWhereKeys = Object.keys(whereCols).sort();
-    
-    // Both queries must have the exact same WHERE columns
-    if (cachedWhereKeys.length !== newWhereKeys.length) {
-      return false;
-    }
-    
-    // Check that all columns and values match exactly
-    for (let i = 0; i < cachedWhereKeys.length; i++) {
-      const cachedCol = cachedWhereKeys[i];
-      const newCol = newWhereKeys[i];
-      
-      // Different columns - cannot satisfy
-      if (cachedCol !== newCol) {
-        return false;
-      }
-      
-      // Same column but different values - cannot satisfy
-      if (mergedQuery.combinedWhereCols[cachedCol] !== whereCols[newCol]) {
-        return false;
-      }
-    }
-    
-    // Case 4: Check variable context - only reuse cache if variable IDs overlap significantly
-    // This prevents different logical goals from incorrectly sharing cache
-    if (varIds && varIds.size > 0) {
-      const intersection = new Set([...varIds].filter(v => mergedQuery.sharedVarIds.has(v)));
-      const unionSize = varIds.size + mergedQuery.sharedVarIds.size - intersection.size;
-      const similarity = intersection.size / unionSize;
-      
-      // Only reuse cache if there's significant variable overlap (>50%)
-      // This ensures logically related queries can share cache while preventing 
-      // unrelated queries that happen to use same table structure from sharing
-      if (similarity < 0.5) {
-        return false;
-      }
-    }
-    
-    return true;
-  }
+  // Simplified cache condition checking - removed for performance
+  // private canQuerySatisfyConditions() - removed
   
-  /**
-   * Filter and remap cached results to match the new query structure
-   */
-  private filterAndRemapCachedResults(
-    cachedResults: any[], 
-    whereCols: Record<string, Term>,
-    selectCols: Record<string, Term>,
-    originalQuery: Record<string, Term>
-  ): any[] {
-    this.logger.log("FILTER_AND_REMAP_CACHED_RESULTS", `Filtering and remapping cached results`, {
-      cachedRowCount: cachedResults.length,
-      whereCols: Object.keys(whereCols),
-      selectCols: Object.keys(selectCols),
-      originalQuery: Object.keys(originalQuery),
-      sampleCachedRow: cachedResults[0]
-    });
-    
-    // Filter results based on WHERE conditions
-    let filteredResults = cachedResults;
-    
-    if (Object.keys(whereCols).length > 0) {
-      filteredResults = cachedResults.filter(row => {
-        for (const [column, expectedValue] of Object.entries(whereCols)) {
-          // The cached row might have this column under a different alias
-          const actualValue = this.findColumnValueInRow(row, column);
-          
-          if (actualValue !== expectedValue) {
-            return false;
-          }
-        }
-        return true;
-      });
-    }
-    
-    this.logger.log("FILTER_RESULTS", `Filtered ${cachedResults.length} -> ${filteredResults.length} rows`);
-    
-    // Remap results to match the new query's variable structure
-    const remappedResults = filteredResults.map(row => {
-      const newRow: any = {};
-      
-      // Map each column in the original query to the appropriate value
-      for (const [column, originalTerm] of Object.entries(originalQuery)) {
-        if (isVar(originalTerm)) {
-          // This column should get its value from the cached row
-          if (whereCols[column] !== undefined) {
-            // This column is grounded in the new query - use the grounded value
-            newRow[originalTerm.id] = whereCols[column];
-          } else {
-            // This column is still a variable - get its value from cached row
-            const value = this.findColumnValueInRow(row, column);
-            if (value !== undefined) {
-              newRow[originalTerm.id] = value;
-            }
-          }
-        }
-      }
-      
-      return newRow;
-    });
-    
-    this.logger.log("REMAP_RESULTS", `Remapped results`, {
-      sampleOriginalRow: filteredResults[0],
-      sampleRemappedRow: remappedResults[0]
-    });
-    
-    return remappedResults;
-  }
+  // Simplified result filtering and remapping - removed for performance
+  // private filterAndRemapCachedResults() - removed
   
-  /**
-   * Find a column value in a row, handling different aliasing patterns
-   */
-  private findColumnValueInRow(row: any, column: string): any {
-    // Try direct column name
-    if (row[column] !== undefined) {
-      return row[column];
-    }
-    
-    // The cached row columns are aliased, so we need to find the right alias
-    // Look for any key that seems to correspond to this column
-    for (const [key, value] of Object.entries(row)) {
-      // Check various patterns:
-      // 1. Key contains the column name (e.g., "q_person_0" contains "person")
-      // 2. Column name contains the key (e.g., "parent" contains "p")
-      // 3. Both refer to the same database column (common case: "parent" vs "parent_5")
-      const keyBase = key.split('_')[0]; // Extract base from "q_person_0" -> "q"
-      const columnBase = column.split('_')[0]; // Extract base from "kid" -> "kid"
-      
-      if (key.includes(column) || column.includes(keyBase) || 
-          (column === 'kid' && key.includes('person')) ||
-          (column === 'parent' && (key.includes('parent') || key.includes('in_s'))) ||
-          (column === 'parent' && keyBase === 'in' && key.includes('s'))) {
-        this.logger.log("COLUMN_MATCH_FOUND", `Found column match`, {
-          column,
-          key,
-          value,
-          matchType: key.includes(column) ? 'key_contains_column' : 
-            column.includes(keyBase) ? 'column_contains_key' :
-              'special_mapping'
-        });
-        return value;
-      }
-    }
-    
-    this.logger.log("COLUMN_NOT_FOUND", `Could not find column in row`, {
-      column,
-      availableKeys: Object.keys(row)
-    });
-    
-    return undefined;
-  }
+  // Simplified column value lookup - removed for performance
+  // private findColumnValueInRow() - removed
 
   /**
    * Get merged query results for a specific goal
@@ -434,6 +240,38 @@ export class QueryMerger {
   }
 
   /**
+   * Wait for a pattern to be ready using async event instead of polling
+   */
+  async waitForPatternReady(goalId: number, timeoutMs = 5000): Promise<boolean> {
+    if (this.isPatternReady(goalId)) {
+      return true;
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.patternReadyCallbacks.delete(goalId);
+        resolve(false);
+      }, timeoutMs);
+
+      this.patternReadyCallbacks.set(goalId, () => {
+        clearTimeout(timeout);
+        this.patternReadyCallbacks.delete(goalId);
+        resolve(true);
+      });
+    });
+  }
+
+  /**
+   * Notify that a pattern is ready
+   */
+  private notifyPatternReady(goalId: number): void {
+    const callback = this.patternReadyCallbacks.get(goalId);
+    if (callback) {
+      callback();
+    }
+  }
+
+  /**
    * Get the table alias for a specific goal ID in JOIN queries
    */
   getTableAliasForGoal(goalId: number): string | null {
@@ -465,6 +303,17 @@ export class QueryMerger {
       this.mergeTimer = null;
       this.processPendingPatterns();
     }, this.mergeDelayMs);
+  }
+
+  /**
+   * Force immediate processing of pending patterns without delay
+   */
+  private forceProcessPendingPatterns(): Promise<void> {
+    if (this.mergeTimer) {
+      clearTimeout(this.mergeTimer);
+      this.mergeTimer = null;
+    }
+    return this.processPendingPatterns();
   }
 
   private async processPendingPatterns(): Promise<void> {
@@ -599,6 +448,9 @@ export class QueryMerger {
     
     this.mergedQueries.set(mergedQuery.id, mergedQuery);
     this.pendingPatterns.delete(pattern.goalId);
+    
+    // Notify that the pattern is ready
+    this.notifyPatternReady(pattern.goalId);
   }
 
   private async processSameTableMergedPatterns(table: string, patterns: QueryPattern[]): Promise<void> {
@@ -653,9 +505,10 @@ export class QueryMerger {
     
     this.mergedQueries.set(mergedQuery.id, mergedQuery);
     
-    // Remove patterns from pending
+    // Remove patterns from pending and notify readiness
     for (const pattern of patterns) {
       this.pendingPatterns.delete(pattern.goalId);
+      this.notifyPatternReady(pattern.goalId);
     }
   }
 
@@ -702,9 +555,10 @@ export class QueryMerger {
     
     this.mergedQueries.set(mergedQuery.id, mergedQuery);
     
-    // Remove patterns from pending
+    // Remove patterns from pending and notify readiness
     for (const pattern of patterns) {
       this.pendingPatterns.delete(pattern.goalId);
+      this.notifyPatternReady(pattern.goalId);
     }
   }
 
@@ -1294,5 +1148,40 @@ export class QueryMerger {
         break;
       }
     }
+  }
+
+  /**
+   * Convert array rows to objects using column names from SELECT
+   */
+  private convertArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
+    if (rows.length === 0) return [];
+    
+    // Parse column aliases from SELECT clause
+    const columnNames = selectCols.map(col => {
+      const asIndex = col.lastIndexOf(' AS ');
+      return asIndex > -1 ? col.substring(asIndex + 4) : col;
+    });
+    
+    return rows.map(row => {
+      const obj: any = {};
+      for (let i = 0; i < Math.min(row.length, columnNames.length); i++) {
+        obj[columnNames[i]] = row[i];
+      }
+      return obj;
+    });
+  }
+
+  /**
+   * Convert symmetric query array rows to objects
+   */
+  private convertSymmetricArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
+    return this.convertArrayRowsToObjects(rows, selectCols);
+  }
+
+  /**
+   * Convert JOIN query array rows to objects
+   */
+  private convertJoinArrayRowsToObjects(rows: any[][], selectCols: string[]): any[] {
+    return this.convertArrayRowsToObjects(rows, selectCols);
   }
 }

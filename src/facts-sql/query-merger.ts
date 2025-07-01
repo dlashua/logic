@@ -42,7 +42,7 @@ export class QueryMerger {
   constructor(
     private logger: Logger,
     private db: Knex,
-    mergeDelayMs = 10
+    mergeDelayMs = 50
   ) {
     this.mergeDelayMs = mergeDelayMs;
   }
@@ -94,8 +94,8 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Force immediate processing for better performance - await to ensure completion
-    await this.forceProcessPendingPatterns();
+    // Schedule pattern processing with short delay to allow batching
+    this.scheduleMergeProcessing();
   }
 
   /**
@@ -131,8 +131,8 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Force immediate processing for better performance - await to ensure completion
-    await this.forceProcessPendingPatterns();
+    // Schedule pattern processing with short delay to allow batching
+    this.scheduleMergeProcessing();
   }
 
   /**
@@ -172,8 +172,8 @@ export class QueryMerger {
       whereCols: Object.keys(whereCols)
     });
 
-    // Force immediate processing for better performance - await to ensure completion
-    await this.forceProcessPendingPatterns();
+    // Schedule pattern processing with short delay to allow batching
+    this.scheduleMergeProcessing();
   }
 
   /**
@@ -314,6 +314,96 @@ export class QueryMerger {
       this.mergeTimer = null;
     }
     return this.processPendingPatterns();
+  }
+
+  /**
+   * Check for existing compatible patterns and merge with them, or process individually
+   */
+  private async checkAndMergeWithExisting(goalId: number): Promise<void> {
+    const pattern = this.pendingPatterns.get(goalId);
+    if (!pattern) return;
+
+    // Find other pending patterns that could be merged with this one
+    const compatiblePatterns = [];
+    for (const otherPattern of this.pendingPatterns.values()) {
+      if (otherPattern.goalId === goalId || otherPattern.locked) {
+        continue;
+      }
+      
+      // Check if patterns are compatible for merging
+      if (this.arePatternsMergeable(pattern, otherPattern)) {
+        compatiblePatterns.push(otherPattern);
+      }
+    }
+
+    if (compatiblePatterns.length > 0) {
+      // Found compatible patterns - merge them together
+      const allPatterns = [pattern, ...compatiblePatterns];
+      this.logger.log("SMART_MERGE_FOUND", `Found ${compatiblePatterns.length} compatible patterns for goal ${goalId}`, {
+        mainGoalId: goalId,
+        compatibleGoalIds: compatiblePatterns.map(p => p.goalId),
+        tables: allPatterns.map(p => p.table),
+        varIds: allPatterns.map(p => Array.from(p.varIds))
+      });
+
+      // Process all patterns together
+      const mergeGroups = this.findMergeGroups(allPatterns);
+      for (const group of mergeGroups) {
+        if (group.length === 1) {
+          await this.processSinglePattern(group[0]);
+        } else {
+          const tables = new Set(group.map(p => p.table));
+          if (tables.size === 1) {
+            await this.processSameTableMergedPatterns(Array.from(tables)[0], group);
+          } else {
+            await this.processCrossTableMergedPatterns(group);
+          }
+        }
+      }
+    } else {
+      // No compatible patterns - process individually
+      await this.forceProcessPendingPatterns();
+    }
+  }
+
+  /**
+   * Check if two patterns can be merged (same table, shared variables, compatible structure)
+   */
+  private arePatternsMergeable(pattern1: QueryPattern, pattern2: QueryPattern): boolean {
+    // Must be same table
+    if (pattern1.table !== pattern2.table) {
+      return false;
+    }
+
+    // Must share at least one variable
+    const sharedVars = Array.from(pattern1.varIds).filter(varId => pattern2.varIds.has(varId));
+    if (sharedVars.length === 0) {
+      return false;
+    }
+
+    // Both patterns should have compatible WHERE constraints
+    // (For now, we'll be conservative and only merge if WHERE constraints are identical)
+    const pattern1WhereKeys = Object.keys(pattern1.whereCols).sort();
+    const pattern2WhereKeys = Object.keys(pattern2.whereCols).sort();
+    
+    if (pattern1WhereKeys.length !== pattern2WhereKeys.length) {
+      return false;
+    }
+
+    for (let i = 0; i < pattern1WhereKeys.length; i++) {
+      const key1 = pattern1WhereKeys[i];
+      const key2 = pattern2WhereKeys[i];
+      
+      if (key1 !== key2) {
+        return false;
+      }
+      
+      if (pattern1.whereCols[key1] !== pattern2.whereCols[key2]) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private async processPendingPatterns(): Promise<void> {

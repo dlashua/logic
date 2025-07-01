@@ -23,9 +23,22 @@ export const uniqueo = (t: Term, g: Goal) =>
 export function not(goal: Goal): Goal {
   const g = async function* not(s: Subst) {
     let found = false;
-    for await (const _subst of goal(s)) {
-      found = true;
-      break;
+    for await (const subst of goal(s)) {
+      // Check if this result only added bindings that were already in the original substitution
+      // If it added new variable bindings, we don't consider this a "safe" success
+      let addedNewBindings = false;
+      for (const [key, value] of subst) {
+        if (!s.has(key)) {
+          addedNewBindings = true;
+          break;
+        }
+      }
+      
+      // If the goal succeeded without adding new bindings, it's a genuine success
+      if (!addedNewBindings) {
+        found = true;
+        break;
+      }
     }
     if (!found) yield s;
   };

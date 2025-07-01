@@ -228,16 +228,19 @@ export class QueryMerger {
   }
 
   /**
-   * Add a new query pattern for potential merging
+   * Private helper to create, store, and log a new pattern.
+   * This consolidates the logic from the public `add*` methods.
    */
-  async addPattern(
+  private async createAndAddPattern(
     goalId: number,
     table: string,
-    queryObj: Record<string, Term>
+    queryObj: Record<string, Term>,
+    selectCols: Record<string, Term>,
+    whereCols: Record<string, Term>,
+    options: { isSymmetric?: boolean; symmetricKeys?: [string, string] } = {}
   ): Promise<void> {
-    const { selectCols, whereCols } = this.patternProcessor.separateQueryColumns(queryObj);
     const varIds = this.patternProcessor.extractVarIds(queryObj);
-    
+
     const pattern: QueryPattern = {
       goalId,
       table,
@@ -246,24 +249,42 @@ export class QueryMerger {
       whereCols,
       varIds,
       locked: false,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      ...options,
     };
 
     this.pendingPatterns.set(goalId, pattern);
-    this.logger.log("PATTERN_CREATED", `[Goal ${goalId}] Pattern created for table ${table}`, {
+
+    const logType = options.isSymmetric ? "SYMMETRIC_PATTERN_CREATED" : "PATTERN_CREATED";
+    const logPayload: any = {
       goalId,
       table,
       varIds: Array.from(varIds),
       selectCols: Object.keys(selectCols),
-      whereCols: Object.keys(whereCols)
-    });
+      whereCols: Object.keys(whereCols),
+    };
+    if (options.symmetricKeys) {
+      logPayload.keys = options.symmetricKeys;
+    }
+    this.logger.log(logType, `[Goal ${goalId}] Pattern created for table ${table}`, logPayload);
 
-    // Schedule pattern processing with short delay to allow batching
     this.scheduleMergeProcessing();
   }
 
   /**
-   * Add a new query pattern with explicit grounding information (for execution-time grounding)
+   * Add a new query pattern for potential merging.
+   */
+  async addPattern(
+    goalId: number,
+    table: string,
+    queryObj: Record<string, Term>
+  ): Promise<void> {
+    const { selectCols, whereCols } = this.patternProcessor.separateQueryColumns(queryObj);
+    await this.createAndAddPattern(goalId, table, queryObj, selectCols, whereCols);
+  }
+
+  /**
+   * Add a new query pattern with explicit grounding information.
    */
   async addPatternWithGrounding(
     goalId: number,
@@ -272,35 +293,11 @@ export class QueryMerger {
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
   ): Promise<void> {
-    const varIds = this.patternProcessor.extractVarIds(originalQueryObj);
-    
-    const pattern: QueryPattern = {
-      goalId,
-      table,
-      queryObj: originalQueryObj, // Keep original query with variables
-      selectCols,
-      whereCols,
-      varIds,
-      locked: false,
-      timestamp: Date.now()
-    };
-
-    this.pendingPatterns.set(goalId, pattern);
-    
-    this.logger.log("PATTERN_CREATED", `[Goal ${goalId}] Pattern created for table ${table}`, {
-      goalId,
-      table,
-      varIds: Array.from(varIds),
-      selectCols: Object.keys(selectCols),
-      whereCols: Object.keys(whereCols)
-    });
-
-    // Schedule pattern processing with short delay to allow batching
-    this.scheduleMergeProcessing();
+    await this.createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols);
   }
 
   /**
-   * Add a symmetric query pattern with explicit grounding information (for execution-time grounding)
+   * Add a symmetric query pattern with explicit grounding information.
    */
   async addSymmetricPatternWithGrounding(
     goalId: number,
@@ -310,36 +307,11 @@ export class QueryMerger {
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
   ): Promise<void> {
-    const varIds = this.patternProcessor.extractVarIds(originalQueryObj);
-    
-    const pattern: QueryPattern = {
-      goalId,
-      table,
-      queryObj: originalQueryObj, // Keep original query with variables
-      selectCols,
-      whereCols,
-      varIds,
-      locked: false,
-      timestamp: Date.now(),
+    await this.createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols, {
       isSymmetric: true,
-      symmetricKeys: keys
-    };
-
-    this.pendingPatterns.set(goalId, pattern);
-    
-    this.logger.log("SYMMETRIC_PATTERN_CREATED", `[Goal ${goalId}] Symmetric pattern created for table ${table}`, {
-      goalId,
-      table,
-      keys,
-      varIds: Array.from(varIds),
-      selectCols: Object.keys(selectCols),
-      whereCols: Object.keys(whereCols)
+      symmetricKeys: keys,
     });
-
-    // Schedule pattern processing with short delay to allow batching
-    this.scheduleMergeProcessing();
   }
-
   
 
   /**

@@ -29,6 +29,8 @@ export interface MergedQuery {
   results?: any[];
 }
 
+type JoinVars = { varId: string; columns: { table: string; column: string; goalId: number; type: 'select' | 'where' }[] }[];
+
 export class QueryMerger {
   private pendingPatterns = new Map<number, QueryPattern>();
   private mergedQueries = new Map<string, MergedQuery>();
@@ -231,7 +233,7 @@ export class QueryMerger {
    * Private helper to create, store, and log a new pattern.
    * This consolidates the logic from the public `add*` methods.
    */
-  private async createAndAddPattern(
+  private async _createAndAddPattern(
     goalId: number,
     table: string,
     queryObj: Record<string, Term>,
@@ -280,7 +282,7 @@ export class QueryMerger {
     queryObj: Record<string, Term>
   ): Promise<void> {
     const { selectCols, whereCols } = this.patternProcessor.separateQueryColumns(queryObj);
-    await this.createAndAddPattern(goalId, table, queryObj, selectCols, whereCols);
+    await this._createAndAddPattern(goalId, table, queryObj, selectCols, whereCols);
   }
 
   /**
@@ -293,7 +295,7 @@ export class QueryMerger {
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
   ): Promise<void> {
-    await this.createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols);
+    await this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols);
   }
 
   /**
@@ -307,7 +309,7 @@ export class QueryMerger {
     selectCols: Record<string, Term>,
     whereCols: Record<string, Term>
   ): Promise<void> {
-    await this.createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols, {
+    await this._createAndAddPattern(goalId, table, originalQueryObj, selectCols, whereCols, {
       isSymmetric: true,
       symmetricKeys: keys,
     });
@@ -425,43 +427,36 @@ export class QueryMerger {
     
     // Process each group of patterns
     for (const group of mergeGroups) {
-      await this.processPatternGroup(group);
+      await this._processPatternGroup(group);
     }
   }
 
   /**
    * Processes a group of one or more patterns, handling single, same-table,
-   * and cross-table (JOIN) scenarios. This method consolidates the logic
-   * from the previous processSinglePattern, processSameTableMergedPatterns,
-   * and processCrossTableMergedPatterns methods.
+   * and cross-table (JOIN) scenarios.
    */
-  private async processPatternGroup(patterns: QueryPattern[]): Promise<void> {
-    // 1. Lock all patterns in the group to prevent reprocessing.
+  private async _processPatternGroup(patterns: QueryPattern[]): Promise<void> {
     patterns.forEach(p => p.locked = true);
 
     const goalIds = patterns.map(p => p.goalId);
     const tables = new Set(patterns.map(p => p.table));
-    const isSinglePattern = patterns.length === 1;
     const isJoin = tables.size > 1;
 
     let mergedQuery: MergedQuery;
-    let results: any[];
+    let joinVars: JoinVars | undefined;
 
     if (isJoin) {
-      // --- Logic for Cross-Table JOIN ---
       const tableNames = Array.from(tables);
       this.logger.log("PATTERN_MERGED", `[Goals ${goalIds.join(',')}] Cross-table patterns merged for JOIN`, {
         goalIds,
         tables: tableNames,
-        sharedVarIds: Array.from(new Set(patterns.flatMap(p => Array.from(p.varIds))))
       });
 
-      const joinVars = this.patternProcessor.findJoinVariables(patterns);
+      joinVars = this.patternProcessor.findJoinVariables(patterns);
       if (joinVars.length === 0) {
         this.logger.log("JOIN_NO_SHARED_VARS", `No shared variables for JOIN [Goals ${goalIds.join(',')}], processing individually`);
-        // Fallback: process each pattern in the group individually.
         for (const pattern of patterns) {
-          await this.processPatternGroup([pattern]);
+          await this._processPatternGroup([pattern]);
         }
         return;
       }
@@ -473,103 +468,76 @@ export class QueryMerger {
         combinedSelectCols: this.patternProcessor.buildJoinSelectColumns(patterns),
         combinedWhereCols: this.patternProcessor.buildJoinWhereConditions(patterns),
         sharedVarIds: new Set(patterns.flatMap(p => Array.from(p.varIds))),
-        locked: true
+        locked: true,
       };
-      results = await this.executeJoinQuery(mergedQuery, joinVars);
     } else {
-      // --- Logic for Single Pattern or Same-Table Merge ---
       const table = patterns[0].table;
-      if (!isSinglePattern) {
+      if (patterns.length > 1) {
         this.logger.log("PATTERN_MERGED", `[Goals ${goalIds.join(',')}] Same-table patterns merged for table ${table}`, {
           goalIds,
           table,
-          sharedVarIds: Array.from(new Set(patterns.flatMap(p => Array.from(p.varIds))))
         });
       }
 
       const combinedSelectCols = new Set<string>();
       const combinedWhereCols: Record<string, any> = {};
-      const sharedVarIds = new Set<string>();
-
-      for (const pattern of patterns) {
-        Object.keys(pattern.selectCols).forEach(col => combinedSelectCols.add(col));
-        for (const [col, value] of Object.entries(pattern.whereCols)) {
-          if (!isVar(value)) {
-            combinedWhereCols[col] = value;
-          }
-        }
-        pattern.varIds.forEach(id => sharedVarIds.add(id));
-      }
+      patterns.forEach(p => {
+        Object.keys(p.selectCols).forEach(col => combinedSelectCols.add(col));
+        Object.entries(p.whereCols).forEach(([col, val]) => {
+          if (!isVar(val)) combinedWhereCols[col] = val;
+        });
+      });
 
       mergedQuery = {
-        id: isSinglePattern ? `single_${this.nextMergedQueryId++}` : `merged_${this.nextMergedQueryId++}`,
+        id: patterns.length === 1 ? `single_${this.nextMergedQueryId++}` : `merged_${this.nextMergedQueryId++}`,
         patterns,
         table,
         combinedSelectCols: Array.from(combinedSelectCols),
         combinedWhereCols,
-        sharedVarIds,
-        locked: true
+        sharedVarIds: new Set(patterns.flatMap(p => Array.from(p.varIds))),
+        locked: true,
       };
-      results = await this.executeQuery(mergedQuery);
     }
 
-    // 4. Store results and add to the main merged queries map.
+    const results = await this._executeQuery(mergedQuery, joinVars);
     mergedQuery.results = results;
     this.mergedQueries.set(mergedQuery.id, mergedQuery);
 
-    // 5. Remove processed patterns from pending and notify any listeners.
-    for (const pattern of patterns) {
-      this.pendingPatterns.delete(pattern.goalId);
-      this.notifyPatternReady(pattern.goalId);
-    }
+    patterns.forEach(p => {
+      this.pendingPatterns.delete(p.goalId);
+      this.notifyPatternReady(p.goalId);
+    });
   }
 
-
-  private async executeQuery(mergedQuery: MergedQuery): Promise<any[]> {
-    const queryBuilder = new QueryBuilder(this.db).build(mergedQuery);
-    const sql = queryBuilder.toSQL().toNative();
-    this.logger.log("SAME_TABLE_QUERY_EXECUTING", `Executing same-table query with aliases`, {
-      sql: sql.sql,
-      bindings: sql.bindings
-    });
-    
-    const results = await queryBuilder;
-    this.queries.push(sql.sql);
-    
-    this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Database query executed`, {
-      goalIds: mergedQuery.patterns.map(p => p.goalId),
-      table: mergedQuery.table,
-      sql: sql.sql,
-      rowCount: results.length,
-      rows: results
-    });
-    
-    return results;
-  }
-
-  private async executeJoinQuery(
-    mergedQuery: MergedQuery, 
-    joinVars: { varId: string; columns: { table: string; column: string; goalId: number; type: 'select' | 'where' }[] }[]
-  ): Promise<any[]> {
+  /**
+   * Builds and executes a query (single table, symmetric, or join) and returns the results.
+   * This method consolidates the logic from the previous executeQuery and executeJoinQuery methods.
+   */
+  private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
     const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);
     const sql = queryBuilder.toSQL().toNative();
-    
-    this.logger.log("JOIN_QUERY_EXECUTING", `Executing JOIN query`, {
-      sql: sql.sql,
-      bindings: sql.bindings
-    });
-    
+    const isJoin = !!joinVars;
+
+    this.logger.log(
+      isJoin ? "JOIN_QUERY_EXECUTING" : "SAME_TABLE_QUERY_EXECUTING",
+      `Executing ${isJoin ? 'JOIN' : 'same-table'} query`,
+      {
+        sql: sql.sql,
+        bindings: sql.bindings 
+      }
+    );
+
     const results = await queryBuilder;
     this.queries.push(sql.sql);
-    
-    this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] JOIN query executed`, {
+
+    this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),
       table: mergedQuery.table,
       sql: sql.sql,
       rowCount: results.length,
-      rows: results
+      rows: results,
     });
-    
+
     return results;
   }
 

@@ -541,25 +541,24 @@ export class QueryMerger {
    */
   private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
     const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);
-    const sql = queryBuilder.toSQL().toNative();
+    const sql = queryBuilder.toString()
     const isJoin = !!joinVars;
 
     this.logger.log(
       isJoin ? "JOIN_QUERY_EXECUTING" : "SAME_TABLE_QUERY_EXECUTING",
       `Executing ${isJoin ? 'JOIN' : 'same-table'} query`,
       {
-        sql: sql.sql,
-        bindings: sql.bindings 
+        sql: sql,
       }
     );
 
+    this.queries.push(sql);
     const results = await queryBuilder;
-    this.queries.push(sql.sql);
 
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),
       table: mergedQuery.table,
-      sql: sql.sql,
+      sql: sql,
       rowCount: results.length,
       rows: results,
     });

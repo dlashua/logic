@@ -48,7 +48,9 @@ export class QueryMerger {
   private queries: string[] = [];
   
   // Semantic result cache for identical queries based on query structure
-  private queryResultCache = new Map<string, any[]>();
+  private queryResultCache = new Map<string, { data: any[]; timestamp: number }>();
+  private readonly queryCacheTTL = 5 * 60 * 1000; // 5 minutes TTL for query cache
+  private queryCacheCleanupTimer: NodeJS.Timeout | null = null;
   
   // Memory management settings
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -99,6 +101,7 @@ export class QueryMerger {
     
     this.cleanupTimer = setInterval(() => {
       this.cleanupOldGoals();
+      this.cleanupExpiredQueryCache();
     }, this.cleanupIntervalMs);
   }
 
@@ -158,6 +161,22 @@ export class QueryMerger {
     }
   }
 
+  private cleanupExpiredQueryCache(): void {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    for (const [cacheKey, entry] of this.queryResultCache.entries()) {
+      if (now - entry.timestamp > this.queryCacheTTL) {
+        this.queryResultCache.delete(cacheKey);
+        cleaned++;
+      }
+    }
+    
+    if (cleaned > 0) {
+      this.logger.log('QUERY_CACHE_CLEANUP', `Cleaned ${cleaned} expired query cache entries`);
+    }
+  }
+
   private logMemoryStats(): void {
     const memUsage = process.memoryUsage();
     const stats = {
@@ -167,6 +186,7 @@ export class QueryMerger {
       mergedQueries: this.mergedQueries.size,
       processedRows: this.processedRows.size,
       patternCallbacks: this.patternReadyCallbacks.size,
+      queryCache: this.queryResultCache.size,
       currentGoalId: QueryMerger.globalGoalId
     };
     
@@ -197,6 +217,7 @@ export class QueryMerger {
     mergedQueries: number;
     processedRows: number;
     patternCallbacks: number;
+    queryCache: number;
     currentGoalId: number;
     } {
     return {
@@ -204,6 +225,7 @@ export class QueryMerger {
       mergedQueries: this.mergedQueries.size,
       processedRows: this.processedRows.size,
       patternCallbacks: this.patternReadyCallbacks.size,
+      queryCache: this.queryResultCache.size,
       currentGoalId: QueryMerger.globalGoalId
     };
   }
@@ -577,13 +599,13 @@ export class QueryMerger {
     // Create semantic cache key based on query structure
     const cacheKey = queryBuilderInstance.createCacheKey(mergedQuery, joinVars);
     if (this.queryResultCache.has(cacheKey)) {
-      const cachedResults = this.queryResultCache.get(cacheKey)!;
+      const cachedEntry = this.queryResultCache.get(cacheKey)!;
       this.logger.log("QUERY_CACHE_HIT", `Cache hit for structured query`, {
         cacheKey,
         goalIds: mergedQuery.patterns.map(p => p.goalId),
-        rowCount: cachedResults.length
+        rowCount: cachedEntry.data.length
       });
-      return cachedResults;
+      return cachedEntry.data;
     }
 
     const queryBuilder = queryBuilderInstance.build(mergedQuery, joinVars);
@@ -601,8 +623,11 @@ export class QueryMerger {
     const results = await queryBuilder;
     this.queries.push(sql);
 
-    // Cache the results using semantic cache key
-    this.queryResultCache.set(cacheKey, results);
+    // Cache the results using semantic cache key with TTL
+    this.queryResultCache.set(cacheKey, {
+      data: results,
+      timestamp: Date.now()
+    });
 
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),

@@ -47,28 +47,8 @@ export class QueryMerger {
 
   private queries: string[] = [];
   
-  // SQL-based result cache for identical queries
-  private sqlResultCache = new Map<string, any[]>();
-  
-  /**
-   * Creates a normalized version of SQL for caching purposes.
-   * This normalizes all column aliases while preserving query structure.
-   */
-  private normalizeSqlForCache(sql: string): string {
-    let aliasCounter = 0;
-    const aliasMap = new Map<string, string>();
-    
-    return sql.replace(/\bAS\s+(`?[^,\s`]+`?)/gi, (_, alias) => {
-      // Remove backticks for comparison
-      const cleanAlias = alias.replace(/`/g, '');
-      
-      if (!aliasMap.has(cleanAlias)) {
-        aliasMap.set(cleanAlias, `alias_${aliasCounter++}`);
-      }
-      
-      return `AS ${aliasMap.get(cleanAlias)}`;
-    });
-  }
+  // Semantic result cache for identical queries based on query structure
+  private queryResultCache = new Map<string, any[]>();
   
   // Memory management settings
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -251,7 +231,7 @@ export class QueryMerger {
     this.processedRows.clear();
     this.patternReadyCallbacks.clear();
     this.queries.length = 0;
-    this.sqlResultCache.clear();
+    this.queryResultCache.clear();
     
     this.logger.log('QUERY_MERGER_DESTROYED', 'QueryMerger destroyed and cleaned up');
   }
@@ -592,23 +572,23 @@ export class QueryMerger {
    * Builds and executes a query.
    */
   private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
-    const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);
-    console.log(queryBuilder.toSQL());
-    const sql = queryBuilder.toString();
-    const isJoin = !!joinVars;
-
-    // Check SQL cache first using normalized SQL
-    const normalizedSql = this.normalizeSqlForCache(sql);
-    if (this.sqlResultCache.has(normalizedSql)) {
-      const cachedResults = this.sqlResultCache.get(normalizedSql)!;
-      this.logger.log("SQL_CACHE_HIT", `Cache hit for SQL query`, {
-        originalSql: sql,
-        normalizedSql,
+    const queryBuilderInstance = new QueryBuilder(this.db);
+    
+    // Create semantic cache key based on query structure
+    const cacheKey = queryBuilderInstance.createCacheKey(mergedQuery, joinVars);
+    if (this.queryResultCache.has(cacheKey)) {
+      const cachedResults = this.queryResultCache.get(cacheKey)!;
+      this.logger.log("QUERY_CACHE_HIT", `Cache hit for structured query`, {
+        cacheKey,
         goalIds: mergedQuery.patterns.map(p => p.goalId),
         rowCount: cachedResults.length
       });
       return cachedResults;
     }
+
+    const queryBuilder = queryBuilderInstance.build(mergedQuery, joinVars);
+    const sql = queryBuilder.toString();
+    const isJoin = !!joinVars;
 
     this.logger.log(
       isJoin ? "JOIN_QUERY_EXECUTING" : "SAME_TABLE_QUERY_EXECUTING",
@@ -621,8 +601,8 @@ export class QueryMerger {
     const results = await queryBuilder;
     this.queries.push(sql);
 
-    // Cache the results using normalized SQL
-    this.sqlResultCache.set(normalizedSql, results);
+    // Cache the results using semantic cache key
+    this.queryResultCache.set(cacheKey, results);
 
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),

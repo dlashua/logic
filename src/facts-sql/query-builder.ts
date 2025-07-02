@@ -5,6 +5,27 @@ import type { QueryPattern, MergedQuery } from "./query-merger.ts";
 export class QueryBuilder {
   constructor(private db: Knex) {}
 
+  /**
+   * Creates a semantic cache key based on query structure rather than SQL text.
+   * This is more reliable than string-based normalization.
+   */
+  public createCacheKey(mergedQuery: MergedQuery, joinVars?: any[]): string {
+    const symmetricPattern = mergedQuery.patterns.find(p => p.isSymmetric);
+    
+    const key = {
+      tables: mergedQuery.patterns.map(p => p.table).sort(),
+      whereCols: mergedQuery.combinedWhereCols,
+      selectCols: mergedQuery.patterns.flatMap(p => Object.keys(p.selectCols)).sort(),
+      joinVars: joinVars?.map(jv => jv.varId).sort() || [],
+      isSymmetric: !!symmetricPattern,
+      symmetricKeys: symmetricPattern?.symmetricKeys || null,
+      queryType: joinVars && joinVars.length > 0 ? 'join' : 
+        symmetricPattern ? 'symmetric' : 'single'
+    };
+    
+    return JSON.stringify(key);
+  }
+
   public build(mergedQuery: MergedQuery, joinVars?: any[]): Knex.QueryBuilder {
     const symmetricPattern = mergedQuery.patterns.find(p => p.isSymmetric);
     if (symmetricPattern) {

@@ -58,7 +58,7 @@ export class QueryMerger {
     // For now, create a simple normalization:
     // Replace all AS aliases with a generic pattern
     return sql.replace(/AS `[^`]+`/g, 'AS alias')
-              .replace(/AS [^\s,]+/g, 'AS alias');
+      .replace(/AS [^\s,]+/g, 'AS alias');
   }
   
   // Memory management settings

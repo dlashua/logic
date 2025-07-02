@@ -1,5 +1,11 @@
 import { Goal, Term, Subst } from "../core/types.ts";
-import { isVar, walk, isCons, isNil, isLogicList } from "../core/kernel.ts";
+import {
+  isVar,
+  walk,
+  isCons,
+  isNil,
+  isLogicList
+} from "../core/kernel.ts"
 
 type GoalFunction = (...args: any[]) => Goal;
 
@@ -52,7 +58,10 @@ export function memoize<T extends GoalFunction>(
         yield subst;
       }
       // Store new results with expiry
-      cache.set(key, { value: results, expiry: Date.now() + ttl });
+      cache.set(key, {
+        value: results,
+        expiry: Date.now() + ttl 
+      });
     };
   }) as T;
 

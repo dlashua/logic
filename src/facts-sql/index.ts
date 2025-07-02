@@ -1,7 +1,7 @@
 import knex from "knex";
 import type { Knex } from "knex";
 import { ConfigurationManager } from "../shared/config.ts";
-import { Logger } from "../shared/logger.ts";
+import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
 import type { BaseConfig as Configuration } from "../shared/types.ts";
 import type { Term, Goal } from "../core/types.ts";
 import { or } from "../core/combinators.ts";
@@ -11,11 +11,13 @@ import type { RelationOptions } from "./types.ts";
 export type DBManager = Awaited<ReturnType<typeof createDBManager>>;
 export async function createDBManager (
   knex_connect_options: Knex.Config,
-  logger: Logger,
+  logger: SimpleLogger,
   options?: RelationOptions,
 ) {
   const db = knex(knex_connect_options);
   const queries: string[] = [];
+  const goals: { goalId: number; table: string; queryObj: Record<string, Term> }[] = [];
+  const storedQueries: Map<string, { goalIds: number[]; rows: any[] }> = new Map();
   let nextGoalId = 0;
     
   return {
@@ -25,6 +27,41 @@ export async function createDBManager (
     clearQueries: () => queries.splice(0, queries.length),
     getQueryCount: () => queries.length,
     getNextGoalId: () => ++nextGoalId,
+    addGoal: (goalId: number, table: string, queryObj: Record<string, Term>) => goals.push({
+      goalId,
+      table,
+      queryObj 
+    }),
+    getGoals: () => goals,
+    clearGoals: () => goals.splice(0, goals.length),
+    findGoalsWithSharedKeys: (goalId: number) => {
+      const targetGoal = goals.find(goal => goal.goalId === goalId);
+      if (!targetGoal) return [];
+      
+      return goals.filter(goal => {
+        if (goal.goalId === goalId) return false; // exclude itself
+        
+        for (const [key, term] of Object.entries(targetGoal.queryObj)) {
+          if (key in goal.queryObj && goal.queryObj[key] === term) {
+            return true;
+          }
+        }
+        return false;
+      });
+    },
+    storeQuery: (queryString: string, goalIds: number[], rows: any[]) => {
+      storedQueries.set(queryString, { goalIds, rows });
+    },
+    findStoredQuery: (goalId: number) => {
+      for (const [queryString, data] of storedQueries.entries()) {
+        if (data.goalIds.includes(goalId)) {
+          return { queryString, rows: data.rows };
+        }
+      }
+      return null;
+    },
+    getStoredQueries: () => storedQueries,
+    clearStoredQueries: () => storedQueries.clear(),
 
   }
 }
@@ -40,7 +77,7 @@ export const makeRelDB = async (
   const config = ConfigurationManager.create(configOverrides);
   
   // Create core dependencies
-  const logger = new Logger(config.logging);
+  const logger = getDefaultLogger();
   
   const dbManager = await createDBManager(knex_connect_options, logger, options)
 

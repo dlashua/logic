@@ -12,16 +12,22 @@ export class ConfigurationManager {
       logging: {
         enabled: false,
         ignoredIds: new Set([
-          // "JOIN_QUERY_EXECUTING",
-
-          // "GOAL_COMPLETE",
-          // "CHECKING_MERGE_CANDIDATES",
-          // "MERGE_CANDIDATE_CHECK",
-          // "MERGE_DETECTION_START",
-          // "RELATION_CREATED",
-
+          "JOIN_QUERY_EXECUTING",
+          "SAME_TABLE_QUERY_EXECUTING",
+          "GOAL_COMPLETE",
+          "CHECKING_MERGE_CANDIDATES",
+          "MERGE_CANDIDATE_CHECK",
+          "MERGE_DETECTION_START",
+          "RELATION_CREATED", 
+          "DB_QUERY_EXECUTED",
+          "FACT_ADDED",
+          "PATTERN_CREATED",
+          "SYMMETRIC_PATTERN_CREATED",
+          "PROCESSING_LOOP_START",
+          "PROCESSING_LOOP_END",
+          "MEMORY_STATS",
         ]),
-        criticalIds: new Set(["SELECTCOLS MISMATCH PATTERNS"])
+        criticalIds: new Set([])
       }
     };
   }

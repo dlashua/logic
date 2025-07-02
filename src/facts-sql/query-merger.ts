@@ -47,6 +47,20 @@ export class QueryMerger {
 
   private queries: string[] = [];
   
+  // SQL-based result cache for identical queries
+  private sqlResultCache = new Map<string, any[]>();
+  
+  /**
+   * Creates a normalized version of SQL for caching purposes.
+   * This removes alias differences while preserving the essential query structure.
+   */
+  private normalizeSqlForCache(sql: string): string {
+    // For now, create a simple normalization:
+    // Replace all AS aliases with a generic pattern
+    return sql.replace(/AS `[^`]+`/g, 'AS alias')
+              .replace(/AS [^\s,]+/g, 'AS alias');
+  }
+  
   // Memory management settings
   private cleanupTimer: NodeJS.Timeout | null = null;
   private readonly maxGoalAge = 5 * 60 * 1000; // 5 minutes (goals can be reused but will restart)
@@ -228,6 +242,7 @@ export class QueryMerger {
     this.processedRows.clear();
     this.patternReadyCallbacks.clear();
     this.queries.length = 0;
+    this.sqlResultCache.clear();
     
     this.logger.log('QUERY_MERGER_DESTROYED', 'QueryMerger destroyed and cleaned up');
   }
@@ -367,9 +382,8 @@ export class QueryMerger {
       }
     }
     
-    // Check if it's locked (being processed)
-    const pattern = this.pendingPatterns.get(goalId);
-    return pattern ? pattern.locked : false;
+    // If pattern is not in pending patterns, it was processed and removed
+    return !this.pendingPatterns.has(goalId);
   }
 
   /**
@@ -505,22 +519,51 @@ export class QueryMerger {
           table,
         });
       }
-
-      const combinedSelectCols = new Set<string>();
-      const combinedWhereCols: Record<string, any> = {};
-      patterns.forEach(p => {
-        Object.keys(p.selectCols).forEach(col => combinedSelectCols.add(col));
-        Object.entries(p.whereCols).forEach(([col, val]) => {
-          if (!isVar(val)) combinedWhereCols[col] = val;
+  
+      // --- New Same-Table Merge Logic ---
+      let mostGeneralPattern = patterns[0];
+      if (patterns.length > 1) {
+        // Find the pattern with the fewest WHERE conditions as a candidate for the most general.
+        for (let i = 1; i < patterns.length; i++) {
+          if (Object.keys(patterns[i].whereCols).length < Object.keys(mostGeneralPattern.whereCols).length) {
+            mostGeneralPattern = patterns[i];
+          }
+        }
+      }
+  
+      // Verify that the chosen general pattern's WHERE clauses are a true subset of all other patterns.
+      let isMergeValid = true;
+      const generalWhereEntries = Object.entries(mostGeneralPattern.whereCols);
+      for (const pattern of patterns) {
+        if (pattern === mostGeneralPattern) continue;
+        for (const [key, value] of generalWhereEntries) {
+          if (pattern.whereCols[key] !== value) {
+            isMergeValid = false;
+            break;
+          }
+        }
+        if (!isMergeValid) break;
+      }
+  
+      if (!isMergeValid) {
+        this.logger.log("INCOMPATIBLE_MERGE", `Patterns for table ${table} are not compatible for subset merge. Processing individually.`, {
+          goalIds 
         });
-      });
-
+        for (const pattern of patterns) {
+          await this._processPatternGroup([pattern]);
+        }
+        return;
+      }
+  
+      // If the merge is valid, use the WHERE clause from the most general pattern.
+      const combinedWhereCols = mostGeneralPattern.whereCols;
+  
       mergedQuery = {
         id: patterns.length === 1 ? `single_${this.nextMergedQueryId++}` : `merged_${this.nextMergedQueryId++}`,
-        patterns,
+        patterns, // Pass ALL patterns to the query builder
         table,
-        combinedSelectCols: Array.from(combinedSelectCols),
-        combinedWhereCols,
+        combinedSelectCols: [], // Let the builder construct this
+        combinedWhereCols, // Use the general WHERE clause
         sharedVarIds: new Set(patterns.flatMap(p => Array.from(p.varIds))),
         locked: true,
       };
@@ -541,24 +584,40 @@ export class QueryMerger {
    */
   private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
     const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);
-    const sql = queryBuilder.toString()
+    const sql = queryBuilder.toString();
     const isJoin = !!joinVars;
+
+    // Check SQL cache first using normalized SQL
+    const normalizedSql = this.normalizeSqlForCache(sql);
+    if (this.sqlResultCache.has(normalizedSql)) {
+      const cachedResults = this.sqlResultCache.get(normalizedSql)!;
+      this.logger.log("SQL_CACHE_HIT", `Cache hit for SQL query`, {
+        originalSql: sql,
+        normalizedSql,
+        goalIds: mergedQuery.patterns.map(p => p.goalId),
+        rowCount: cachedResults.length
+      });
+      return cachedResults;
+    }
 
     this.logger.log(
       isJoin ? "JOIN_QUERY_EXECUTING" : "SAME_TABLE_QUERY_EXECUTING",
       `Executing ${isJoin ? 'JOIN' : 'same-table'} query`,
       {
-        sql: sql,
+        sql,
       }
     );
 
-    this.queries.push(sql);
     const results = await queryBuilder;
+    this.queries.push(sql);
+
+    // Cache the results using normalized SQL
+    this.sqlResultCache.set(normalizedSql, results);
 
     this.logger.log("DB_QUERY_EXECUTED", `[Goals ${mergedQuery.patterns.map(p => p.goalId).join(',')}] Query executed`, {
       goalIds: mergedQuery.patterns.map(p => p.goalId),
       table: mergedQuery.table,
-      sql: sql,
+      sql,
       rowCount: results.length,
       rows: results,
     });

@@ -102,21 +102,24 @@ export class QueryBuilder {
   }
 
   private buildSelectWithVariableAliases(patterns: QueryPattern[]): (Knex.Raw)[] {
-    const selectCols: (Knex.Raw)[] = [];
+    const selectExpressions = new Map<string, Knex.Raw>(); // Use a map to prevent duplicate aliases
+
     for (const pattern of patterns) {
+      // Part 1: Select variables from columns
       for (const [column, term] of Object.entries(pattern.selectCols)) {
-        if (isVar(term)) {
-          selectCols.push(this.db.raw(`?? AS ??`, [column, term.id]));
+        if (isVar(term) && !selectExpressions.has(term.id)) {
+          selectExpressions.set(term.id, this.db.raw(`?? AS ??`, [column, term.id]));
         }
       }
+      // Part 2: Select grounded values that were originally variables
       for (const [column, value] of Object.entries(pattern.whereCols)) {
         const originalTerm = pattern.queryObj[column];
-        if (isVar(originalTerm)) {
-          selectCols.push(this.db.raw(`? AS ??`, [value, originalTerm.id]));
+        if (isVar(originalTerm) && !selectExpressions.has(originalTerm.id)) {
+          selectExpressions.set(originalTerm.id, this.db.raw(`? AS ??`, [value, originalTerm.id]));
         }
       }
     }
-    return selectCols;
+    return Array.from(selectExpressions.values());
   }
 
   private buildAndApplyJoinClauses(queryBuilder: Knex.QueryBuilder, patterns: QueryPattern[], tableAliases: Map<number, string>, joinVars: any[]): void {

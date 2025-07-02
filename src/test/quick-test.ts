@@ -17,8 +17,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-// const BACKEND = "sql";
-const BACKEND = "mem";
+const BACKEND = "sql";
+// const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -58,7 +58,7 @@ function makeQuery() {
     .where($ => [
   
       // DO NOT DELETE THIS TEST CASE COMMENT
-      // membero($.person, ["daniel", "david", "jason", "brooke", "jen", "melanie", "rick"]),
+      membero($.person, ["daniel", "david", "jason", "brooke", "jen", "melanie", "rick"]),
       // membero($.person, ["celeste"]),
 
       familytree.person($.person),

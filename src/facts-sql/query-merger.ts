@@ -52,13 +52,22 @@ export class QueryMerger {
   
   /**
    * Creates a normalized version of SQL for caching purposes.
-   * This removes alias differences while preserving the essential query structure.
+   * This normalizes all column aliases while preserving query structure.
    */
   private normalizeSqlForCache(sql: string): string {
-    // For now, create a simple normalization:
-    // Replace all AS aliases with a generic pattern
-    return sql.replace(/AS `[^`]+`/g, 'AS alias')
-      .replace(/AS [^\s,]+/g, 'AS alias');
+    let aliasCounter = 0;
+    const aliasMap = new Map<string, string>();
+    
+    return sql.replace(/\bAS\s+(`?[^,\s`]+`?)/gi, (_, alias) => {
+      // Remove backticks for comparison
+      const cleanAlias = alias.replace(/`/g, '');
+      
+      if (!aliasMap.has(cleanAlias)) {
+        aliasMap.set(cleanAlias, `alias_${aliasCounter++}`);
+      }
+      
+      return `AS ${aliasMap.get(cleanAlias)}`;
+    });
   }
   
   // Memory management settings
@@ -584,6 +593,7 @@ export class QueryMerger {
    */
   private async _executeQuery(mergedQuery: MergedQuery, joinVars?: JoinVars): Promise<any[]> {
     const queryBuilder = new QueryBuilder(this.db).build(mergedQuery, joinVars);
+    console.log(queryBuilder.toSQL());
     const sql = queryBuilder.toString();
     const isJoin = !!joinVars;
 

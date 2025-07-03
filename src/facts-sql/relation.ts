@@ -60,44 +60,7 @@ export class RegularRelationWithMerger {
   }
 
   private async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
-    // Walk all terms with current Subst to create cache key
-    const walkedTerms: Record<string, any> = {};
-    const groundedTerms: Record<string, any> = {};
-    for (const [key, term] of Object.entries(queryObj)) {
-      const walkedTerm = await walk(term, s);
-      walkedTerms[key] = walkedTerm;
-      
-      // Only include grounded (non-variable) terms in cache key
-      if (!isVar(walkedTerm)) {
-        groundedTerms[key] = walkedTerm;
-      }
-    }
-    const cacheKey = `${this.table}_${JSON.stringify(groundedTerms)}`;
-    
-    // Check if this specific goal+subst combination has been cached
-    if (CACHE_ENABLED) {
-      this.logger.log("CACHE_LOOKUP", {
-        goalId,
-        walkedTerms,
-        cacheKey,
-        allCacheKeys: Array.from(this.dbObj.getStoredQueries().keys())
-      });
-      
-      const storedQuery = this.dbObj.findStoredQueryByKey(cacheKey);
-      if (storedQuery) {
-        this.logger.log("CACHE_HIT", {
-          goalId,
-          queryObj,
-          walkedTerms,
-          cacheKey,
-          rowCount: storedQuery.rows.length
-        });
-        
-        return storedQuery.rows;
-      }
-    }
-
-    // Execute new query
+    // Execute new query first to get the SQL string for cache key
     const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
     const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
 
@@ -123,24 +86,46 @@ export class RegularRelationWithMerger {
     }
 
     const query = this.buildQuery(queryObj, whereCols, joinStructure);
+    const sqlString = query.toString();
+    const cacheKey = sqlString; // Use SQL string as cache key
     
-    this.dbObj.addQuery(`goalId:${goalId} - ${query.toString()}`);
+    // Check if this SQL query has been cached
+    if (CACHE_ENABLED) {
+      this.logger.log("CACHE_LOOKUP", {
+        goalId,
+        cacheKey,
+        allCacheKeys: Array.from(this.dbObj.getStoredQueries().keys()).slice(0, 3)
+      });
+      
+      const storedQuery = this.dbObj.findStoredQueryByKey(cacheKey);
+      if (storedQuery) {
+        this.logger.log("CACHE_HIT", {
+          goalId,
+          queryObj,
+          cacheKey,
+          rowCount: storedQuery.rows.length
+        });
+        
+        return storedQuery.rows;
+      }
+    }
+    
+    this.dbObj.addQuery(`goalId:${goalId} - ${sqlString}`);
     this.logger.log("DB_QUERY", {
       table: this.table,
-      sql: query.toString(),
+      sql: sqlString,
       goalId,
       joinStructure
     });
     const rows = await query;
     
-    // Store query results with walked terms cache key
+    // Store query results with SQL string cache key
     if (CACHE_ENABLED) {
-      this.dbObj.storeQueryWithKey(cacheKey, [goalId], rows);
+      this.dbObj.storeQueryByKey(cacheKey, rows);
       this.logger.log("CACHE_WRITTEN", {
         table: this.table,
         cacheKey,
         goalId,
-        walkedTerms,
         rowCount: rows.length
       });
     }

@@ -5,13 +5,13 @@ const DEFAULT_CONFIG = {
   allowedIds: new Set<string>(), // empty means allow all
   deniedIds: new Set<string>([
     "SHARED_GOALS",
-    // "DB_QUERY",
+    "DB_QUERY",
     "NO_DB_ROWS",
     "CACHE_HIT",
     "UNIFY_SUCCESS",
     "UNIFY_FAILED",
     "STORED_QUERY",
-    // "DB_ROWS",
+    "DB_ROWS",
     "CACHE_WRITTEN",
     // "CACHE_LOOKUP",
   ]), // specific ids to deny

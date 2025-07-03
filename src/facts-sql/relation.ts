@@ -9,14 +9,16 @@ const JOINS_ENABLED = false;
 
 export class RegularRelationWithMerger {
   private logger: Logger;
+  private primaryKey: string;
 
   constructor(
     private dbObj: DBManager,
     private table: string,
     logger?: Logger,
-    options?: RelationOptions,
+    private options?: RelationOptions,
   ) {
     this.logger = logger ?? getDefaultLogger();
+    this.primaryKey = options?.primaryKey || 'id'; // Default to 'id' if not specified
   }
 
   createGoal(queryObj: Record<string, Term>): Goal {
@@ -29,16 +31,7 @@ export class RegularRelationWithMerger {
       
       let yielded = 0;
       for (const row of rows) {
-        // Convert aliased row back to original queryObj keys
-        const convertedRow: Record<string, any> = {};
-        for (const col of queryKeys) {
-          const aliasedColName = `${col}_0`;
-          if (aliasedColName in row) {
-            convertedRow[col] = row[aliasedColName];
-          }
-        }
-
-        const unifiedSubst = await this.unifyRowWithQuery(convertedRow, queryObj, s);
+        const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, s);
         if (unifiedSubst) {
           this.logger.log("UNIFY_SUCCESS", {
             goalId,
@@ -60,7 +53,6 @@ export class RegularRelationWithMerger {
   }
 
   private async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
-    // Execute new query first to get the SQL string for cache key
     const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
     const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
 
@@ -85,11 +77,26 @@ export class RegularRelationWithMerger {
       }
     }
 
+    // Check row cache for primary key queries
+    if (Object.keys(whereCols).length === 1 && this.primaryKey in whereCols && !isVar(whereCols[this.primaryKey])) {
+      const pkValue = whereCols[this.primaryKey];
+      const tableCache = this.dbObj.getRowCache().get(this.table);
+      if (tableCache && tableCache.has(pkValue)) {
+        const row = tableCache.get(pkValue);
+        this.logger.log("ROW_CACHE_HIT", {
+          goalId,
+          table: this.table,
+          primaryKey: this.primaryKey,
+          value: pkValue,
+        });
+        return [row];
+      }
+    }
+
     const query = this.buildQuery(queryObj, whereCols, joinStructure);
     const sqlString = query.toString();
-    const cacheKey = sqlString; // Use SQL string as cache key
+    const cacheKey = sqlString;
     
-    // Check if this SQL query has been cached
     if (CACHE_ENABLED) {
       this.logger.log("CACHE_LOOKUP", {
         goalId,
@@ -119,7 +126,6 @@ export class RegularRelationWithMerger {
     });
     const rows = await query;
     
-    // Store query results with SQL string cache key
     if (CACHE_ENABLED) {
       this.dbObj.storeQueryByKey(cacheKey, rows);
       this.logger.log("CACHE_WRITTEN", {
@@ -128,9 +134,18 @@ export class RegularRelationWithMerger {
         goalId,
         rowCount: rows.length
       });
+
+      // Cache rows by primary key
+      const tableCache = this.dbObj.getRowCache().get(this.table) || new Map();
+      for (const row of rows) {
+        if (this.primaryKey in row) {
+          tableCache.set(row[this.primaryKey], row);
+        }
+      }
+      this.dbObj.getRowCache().set(this.table, tableCache);
     }
     
-    if(rows.length) {
+    if (rows.length) {
       this.logger.log("DB_ROWS", {
         table: this.table,
         sql: query.toString(),
@@ -152,27 +167,17 @@ export class RegularRelationWithMerger {
   }
 
   private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, Term>, joinStructure: any) {
-    const selectColKeys = Object.keys(queryObj)
-    
-    // Build qualified select columns with table prefixes and aliases
-    const baseAlias = `${this.table}_0`;
-    const qualifiedSelectCols = selectColKeys.map(col => `${baseAlias}.${col} as ${col}_0`);
-    // Build qualified where clauses with column aliases
-    const qualifiedWhereCols: Record<string, any> = {};
-    for (const [col, value] of Object.entries(whereCols)) {
-      qualifiedWhereCols[`${col}_0`] = value;
-    }
-    
-    let query = this.dbObj.db(`${this.table} as ${baseAlias}`)
+    const selectCols = this.options?.selectColumns || ['*'];
+
+    let query = this.dbObj.db(this.table)
       .distinct()
-      .select(qualifiedSelectCols)
-      .where(qualifiedWhereCols);
-    
-    // Apply joins if joinStructure exists
+      .select(selectCols)
+      .where(whereCols);
+  
     if (joinStructure && joinStructure.joins.length > 0) {
-      query = this.applyJoins(query, baseAlias, joinStructure);
+      query = this.applyJoins(query, this.table, joinStructure);
     }
-    
+  
     return query;
   }
 
@@ -183,7 +188,6 @@ export class RegularRelationWithMerger {
       const alias = `${join.table}_${aliasCounter}`;
       aliasCounter++;
       
-      // Create a single join with the first condition
       if (join.conditions.length > 0) {
         const firstCondition = join.conditions[0];
         query = query.join(
@@ -192,7 +196,6 @@ export class RegularRelationWithMerger {
           `${alias}.${firstCondition.rightCol}`
         );
         
-        // Add additional conditions as AND clauses
         for (let i = 1; i < join.conditions.length; i++) {
           const condition = join.conditions[i];
           query = query.andWhere(
@@ -227,10 +230,8 @@ export class RegularRelationWithMerger {
     for (const sharedGoal of sharedGoals) {
       const conditions: { leftCol: string; rightCol: string; termId: any }[] = [];
       
-      // Find matching key-term pairs between current goal and shared goal
       for (const [currentKey, currentTerm] of Object.entries(currentQueryObj)) {
         for (const [sharedKey, sharedTerm] of Object.entries(sharedGoal.queryObj)) {
-          // Only create join condition if both key and term match
           if (currentKey === sharedKey && currentTerm === sharedTerm) {
             conditions.push({
               leftCol: currentKey,
@@ -260,24 +261,21 @@ export class RegularRelationWithMerger {
     queryObj: Record<string, Term>,
     s: Subst
   ): Promise<Subst | null> {
-
-    // Optimized unification - directly match variable IDs with row values
     let resultSubst = s;
     
     for (const [col, term] of Object.entries(queryObj)) {
       const rowValue = row[col];
       if (rowValue === undefined) {
-        return null; // Variable not found in result set
+        return null;
       }
 
       const unified = await unify(term, rowValue, resultSubst);
       if (!unified) {
-        return null; // Unification failed
+        return null;
       }
       resultSubst = unified;
     }
     
     return resultSubst;
   }
-
 }

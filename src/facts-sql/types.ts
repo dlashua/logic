@@ -49,8 +49,8 @@ export interface RelDBDependencies {
 }
 
 export interface RelationOptions {
-  fullScanKeys?: string[];
-  cacheTTL?: number; // Time-to-live in milliseconds, defaults to 3000ms
+  primaryKey?: string;
+  selectColumns?: string[];
 }
 
 export interface CacheEntry {

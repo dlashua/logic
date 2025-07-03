@@ -68,7 +68,7 @@ await timeit("sql", async () => {
   for await (const item of results) {
     res.push(item);
   }
-  console.log(relDB.getQueries());
+  console.log("all sql queries", relDB.getQueries());
   console.log({
     results_count: res.length,
     queries_count: relDB.getQueryCount() 

@@ -17,6 +17,7 @@ export async function createDBManager (
   const queries: string[] = [];
   const goals: { goalId: number; table: string; queryObj: Record<string, Term> }[] = [];
   const storedQueries = new Map<string, { rows: any[] }>();
+  const rowCache = new Map<string, Map<any, any>>(); // Cache rows by table and primary key
   let nextGoalId = 0;
     
   return {
@@ -54,23 +55,23 @@ export async function createDBManager (
       });
       logger.log("STORED_QUERY", {
         cacheKey,
-        rows,
-      })
+        rows 
+      });
     },
     findStoredQueryByKey: (cacheKey: string) => {
       const data = storedQueries.get(cacheKey);
       if (data) {
         return {
           cacheKey,
-          rows: data.rows
+          rows: data.rows 
         };
       }
       return null;
     },
     getStoredQueries: () => storedQueries,
     clearStoredQueries: () => storedQueries.clear(),
-
-  }
+    getRowCache: () => rowCache, // Expose row cache for relation to access
+  };
 }
 
 export const makeRelDB = async (
@@ -80,11 +81,8 @@ export const makeRelDB = async (
 ) => {
   options ??= {};
   
-  // Create core dependencies
   const logger = getDefaultLogger();
-  
-  const dbManager = await createDBManager(knex_connect_options, logger, options)
-
+  const dbManager = await createDBManager(knex_connect_options, logger, options);
 
   function createRelation(table: string, options?: RelationOptions) {
     const relation = new RegularRelationWithMerger(
@@ -98,8 +96,6 @@ export const makeRelDB = async (
       return relation.createGoal(queryObj);
     };
   }
-
-
 
   function logic_createSymmetricRelation(table: string, keys: [string, string], options?: RelationOptions) {
     const relation = new RegularRelationWithMerger(
@@ -117,25 +113,10 @@ export const makeRelDB = async (
       return or(
         relation.createGoal(queryObj),
         relation.createGoal(queryObjSwapped),
-      )
+      );
     };
   }
   
-  // function sql_createSymmetricRelation(table: string, keys: [string, string], options?: RelationOptions) {
-  //   // Use the new symmetric relation implementation with merger
-  //   const symmetricRelation = new SymmetricRelationWithMerger(
-  //     dbManager,
-  //     table,
-  //     keys,
-  //     logger,
-  //     options,
-  //   );
-  
-  //   return (queryObj: Record<string, Term>): Goal => {
-  //     return symmetricRelation.createGoal(queryObj);
-  //   };
-  // }
-
   return {
     rel: createRelation,
     relSym: logic_createSymmetricRelation,

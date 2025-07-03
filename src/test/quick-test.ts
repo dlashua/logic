@@ -1,4 +1,5 @@
 import { query } from "../query.ts";
+import { membero } from "../relations/lists.ts";
 
 console.log("START quick-test");
 
@@ -22,6 +23,7 @@ async function loadBackend(backend: string) {
     closeFns.push(
       async () => {
         const allQueries = module.relDB.getQueries();
+        console.log("sql queries", allQueries);
         console.log("queries performed", {
           queries: module.relDB.getQueryCount(),
         });
@@ -43,24 +45,26 @@ const start = Date.now();
 function makeQuery() {
   return query()
     .where($ => [
+
+      membero($.person, ["celeste"]),
   
-      familytree.person($.person),
+      // familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),
       familytree.grandparentAgg($.person, $.grand_parents),
-      familytree.greatgrandparentAgg($.person, $.great_grand_parents),
-      familytree.uncleAgg($.person, $.uncle, 1),
+      // familytree.greatgrandparentAgg($.person, $.great_grand_parents),
+      // familytree.uncleAgg($.person, $.uncle, 1),
   
-      familytree.siblingsAgg($.person, $.siblings),
-      familytree.cousinsAgg($.person, $.cousins_1, 1),
-      familytree.cousinsAgg($.person, $.cousins_2, 2),
-      familytree.cousinsAgg($.person, $.cousins_3, 3),
+      // familytree.siblingsAgg($.person, $.siblings),
+      // familytree.cousinsAgg($.person, $.cousins_1, 1),
+      // familytree.cousinsAgg($.person, $.cousins_2, 2),
+      // familytree.cousinsAgg($.person, $.cousins_3, 3),
 
-      familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-      familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+      // familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+      // familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
   
-      familytree.kidsAgg($.person, $.kids),
+      // familytree.kidsAgg($.person, $.kids),
   
     ])
 }
@@ -70,6 +74,7 @@ const results = await q.toArray();
 
 console.dir({
   // allres: results,
+  oneres: results.find(x => x.person === "celeste"),
   rescnt: results.length,
 }, {
   depth: 100 

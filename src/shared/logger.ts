@@ -17,14 +17,14 @@ const DEFAULT_CONFIG = {
   ]), // specific ids to deny
 };
 
-export interface SimpleLoggerConfig {
+export interface LoggerConfig {
   enabled: boolean;
   allowedIds: Set<string>;
   deniedIds: Set<string>;
 }
 
-export class SimpleLogger {
-  constructor(private config: SimpleLoggerConfig) {}
+export class Logger {
+  constructor(private config: LoggerConfig) {}
 
   log(id: string, data: Record<string, any> | string): void {
     if (!this.config.enabled) return;
@@ -45,11 +45,11 @@ export class SimpleLogger {
   }
 }
 
-let defaultLoggerInstance: SimpleLogger | null = null;
+let defaultLoggerInstance: Logger | null = null;
 
-export function getDefaultLogger(): SimpleLogger {
+export function getDefaultLogger(): Logger {
   if (!defaultLoggerInstance) {
-    defaultLoggerInstance = new SimpleLogger(DEFAULT_CONFIG);
+    defaultLoggerInstance = new Logger(DEFAULT_CONFIG);
   }
   return defaultLoggerInstance;
 }

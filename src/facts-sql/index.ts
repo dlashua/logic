@@ -1,6 +1,6 @@
 import knex from "knex";
 import type { Knex } from "knex";
-import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
+import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import type { BaseConfig as Configuration } from "../shared/types.ts";
 import type { Term, Goal } from "../core/types.ts";
 import { or } from "../core/combinators.ts";
@@ -10,7 +10,7 @@ import type { RelationOptions } from "./types.ts";
 export type DBManager = Awaited<ReturnType<typeof createDBManager>>;
 export async function createDBManager (
   knex_connect_options: Knex.Config,
-  logger: SimpleLogger,
+  logger: Logger,
   options?: RelationOptions,
 ) {
   const db = knex(knex_connect_options);

@@ -1,6 +1,6 @@
 import type { Term, Subst, Goal } from "../core/types.ts";
 import { unify, isVar, walk } from "../core/kernel.ts";
-import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
+import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager } from "./index.ts";
 
@@ -8,12 +8,12 @@ const CACHE_ENABLED = true;
 const JOINS_ENABLED = false;
 
 export class RegularRelationWithMerger {
-  private logger: SimpleLogger;
+  private logger: Logger;
 
   constructor(
     private dbObj: DBManager,
     private table: string,
-    logger?: SimpleLogger,
+    logger?: Logger,
     options?: RelationOptions,
   ) {
     this.logger = logger ?? getDefaultLogger();

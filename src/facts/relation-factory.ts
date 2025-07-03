@@ -1,13 +1,11 @@
-import { SimpleLogger } from "../shared/simple-logger.ts";
-import { BaseCache } from "../shared/cache.ts";
+import { Logger } from "../shared/logger.ts";
 import { MemoryRelation } from "./memory-relation.ts";
 import { MemoryObjRelation } from "./memory-obj-relation.ts";
 import { SymmetricMemoryRelation, SymmetricMemoryObjRelation } from "./symmetric-relation.ts";
 import { FactRelation, FactObjRelation, FactRelationConfig } from "./types.ts";
 
 export interface FactRelationFactoryDependencies {
-  logger: SimpleLogger;
-  cache: BaseCache;
+  logger: Logger;
   config: FactRelationConfig;
 }
 
@@ -17,7 +15,6 @@ export class FactRelationFactory {
   createArrayRelation(): FactRelation {
     const relation = new MemoryRelation(
       this.deps.logger,
-      this.deps.cache,
       this.deps.config
     );
     return relation.createRelation();
@@ -27,7 +24,6 @@ export class FactRelationFactory {
     const relation = new MemoryObjRelation(
       keys,
       this.deps.logger,
-      this.deps.cache,
       this.deps.config
     );
     return relation.createRelation();
@@ -36,7 +32,6 @@ export class FactRelationFactory {
   createSymmetricArrayRelation(): FactRelation {
     const relation = new SymmetricMemoryRelation(
       this.deps.logger,
-      this.deps.cache,
       this.deps.config
     );
     return relation.createRelation();
@@ -46,7 +41,6 @@ export class FactRelationFactory {
     const relation = new SymmetricMemoryObjRelation(
       keys,
       this.deps.logger,
-      this.deps.cache,
       this.deps.config
     );
     return relation.createRelation();

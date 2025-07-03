@@ -1,7 +1,6 @@
 import { Term, Subst } from "../core/types.ts";
 import { isVar } from "../core/kernel.ts";
-import { SimpleLogger } from "../shared/simple-logger.ts";
-import { BaseCache } from "../shared/cache.ts";
+import { Logger } from "../shared/logger.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
 import { GoalFunction } from "../shared/types.ts";
 import { FactObjRelation, FactRelationConfig } from "./types.ts";
@@ -13,8 +12,7 @@ export class MemoryObjRelation {
 
   constructor(
     private keys: string[],
-    private logger: SimpleLogger,
-    private cache: BaseCache,
+    private logger: Logger,
     private config: FactRelationConfig
   ) {}
 

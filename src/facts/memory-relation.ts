@@ -1,7 +1,6 @@
 import { Term, Subst } from "../core/types.ts";
-import { isVar , unify } from "../core/kernel.ts";
-import { SimpleLogger } from "../shared/simple-logger.ts";
-import { BaseCache } from "../shared/cache.ts";
+import { isVar } from "../core/kernel.ts";
+import { Logger } from "../shared/logger.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
 import type { GoalFunction } from "../shared/types.ts";
 import { FactRelation, FactRelationConfig } from "./types.ts";
@@ -12,8 +11,7 @@ export class MemoryRelation {
   private goalIdCounter = 0;
 
   constructor(
-    private logger: SimpleLogger,
-    private cache: BaseCache,
+    private logger: Logger,
     private config: FactRelationConfig
   ) {}
 

@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = {
     "UNIFY_FAILED",
     "STORED_QUERY",
     "DB_ROWS",
+    "CACHE_WRITTEN",
   ]), // specific ids to deny
 };
 

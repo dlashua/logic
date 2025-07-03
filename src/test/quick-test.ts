@@ -59,9 +59,9 @@ function makeQuery() {
   
       // DO NOT DELETE THIS TEST CASE COMMENT
       // membero($.person, ["daniel", "david", "jason", "brooke", "jen", "melanie", "rick"]),
-      membero($.person, ["celeste"]),
+      membero($.person, ["celeste", "jackson"]),
 
-      familytree.person($.person),
+      // familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),

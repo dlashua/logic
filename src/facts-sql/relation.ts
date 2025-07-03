@@ -4,7 +4,7 @@ import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager } from "./index.ts";
 
-const CACHE_ENABLED = false;
+const CACHE_ENABLED = true;
 const JOINS_ENABLED = false;
 
 export class RegularRelationWithMerger {
@@ -45,6 +45,7 @@ export class RegularRelationWithMerger {
             queryObj,
             row,
           });
+          
           yielded++;
           yield unifiedSubst;
         } else {
@@ -118,10 +119,16 @@ export class RegularRelationWithMerger {
     });
     const rows = await query;
     
-    // Store query results with Subst-aware cache key
+    // Store query results with walked terms cache key
     if (CACHE_ENABLED) {
-      const involvedGoalIds = [goalId];
-      this.dbObj.storeQueryWithKey(cacheKey, involvedGoalIds, rows);
+      this.dbObj.storeQueryWithKey(cacheKey, [goalId], rows);
+      this.logger.log("CACHE_WRITTEN", {
+        table: this.table,
+        cacheKey,
+        goalId,
+        walkedTerms,
+        rowCount: rows.length
+      });
     }
     
     if(rows.length) {

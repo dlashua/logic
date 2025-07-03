@@ -4,8 +4,6 @@ import { and, eq, or } from "../core/combinators.ts";
 import { createLogicVarProxy } from "../query.ts";
 import { uniqueo, not } from "../relations/control.ts";
 import { collecto } from "../relations/aggregates.ts";
-// import { memoize } from "../shared/memoize.ts";
-const memoize = (fn) => fn;
 // import { getCousinsOf } from "../test/direct-sql.ts";
 
 export class FamilytreeRelations {
@@ -39,15 +37,15 @@ export class FamilytreeRelations {
   grandparent_kid = (gp: Term<string>, k: Term<string>) => this.ancestorOf(2)(k,gp);
   greatgrandparent_kid = (ggp: Term<string>, k: Term<string>) => this.ancestorOf(3)(k, ggp);
 
-  grandparentAgg = memoize((k: Term<string>, gp: Term<string[]>): Goal => {
+  grandparentAgg = (k: Term<string>, gp: Term<string[]>): Goal => {
     const { proxy: $ } = createLogicVarProxy("grandparentagg_");
     return collecto($.in_gp, this.grandparent_kid($.in_gp, k), gp);
-  });
+  };
 
-  greatgrandparentAgg = memoize((k: Term<string>, gp: Term<string[]>): Goal => {
+  greatgrandparentAgg = (k: Term<string>, gp: Term<string[]>): Goal => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.greatgrandparent_kid(in_s, k), gp);
-  });
+  };
 
   anyParentOf = (v: Term<string>, p: Term<string>): Goal => {
     return or(this.stepParentOf(v, p), this.parentOf(v, p));
@@ -61,10 +59,10 @@ export class FamilytreeRelations {
     return this.parentOf(v, p);
   };
 
-  parentAgg = memoize((k: Term<string>, p: Term<string[]>): Goal => {
+  parentAgg = (k: Term<string>, p: Term<string[]>): Goal => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.parentOf(k, in_s), p);
-  });
+  };
 
   stepParentOf = (kid: Term<string>, stepparent: Term<string>) => {
     const { proxy: $ } = createLogicVarProxy("stepparentof_");
@@ -84,10 +82,10 @@ export class FamilytreeRelations {
     );
   };
 
-  stepParentAgg = memoize((k: Term<string>, p: Term<string[]>) => {
+  stepParentAgg = (k: Term<string>, p: Term<string[]>) => {
     const in_s = lvar("stepParentAgg_in_s");
     return collecto(in_s, this.stepParentOf(k, in_s), p);
-  });
+  };
 
   tap = (msg: any) => {
     return function* (s: any) {
@@ -114,10 +112,10 @@ export class FamilytreeRelations {
     );
   };
 
-  fullSiblingsAgg = memoize((v: Term<string>, s: Term<string[]>) => {
+  fullSiblingsAgg = (v: Term<string>, s: Term<string[]>) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.fullSiblingOf(v, in_s), s);
-  });
+  };
 
   halfSiblingOf = (out_v: Term<string>, out_s: Term<string>) => {
     const sharedparent = lvar("halfsibof_sharedparent");
@@ -132,10 +130,10 @@ export class FamilytreeRelations {
     )
   };
 
-  halfSiblingsAgg = memoize((v: Term<string>, s: Term<string[]>) => {
+  halfSiblingsAgg = (v: Term<string>, s: Term<string[]>) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.halfSiblingOf(v, in_s), s);
-  });
+  };
 
   stepSiblingOf = (out_v: Term<string>, out_s: Term<string>) => {
     const { proxy: $ } = createLogicVarProxy("stepsiblingof_");
@@ -151,34 +149,34 @@ export class FamilytreeRelations {
     )
   };
 
-  stepSiblingsAgg = memoize((v: Term<string>, s: Term<string[]>) => {
+  stepSiblingsAgg = (v: Term<string>, s: Term<string[]>) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.stepSiblingOf(v, in_s), s);
-  });
+  };
 
   siblingOf = (v: Term<string>, s: Term<string>) => {
     const in_s = lvar("in_s");
     return uniqueo(s, and(this.anyParentOf(v, in_s), this.anyKidOf(in_s, s), not(eq(v, s))))
   };
 
-  siblingsAgg = memoize((v: Term<string>, s: Term<string[]>) => {
+  siblingsAgg = (v: Term<string>, s: Term<string[]>) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.siblingOf(v, in_s), s);
-  });
+  };
 
   // Refactored using uncleOfLevel  
   get uncleOf() { return this.uncleOfLevel(1); }
   get greatuncleOf() { return this.uncleOfLevel(2); }
 
-  uncleAgg = memoize((v: Term<string>, s: Term<string[]>, level = 1) => {
+  uncleAgg = (v: Term<string>, s: Term<string[]>, level = 1) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.uncleOfLevel(level)(v, in_s), s);
-  });
+  };
 
-  greatuncleAgg = memoize((v: Term<string>, s: Term<string[]>) => {
+  greatuncleAgg = (v: Term<string>, s: Term<string[]>) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.greatuncleOf(v, in_s), s);
-  });
+  };
 
   // Generalized ancestor relation: ancestorOf(level)(descendant, ancestor)
   ancestorOf(level: number) {
@@ -288,10 +286,10 @@ export class FamilytreeRelations {
   //   return goal;
   // }
 
-  cousinsAgg = memoize((v: Term<string>, s: Term<string[]>, degree = 1, removal = 0) => {
+  cousinsAgg = (v: Term<string>, s: Term<string[]>, degree = 1, removal = 0) => {
     const in_s = lvar("in_s");
     return collecto(in_s, this.cousinOf(v, in_s, degree, removal), s);
-  });
+  };
 
   firstcousinsAgg = (v: Term<string>, s: Term<string[]>) => this.cousinsAgg(v, s, 1);
   secondcousinsAgg = (v: Term<string>, s: Term<string[]>) => this.cousinsAgg(v, s, 2);
@@ -308,5 +306,5 @@ export class FamilytreeRelations {
         not(eq(person, nephew)),
       ),
     );
-  };
+  }
 }

@@ -7,6 +7,11 @@ const DEFAULT_CONFIG = {
     "SHARED_GOALS",
     "DB_QUERY",
     "NO_DB_ROWS",
+    // "CACHE_HIT",
+    "UNIFY_SUCCESS",
+    "UNIFY_FAILED",
+    "STORED_QUERY",
+    "DB_ROWS",
   ]), // specific ids to deny
 };
 

@@ -4,6 +4,9 @@ import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager } from "./index.ts";
 
+const CACHE_ENABLED = false;
+const JOINS_ENABLED = false;
+
 export class RegularRelationWithMerger {
   private logger: SimpleLogger;
 
@@ -22,93 +25,8 @@ export class RegularRelationWithMerger {
     this.dbObj.addGoal(goalId, this.table, queryObj);
 
     return async function* factsSql(this: RegularRelationWithMerger, s: Subst) {
-      // Check if this goal has already been handled in a stored query
-      const storedQuery = this.dbObj.findStoredQuery(goalId);
-      if (storedQuery) {
-        this.logger.log("CACHE_HIT", {
-          goalId,
-          queryString: storedQuery.queryString,
-          rowCount: storedQuery.rows.length
-        });
-        
-        // Process stored rows
-        let yielded = 0;
-        for (const row of storedQuery.rows) {
-          // Convert aliased row back to original queryObj keys
-          const convertedRow: Record<string, any> = {};
-          for (const col of queryKeys) {
-            const aliasedColName = `${col}_0`;
-            if (aliasedColName in row) {
-              convertedRow[col] = row[aliasedColName];
-            }
-          }
-
-          const unifiedSubst = await this.unifyRowWithQuery(convertedRow, queryObj, s);
-          if (unifiedSubst) {
-            yielded++;
-            yield unifiedSubst;
-          }
-        }
-        return;
-      }
-
-      const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
-
-      // Create join structure for shared goals
-      const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
-
-      this.logger.log("SHARED_GOALS", {
-        goalId,
-        sharedGoals,
-        joinStructure
-      });
-
-      const walkedQuery: Record<string, Term> = {};
-      const selectCols: Record<string, Term> = {};
-      const whereCols: Record<string, Term> = {};
+      const rows = await this.cacheOrQuery(goalId, queryObj, s);
       
-      for (const [column, term] of Object.entries(queryObj)) {
-        const walkedTerm = await walk(term, s);
-        walkedQuery[column] = walkedTerm;
-        
-        if (isVar(walkedTerm)) {
-          selectCols[column] = walkedTerm;
-        } else {
-          whereCols[column] = walkedTerm;
-        }
-      }
-
-      const query = this.buildQuery(queryObj, whereCols, joinStructure);
-      
-      this.dbObj.addQuery(query.toString());
-      this.logger.log("DB_QUERY", {
-        table: this.table,
-        sql: query.toString(),
-        goalId,
-        joinStructure
-      });
-      const rows = await query;
-      
-      // Store query results with all involved goalIds
-      const involvedGoalIds = [goalId, ...sharedGoals.map(g => g.goalId)];
-      this.dbObj.storeQuery(query.toString(), involvedGoalIds, rows);
-      
-      if(rows.length) {
-        this.logger.log("DB_ROWS", {
-          table: this.table,
-          sql: query.toString(),
-          goalId,
-          rows,
-        });
-      } else {
-        this.logger.log("NO_DB_ROWS", {
-          table: this.table,
-          sql: query.toString(),
-          goalId,
-          rows,
-        });
-      }
-
       let yielded = 0;
       for (const row of rows) {
         // Convert aliased row back to original queryObj keys
@@ -122,12 +40,107 @@ export class RegularRelationWithMerger {
 
         const unifiedSubst = await this.unifyRowWithQuery(convertedRow, queryObj, s);
         if (unifiedSubst) {
+          this.logger.log("UNIFY_SUCCESS", {
+            goalId,
+            queryObj,
+            row,
+          });
           yielded++;
-
           yield unifiedSubst;
+        } else {
+          this.logger.log("UNIFY_FAILED", {
+            goalId,
+            queryObj,
+            row,
+          });
         }
       }
     }.bind(this);
+  }
+
+  private async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
+    // Walk all terms with current Subst to create cache key
+    const walkedTerms: Record<string, any> = {};
+    for (const [key, term] of Object.entries(queryObj)) {
+      walkedTerms[key] = await walk(term, s);
+    }
+    const cacheKey = `${goalId}_${JSON.stringify(walkedTerms)}`;
+    
+    // Check if this specific goal+subst combination has been cached
+    if (CACHE_ENABLED) {
+      const storedQuery = this.dbObj.findStoredQueryByKey(cacheKey);
+      if (storedQuery) {
+        this.logger.log("CACHE_HIT", {
+          goalId,
+          queryObj,
+          walkedTerms,
+          cacheKey,
+          rowCount: storedQuery.rows.length
+        });
+        
+        return storedQuery.rows;
+      }
+    }
+
+    // Execute new query
+    const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
+    const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
+
+    this.logger.log("SHARED_GOALS", {
+      goalId,
+      sharedGoals,
+      joinStructure
+    });
+
+    const walkedQuery: Record<string, Term> = {};
+    const selectCols: Record<string, Term> = {};
+    const whereCols: Record<string, Term> = {};
+    
+    for (const [column, term] of Object.entries(queryObj)) {
+      const walkedTerm = await walk(term, s);
+      walkedQuery[column] = walkedTerm;
+      
+      if (isVar(walkedTerm)) {
+        selectCols[column] = walkedTerm;
+      } else {
+        whereCols[column] = walkedTerm;
+      }
+    }
+
+    const query = this.buildQuery(queryObj, whereCols, joinStructure);
+    
+    this.dbObj.addQuery(query.toString());
+    this.logger.log("DB_QUERY", {
+      table: this.table,
+      sql: query.toString(),
+      goalId,
+      joinStructure
+    });
+    const rows = await query;
+    
+    // Store query results with Subst-aware cache key
+    if (CACHE_ENABLED) {
+      const involvedGoalIds = [goalId];
+      this.dbObj.storeQueryWithKey(cacheKey, involvedGoalIds, rows);
+    }
+    
+    if(rows.length) {
+      this.logger.log("DB_ROWS", {
+        table: this.table,
+        sql: query.toString(),
+        goalId,
+        rows,
+      });
+    } else {
+      this.logger.log("NO_DB_ROWS", {
+        table: this.table,
+        sql: query.toString(),
+        goalId,
+        rows,
+      });
+    }
+
+    return rows;
   }
 
   private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, Term>, joinStructure: any) {
@@ -191,7 +204,12 @@ export class RegularRelationWithMerger {
     currentQueryObj: Record<string, Term>,
     sharedGoals: { goalId: number; table: string; queryObj: Record<string, Term> }[]
   ) {
-    if (sharedGoals.length === 0) return null;
+    if (!JOINS_ENABLED || sharedGoals.length === 0) {
+      return {
+        baseTable: this.table,
+        joins: []
+      };
+    }
 
     const joins: {
       table: string;
@@ -235,12 +253,6 @@ export class RegularRelationWithMerger {
     s: Subst
   ): Promise<Subst | null> {
 
-    this.logger.log("UNIFY_ROW", {
-      table: this.table,
-      row,
-      queryObj,
-    });
-
     // Optimized unification - directly match variable IDs with row values
     let resultSubst = s;
     
@@ -255,7 +267,6 @@ export class RegularRelationWithMerger {
         return null; // Unification failed
       }
       resultSubst = unified;
-
     }
     
     return resultSubst;

@@ -17,7 +17,7 @@ export async function createDBManager (
   const db = knex(knex_connect_options);
   const queries: string[] = [];
   const goals: { goalId: number; table: string; queryObj: Record<string, Term> }[] = [];
-  const storedQueries: Map<string, { goalIds: number[]; rows: any[] }> = new Map();
+  const storedQueries = new Map<string, { goalIds: number[]; rows: any[] }>();
   let nextGoalId = 0;
     
   return {
@@ -50,13 +50,44 @@ export async function createDBManager (
       });
     },
     storeQuery: (queryString: string, goalIds: number[], rows: any[]) => {
-      storedQueries.set(queryString, { goalIds, rows });
+      storedQueries.set(queryString, {
+        goalIds,
+        rows 
+      });
+      logger.log("STORED_QUERY", {
+        goalIds,
+        rows,
+      })
+    },
+    storeQueryWithKey: (cacheKey: string, goalIds: number[], rows: any[]) => {
+      storedQueries.set(cacheKey, {
+        goalIds,
+        rows 
+      });
+      logger.log("STORED_QUERY", {
+        cacheKey,
+        goalIds,
+        rows,
+      })
     },
     findStoredQuery: (goalId: number) => {
       for (const [queryString, data] of storedQueries.entries()) {
         if (data.goalIds.includes(goalId)) {
-          return { queryString, rows: data.rows };
+          return {
+            queryString,
+            rows: data.rows 
+          };
         }
+      }
+      return null;
+    },
+    findStoredQueryByKey: (cacheKey: string) => {
+      const data = storedQueries.get(cacheKey);
+      if (data) {
+        return {
+          cacheKey,
+          rows: data.rows
+        };
       }
       return null;
     },

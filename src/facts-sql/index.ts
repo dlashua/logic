@@ -16,8 +16,7 @@ export async function createDBManager (
   const db = knex(knex_connect_options);
   const queries: string[] = [];
   const goals: { goalId: number; table: string; queryObj: Record<string, Term> }[] = [];
-  const storedQueries = new Map<string, { rows: any[] }>();
-  const rowCache = new Map<string, Map<any, any>>(); // Cache rows by table and primary key
+  const pendingQueries = new Map<string, {goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>}[]>();
   let nextGoalId = 0;
     
   return {
@@ -41,36 +40,88 @@ export async function createDBManager (
       return goals.filter(goal => {
         if (goal.goalId === goalId) return false; // exclude itself
         
-        for (const [key, term] of Object.entries(targetGoal.queryObj)) {
-          if (key in goal.queryObj && goal.queryObj[key] === term) {
-            return true;
+        // Only consider joins that are actually beneficial:
+        // 1. Different tables (cross-table joins)
+        // 2. Same table with different logic variables that can be correlated
+        
+        if (goal.table !== targetGoal.table) {
+          // Different tables - check for shared variables
+          for (const [key, term] of Object.entries(targetGoal.queryObj)) {
+            if (key in goal.queryObj && goal.queryObj[key] === term) {
+              return true;
+            }
           }
+        } else {
+          // Same table - only join if we have different logic variables that need correlation
+          // This requires a pivot point (like primary key) and different variables in other positions
+          return false; // For now, disable same-table joins - they're rarely beneficial
         }
+        
         return false;
       });
     },
-    storeQueryByKey: (cacheKey: string, rows: any[]) => {
-      storedQueries.set(cacheKey, {
-        rows 
-      });
-      logger.log("STORED_QUERY", {
-        cacheKey,
-        rows 
-      });
-    },
-    findStoredQueryByKey: (cacheKey: string) => {
-      const data = storedQueries.get(cacheKey);
-      if (data) {
-        return {
-          cacheKey,
-          rows: data.rows 
-        };
+    addPendingQuery: (table: string, goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>) => {
+      const key = table;
+      if (!pendingQueries.has(key)) {
+        pendingQueries.set(key, []);
       }
-      return null;
+      pendingQueries.get(key)!.push({ goalId, queryObj, whereCols });
     },
-    getStoredQueries: () => storedQueries,
-    clearStoredQueries: () => storedQueries.clear(),
-    getRowCache: () => rowCache, // Expose row cache for relation to access
+    findPendingQueries: (table: string, goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>) => {
+      const key = table;
+      const pending = pendingQueries.get(key) || [];
+      
+      // Find queries with the same pattern (same queryObj structure and same WHERE columns)
+      const mergeable = pending.filter(p => {
+        if (p.goalId === goalId) return false; // exclude self
+        
+        // Check if they have the same query structure (same columns)
+        const pKeys = Object.keys(p.queryObj).sort();
+        const currentKeys = Object.keys(queryObj).sort();
+        
+        if (pKeys.length !== currentKeys.length) return false;
+        
+        for (let i = 0; i < pKeys.length; i++) {
+          if (pKeys[i] !== currentKeys[i]) return false;
+        }
+        
+        // Check if they have the same WHERE column structure
+        const pWhereKeys = Object.keys(p.whereCols).sort();
+        const currentWhereKeys = Object.keys(whereCols).sort();
+        
+        if (pWhereKeys.length !== currentWhereKeys.length) return false;
+        
+        for (let i = 0; i < pWhereKeys.length; i++) {
+          if (pWhereKeys[i] !== currentWhereKeys[i]) return false;
+        }
+        
+        return true;
+      });
+      
+      // Debug logging
+      if (pending.length > 0) {
+        logger.log("PENDING_QUERIES_DEBUG", {
+          table,
+          goalId,
+          totalPending: pending.length,
+          mergeableFound: mergeable.length,
+          allPendingGoals: pending.map(p => p.goalId),
+          mergeableGoals: mergeable.map(m => m.goalId),
+          currentQueryObj: queryObj,
+          currentWhereCols: whereCols,
+          pendingDetails: pending.map(p => ({
+            goalId: p.goalId,
+            queryObj: p.queryObj,
+            whereCols: p.whereCols
+          }))
+        });
+      }
+      
+      return mergeable;
+    },
+    clearPendingQueries: (table: string) => {
+      pendingQueries.delete(table);
+    },
   };
 }
 

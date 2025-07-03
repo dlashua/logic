@@ -1,3 +1,4 @@
+import { or } from "../core/combinators.ts";
 import { query } from "../query.ts";
 import { membero } from "../relations/lists.ts";
 
@@ -46,9 +47,9 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      membero($.person, ["celeste"]),
-  
-      // familytree.person($.person),
+      membero($.person, ["celeste", "alexh"]),
+
+      familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),
@@ -73,8 +74,8 @@ const q = makeQuery();
 const results = await q.toArray();
 
 console.dir({
-  // allres: results,
-  oneres: results.find(x => x.person === "celeste"),
+  allres: results,
+  oneres: results.filter(x => x.person === "celeste"),
   rescnt: results.length,
 }, {
   depth: 100 

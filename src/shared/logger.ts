@@ -1,19 +1,18 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: false,
+  enabled: true,
   allowedIds: new Set<string>(), // empty means allow all
   deniedIds: new Set<string>([
     "SHARED_GOALS",
     "DB_QUERY",
     "NO_DB_ROWS",
-    "CACHE_HIT",
     "UNIFY_SUCCESS",
     "UNIFY_FAILED",
-    "STORED_QUERY",
     "DB_ROWS",
-    "CACHE_WRITTEN",
-    "CACHE_LOOKUP",
+    // "GOAL_CREATED", // Enabled to see queryObj values
+    // "MERGEABLE_CHECK", // Enabled to see merge detection
+    // "PENDING_QUERIES_DEBUG", // Enabled to debug pending queries
   ]), // specific ids to deny
 };
 

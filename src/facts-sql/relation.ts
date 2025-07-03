@@ -4,12 +4,11 @@ import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager } from "./index.ts";
 
-const CACHE_ENABLED = true;
-const JOINS_ENABLED = false;
+const JOINS_ENABLED = true;
 
 export class RegularRelationWithMerger {
   private logger: Logger;
-  private primaryKey: string;
+  private primaryKey?: string;
 
   constructor(
     private dbObj: DBManager,
@@ -18,16 +17,22 @@ export class RegularRelationWithMerger {
     private options?: RelationOptions,
   ) {
     this.logger = logger ?? getDefaultLogger();
-    this.primaryKey = options?.primaryKey || 'id'; // Default to 'id' if not specified
+    this.primaryKey = options?.primaryKey; // No default - honor the idea of no primary key
   }
 
   createGoal(queryObj: Record<string, Term>): Goal {
     const queryKeys = Object.keys(queryObj);
     const goalId = this.dbObj.getNextGoalId();
     this.dbObj.addGoal(goalId, this.table, queryObj);
+    
+    this.logger.log("GOAL_CREATED", {
+      goalId,
+      table: this.table,
+      queryObj
+    });
 
     return async function* factsSql(this: RegularRelationWithMerger, s: Subst) {
-      const rows = await this.cacheOrQuery(goalId, queryObj, s);
+      const rows = await this.executeQuery(goalId, queryObj, s);
       
       let yielded = 0;
       for (const row of rows) {
@@ -52,7 +57,7 @@ export class RegularRelationWithMerger {
     }.bind(this);
   }
 
-  private async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
+  private async executeQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
     const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
     const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
 
@@ -77,45 +82,14 @@ export class RegularRelationWithMerger {
       }
     }
 
-    // Check row cache for primary key queries
-    if (Object.keys(whereCols).length === 1 && this.primaryKey in whereCols && !isVar(whereCols[this.primaryKey])) {
-      const pkValue = whereCols[this.primaryKey];
-      const tableCache = this.dbObj.getRowCache().get(this.table);
-      if (tableCache && tableCache.has(pkValue)) {
-        const row = tableCache.get(pkValue);
-        this.logger.log("ROW_CACHE_HIT", {
-          goalId,
-          table: this.table,
-          primaryKey: this.primaryKey,
-          value: pkValue,
-        });
-        return [row];
-      }
+    // Check if this query can be merged with pending queries
+    const mergeableQueries = await this.findMergeableQueries(goalId, queryObj, whereCols);
+    if (mergeableQueries.length > 0) {
+      return await this.executeMergedQuery(goalId, queryObj, whereCols, mergeableQueries, joinStructure);
     }
 
     const query = this.buildQuery(queryObj, whereCols, joinStructure);
     const sqlString = query.toString();
-    const cacheKey = sqlString;
-    
-    if (CACHE_ENABLED) {
-      this.logger.log("CACHE_LOOKUP", {
-        goalId,
-        cacheKey,
-        allCacheKeys: Array.from(this.dbObj.getStoredQueries().keys()).slice(0, 3)
-      });
-      
-      const storedQuery = this.dbObj.findStoredQueryByKey(cacheKey);
-      if (storedQuery) {
-        this.logger.log("CACHE_HIT", {
-          goalId,
-          queryObj,
-          cacheKey,
-          rowCount: storedQuery.rows.length
-        });
-        
-        return storedQuery.rows;
-      }
-    }
     
     this.dbObj.addQuery(`goalId:${goalId} - ${sqlString}`);
     this.logger.log("DB_QUERY", {
@@ -126,31 +100,11 @@ export class RegularRelationWithMerger {
     });
     const rows = await query;
     
-    if (CACHE_ENABLED) {
-      this.dbObj.storeQueryByKey(cacheKey, rows);
-      this.logger.log("CACHE_WRITTEN", {
-        table: this.table,
-        cacheKey,
-        goalId,
-        rowCount: rows.length
-      });
-
-      // Cache rows by primary key
-      const tableCache = this.dbObj.getRowCache().get(this.table) || new Map();
-      for (const row of rows) {
-        if (this.primaryKey in row) {
-          tableCache.set(row[this.primaryKey], row);
-        }
-      }
-      this.dbObj.getRowCache().set(this.table, tableCache);
-    }
-    
     if (rows.length) {
       this.logger.log("DB_ROWS", {
         table: this.table,
         sql: query.toString(),
         goalId,
-        cacheKey,
         rows,
       });
     } else {
@@ -158,7 +112,6 @@ export class RegularRelationWithMerger {
         table: this.table,
         sql: query.toString(),
         goalId,
-        cacheKey,
         rows,
       });
     }
@@ -166,19 +119,134 @@ export class RegularRelationWithMerger {
     return rows;
   }
 
-  private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, Term>, joinStructure: any) {
-    const selectCols = this.options?.selectColumns || ['*'];
-
-    let query = this.dbObj.db(this.table)
-      .distinct()
-      .select(selectCols)
-      .where(whereCols);
-  
-    if (joinStructure && joinStructure.joins.length > 0) {
-      query = this.applyJoins(query, this.table, joinStructure);
+  private async findMergeableQueries(goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>): Promise<any[]> {
+    // Add this query to pending queries
+    this.dbObj.addPendingQuery(this.table, goalId, queryObj, whereCols);
+    
+    // Wait longer for other queries to arrive (extended batching)
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Find other pending queries with the same pattern
+    const mergeable = this.dbObj.findPendingQueries(this.table, goalId, queryObj, whereCols);
+    
+    // Only merge if we have at least 2 queries (current + 1 other)
+    if (mergeable.length >= 1) {
+      this.logger.log("MERGEABLE_CHECK", {
+        goalId,
+        table: this.table,
+        queryObj,
+        whereCols,
+        mergeableCount: mergeable.length,
+        mergeableGoals: mergeable.map(m => m.goalId),
+        status: "MERGING"
+      });
+      
+      return mergeable;
+    } else {
+      this.logger.log("MERGEABLE_CHECK", {
+        goalId,
+        table: this.table,
+        queryObj,
+        whereCols,
+        mergeableCount: mergeable.length,
+        mergeableGoals: [],
+        status: "NO_MERGE"
+      });
+      
+      return [];
     }
-  
-    return query;
+  }
+
+  private async executeMergedQuery(
+    goalId: number, 
+    queryObj: Record<string, Term>, 
+    whereCols: Record<string, Term>, 
+    mergeableQueries: any[], 
+    joinStructure: any
+  ): Promise<any[]> {
+    // Check if we can merge multiple WHERE values for the same column
+    const allQueries = [{ goalId, queryObj, whereCols }, ...mergeableQueries];
+    
+    // Find common WHERE columns and group by them
+    const commonColumns = this.findCommonWhereColumns(allQueries);
+    
+    if (commonColumns.length > 0) {
+      // We can merge! Create a single query with WHERE IN clause
+      const mergedQuery = this.buildMergedQuery(queryObj, allQueries, commonColumns, joinStructure);
+      const sqlString = mergedQuery.toString();
+      
+      this.dbObj.addQuery(`goalId:${goalId} - MERGED(${allQueries.length}) - ${sqlString}`);
+      this.logger.log("DB_QUERY", {
+        table: this.table,
+        sql: sqlString,
+        goalId,
+        joinStructure,
+        note: `merged query for ${allQueries.length} goals`,
+        mergedGoals: allQueries.map(q => q.goalId)
+      });
+      
+      const rows = await mergedQuery;
+      
+      // TODO: Remove only the specific merged queries from pending, not all pending queries
+      // this.dbObj.clearPendingQueries(this.table);
+      
+      return rows;
+    } else {
+      // Can't merge, execute original query
+      const query = this.buildQuery(queryObj, whereCols, joinStructure);
+      const sqlString = query.toString();
+      
+      this.dbObj.addQuery(`goalId:${goalId} - ${sqlString}`);
+      this.logger.log("DB_QUERY", {
+        table: this.table,
+        sql: sqlString,
+        goalId,
+        joinStructure
+      });
+      const rows = await query;
+      
+      return rows;
+    }
+  }
+
+  private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, Term>, joinStructure: any) {
+    // Build select columns - include all query columns and primary key if specified
+    const selectCols = Object.keys(queryObj);
+    
+    // Ensure primary key is included for fast matching
+    if (this.primaryKey && !selectCols.includes(this.primaryKey)) {
+      selectCols.push(this.primaryKey);
+    }
+    
+    // If we have joins, we need to use table aliases and qualified column names
+    if (joinStructure && joinStructure.joins.length > 0) {
+      const baseAlias = this.table;
+      
+      // Build qualified select columns
+      const qualifiedSelectCols = selectCols.map(col => `${baseAlias}.${col}`);
+      
+      // Build qualified where clauses
+      const qualifiedWhereCols: Record<string, any> = {};
+      for (const [col, value] of Object.entries(whereCols)) {
+        qualifiedWhereCols[`${baseAlias}.${col}`] = value;
+      }
+      
+      let query = this.dbObj.db(`${this.table} as ${baseAlias}`)
+        .distinct()
+        .select(qualifiedSelectCols)
+        .where(qualifiedWhereCols);
+      
+      query = this.applyJoins(query, baseAlias, joinStructure);
+      return query;
+    } else {
+      // No joins, use simple query
+      const query = this.dbObj.db(this.table)
+        .distinct()
+        .select(selectCols)
+        .where(whereCols);
+      
+      return query;
+    }
   }
 
   private applyJoins(query: any, baseAlias: string, joinStructure: any) {
@@ -228,6 +296,11 @@ export class RegularRelationWithMerger {
     }[] = [];
 
     for (const sharedGoal of sharedGoals) {
+      // Only create joins for different tables (cross-table joins)
+      if (sharedGoal.table === this.table) {
+        continue; // Skip same-table goals - they won't benefit from joins
+      }
+      
       const conditions: { leftCol: string; rightCol: string; termId: any }[] = [];
       
       for (const [currentKey, currentTerm] of Object.entries(currentQueryObj)) {
@@ -254,7 +327,90 @@ export class RegularRelationWithMerger {
       baseTable: this.table,
       joins
     };
-  }  
+  }
+
+  private findCommonWhereColumns(allQueries: any[]): string[] {
+    if (allQueries.length < 2) return [];
+    
+    // Get the WHERE columns from the first query
+    const firstWhereColumns = Object.keys(allQueries[0].whereCols);
+    
+    // Check if all other queries have the same WHERE columns
+    const commonColumns = firstWhereColumns.filter(col => {
+      return allQueries.every(query => col in query.whereCols);
+    });
+    
+    return commonColumns;
+  }
+
+  private buildMergedQuery(
+    baseQueryObj: Record<string, Term>, 
+    allQueries: any[], 
+    commonColumns: string[], 
+    joinStructure: any
+  ) {
+    // Build select columns - include all query columns and primary key if specified
+    const selectCols = Object.keys(baseQueryObj);
+    
+    // Ensure primary key is included for fast matching
+    if (this.primaryKey && !selectCols.includes(this.primaryKey)) {
+      selectCols.push(this.primaryKey);
+    }
+    
+    // Collect all unique values for each common column
+    const columnValueMap: Record<string, Set<any>> = {};
+    
+    for (const col of commonColumns) {
+      columnValueMap[col] = new Set();
+      for (const query of allQueries) {
+        if (col in query.whereCols) {
+          columnValueMap[col].add(query.whereCols[col]);
+        }
+      }
+    }
+    
+    // If we have joins, we need to use table aliases and qualified column names
+    if (joinStructure && joinStructure.joins.length > 0) {
+      const baseAlias = this.table;
+      
+      // Build qualified select columns
+      const qualifiedSelectCols = selectCols.map(col => `${baseAlias}.${col}`);
+      
+      let query = this.dbObj.db(`${this.table} as ${baseAlias}`)
+        .distinct()
+        .select(qualifiedSelectCols);
+      
+      // Add WHERE IN clauses for common columns
+      for (const col of commonColumns) {
+        const values = Array.from(columnValueMap[col]);
+        if (values.length > 1) {
+          query = query.whereIn(`${baseAlias}.${col}`, values);
+        } else {
+          query = query.where(`${baseAlias}.${col}`, values[0]);
+        }
+      }
+      
+      query = this.applyJoins(query, baseAlias, joinStructure);
+      return query;
+    } else {
+      // No joins, use simple query
+      let query = this.dbObj.db(this.table)
+        .distinct()
+        .select(selectCols);
+      
+      // Add WHERE IN clauses for common columns
+      for (const col of commonColumns) {
+        const values = Array.from(columnValueMap[col]);
+        if (values.length > 1) {
+          query = query.whereIn(col, values);
+        } else {
+          query = query.where(col, values[0]);
+        }
+      }
+      
+      return query;
+    }
+  }
   
   private async unifyRowWithQuery(
     row: any,

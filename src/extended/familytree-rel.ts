@@ -4,7 +4,8 @@ import { and, eq, or } from "../core/combinators.ts";
 import { createLogicVarProxy } from "../query.ts";
 import { uniqueo, not } from "../relations/control.ts";
 import { collecto } from "../relations/aggregates.ts";
-import { memoize } from "../shared/memoize.ts";
+// import { memoize } from "../shared/memoize.ts";
+const memoize = (fn) => fn;
 // import { getCousinsOf } from "../test/direct-sql.ts";
 
 export class FamilytreeRelations {

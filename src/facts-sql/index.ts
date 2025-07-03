@@ -52,9 +52,13 @@ export async function createDBManager (
             }
           }
         } else {
-          // Same table - only join if we have different logic variables that need correlation
-          // This requires a pivot point (like primary key) and different variables in other positions
-          return false; // For now, disable same-table joins - they're rarely beneficial
+          // Same table - check if they share variables (for column expansion)
+          for (const [key, term] of Object.entries(targetGoal.queryObj)) {
+            if (key in goal.queryObj && goal.queryObj[key] === term) {
+              return true; // They share a variable, so target goal can fetch additional columns
+            }
+          }
+          return false;
         }
         
         return false;
@@ -66,12 +70,20 @@ export async function createDBManager (
         pendingQueries.set(key, []);
       }
       pendingQueries.get(key)!.push({ goalId, queryObj, whereCols });
+      
+      if (goalId === 2) {
+        logger.log("PENDING_ADD", `Added Goal ${goalId} to pending. Total pending: ${pendingQueries.get(key)!.length}`);
+      }
     },
     findPendingQueries: (table: string, goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>) => {
       const key = table;
       const pending = pendingQueries.get(key) || [];
       
       // Find queries with the same pattern (same queryObj structure and same WHERE columns)
+      if (goalId === 2) {
+        logger.log("MERGE_DEBUG", `Goal ${goalId}: Checking ${pending.length} pending queries: ${pending.map(p => `Goal${p.goalId}(${Object.keys(p.queryObj).join(',')})`).join(', ')}`);
+      }
+      
       const mergeable = pending.filter(p => {
         if (p.goalId === goalId) return false; // exclude self
         
@@ -79,20 +91,45 @@ export async function createDBManager (
         const pKeys = Object.keys(p.queryObj).sort();
         const currentKeys = Object.keys(queryObj).sort();
         
-        if (pKeys.length !== currentKeys.length) return false;
+        if (pKeys.length !== currentKeys.length) {
+          if (goalId === 2) {
+            logger.log("MERGE_DEBUG", `Goal ${goalId}: Different query key lengths - pending: [${pKeys.join(',')}], current: [${currentKeys.join(',')}]`);
+          }
+          return false;
+        }
         
         for (let i = 0; i < pKeys.length; i++) {
-          if (pKeys[i] !== currentKeys[i]) return false;
+          if (pKeys[i] !== currentKeys[i]) {
+            if (goalId === 2) {
+              logger.log("MERGE_DEBUG", `Goal ${goalId} vs Goal ${p.goalId}: Different query keys at index ${i} - pending: ${pKeys[i]}, current: ${currentKeys[i]}`);
+            }
+            return false;
+          }
         }
         
         // Check if they have the same WHERE column structure
         const pWhereKeys = Object.keys(p.whereCols).sort();
         const currentWhereKeys = Object.keys(whereCols).sort();
         
-        if (pWhereKeys.length !== currentWhereKeys.length) return false;
+        if (pWhereKeys.length !== currentWhereKeys.length) {
+          if (goalId === 2) {
+            logger.log("MERGE_DEBUG", `Goal ${goalId}: Different WHERE key lengths - pending: [${pWhereKeys.join(',')}], current: [${currentWhereKeys.join(',')}]`);
+          }
+          return false;
+        }
         
         for (let i = 0; i < pWhereKeys.length; i++) {
-          if (pWhereKeys[i] !== currentWhereKeys[i]) return false;
+          if (pWhereKeys[i] !== currentWhereKeys[i]) {
+            if (goalId === 2) {
+              logger.log("MERGE_DEBUG", `Goal ${goalId}: Different WHERE keys at index ${i} - pending: ${pWhereKeys[i]}, current: ${currentWhereKeys[i]}`);
+            }
+            return false;
+          }
+        }
+        
+        // If we reach here, it should be mergeable
+        if (goalId === 2) {
+          logger.log("MERGE_DEBUG", `Goal ${goalId}: MERGEABLE with goal ${p.goalId}`);
         }
         
         return true;

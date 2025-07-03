@@ -64,7 +64,8 @@ export class RegularRelationWithMerger {
     this.logger.log("SHARED_GOALS", {
       goalId,
       sharedGoals,
-      joinStructure
+      joinStructure,
+      allGoals: this.dbObj.getGoals().map(g => ({ goalId: g.goalId, table: g.table, queryObj: g.queryObj }))
     });
 
     const walkedQuery: Record<string, Term> = {};
@@ -213,6 +214,19 @@ export class RegularRelationWithMerger {
     // Build select columns - include all query columns and primary key if specified
     const selectCols = Object.keys(queryObj);
     
+    // Add columns from shared goals that share variables with this goal
+    const sharedGoals = joinStructure.sharedGoals || [];
+    for (const sharedGoal of sharedGoals) {
+      if (sharedGoal.table === this.table) {
+        // Same table - add their columns to our SELECT
+        for (const column of Object.keys(sharedGoal.queryObj)) {
+          if (!selectCols.includes(column)) {
+            selectCols.push(column);
+          }
+        }
+      }
+    }
+    
     // Ensure primary key is included for fast matching
     if (this.primaryKey && !selectCols.includes(this.primaryKey)) {
       selectCols.push(this.primaryKey);
@@ -323,9 +337,27 @@ export class RegularRelationWithMerger {
       }
     }
 
+    // Also collect same-table goals that share variables for column expansion
+    const sameTableSharedGoals = [];
+    for (const sharedGoal of sharedGoals) {
+      if (sharedGoal.table === this.table) {
+        // Check if they share variables
+        const hasSharedVars = Object.entries(currentQueryObj).some(([currentKey, currentTerm]) =>
+          Object.entries(sharedGoal.queryObj).some(([sharedKey, sharedTerm]) =>
+            currentTerm === sharedTerm // Same variable reference
+          )
+        );
+        
+        if (hasSharedVars) {
+          sameTableSharedGoals.push(sharedGoal);
+        }
+      }
+    }
+
     return {
       baseTable: this.table,
-      joins
+      joins,
+      sharedGoals: sameTableSharedGoals
     };
   }
 

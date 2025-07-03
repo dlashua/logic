@@ -10,7 +10,7 @@ import {
   state,
   countrycode,
   population
-} from "./city-data.ts"
+} from "./city-data-mem.ts"
 
 
 await acquireData();

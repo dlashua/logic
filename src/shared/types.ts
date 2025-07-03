@@ -50,3 +50,5 @@ export interface IndexManager<K = any> {
   set(position: K, index: IndexMap): void;
   has(position: K): boolean;
 }
+
+export type GoalFunction = (s: Subst) => AsyncGenerator<any, void, unknown>;

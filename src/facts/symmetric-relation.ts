@@ -1,6 +1,6 @@
 import { Term } from "../core/types.ts";
 import { eq, or } from "../core/combinators.ts";
-import { Logger } from "../shared/logger.ts";
+import { SimpleLogger } from "../shared/simple-logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { MemoryRelation } from "./memory-relation.ts";
 import { MemoryObjRelation } from "./memory-obj-relation.ts";
@@ -10,7 +10,7 @@ export class SymmetricMemoryRelation {
   private memoryRelation: MemoryRelation;
 
   constructor(
-    logger: Logger,
+    logger: SimpleLogger,
     cache: BaseCache,
     config: FactRelationConfig
   ) {
@@ -49,7 +49,7 @@ export class SymmetricMemoryObjRelation {
 
   constructor(
     private keys: string[],
-    logger: Logger,
+    logger: SimpleLogger,
     cache: BaseCache,
     config: FactRelationConfig
   ) {

@@ -1,4 +1,4 @@
-import { Logger } from "../shared/logger.ts";
+import { SimpleLogger } from "../shared/simple-logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { MemoryRelation } from "./memory-relation.ts";
 import { MemoryObjRelation } from "./memory-obj-relation.ts";
@@ -6,7 +6,7 @@ import { SymmetricMemoryRelation, SymmetricMemoryObjRelation } from "./symmetric
 import { FactRelation, FactObjRelation, FactRelationConfig } from "./types.ts";
 
 export interface FactRelationFactoryDependencies {
-  logger: Logger;
+  logger: SimpleLogger;
   cache: BaseCache;
   config: FactRelationConfig;
 }

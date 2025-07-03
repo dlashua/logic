@@ -1,5 +1,5 @@
 import { ConfigurationManager } from "../shared/config.ts";
-import { Logger } from "../shared/logger.ts";
+import { getDefaultLogger } from "../shared/simple-logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { BaseConfig } from "../shared/types.ts";
 import { FactRelationFactory } from "./relation-factory.ts";
@@ -10,7 +10,7 @@ export const makeFacts = (
   factConfig?: FactRelationConfig
 ) => {
   const configuration = ConfigurationManager.create(config);
-  const logger = new Logger(configuration.logging);
+  const logger = getDefaultLogger();
   const cache = new BaseCache(configuration.cache, logger);
   
   const factory = new FactRelationFactory({
@@ -31,7 +31,7 @@ export const makeFactsObj = (
   factConfig?: FactRelationConfig
 ): FactObjRelation => {
   const configuration = ConfigurationManager.create(config);
-  const logger = new Logger(configuration.logging);
+  const logger = getDefaultLogger();
   const cache = new BaseCache(configuration.cache, logger);
   
   const factory = new FactRelationFactory({
@@ -51,7 +51,7 @@ export const makeFactsSym = (
   factConfig?: FactRelationConfig
 ): FactRelation => {
   const configuration = ConfigurationManager.create(config);
-  const logger = new Logger(configuration.logging);
+  const logger = getDefaultLogger();
   const cache = new BaseCache(configuration.cache, logger);
   
   const factory = new FactRelationFactory({
@@ -72,7 +72,7 @@ export const makeFactsObjSym = (
   factConfig?: FactRelationConfig
 ): FactObjRelation => {
   const configuration = ConfigurationManager.create(config);
-  const logger = new Logger(configuration.logging);
+  const logger = getDefaultLogger();
   const cache = new BaseCache(configuration.cache, logger);
   
   const factory = new FactRelationFactory({

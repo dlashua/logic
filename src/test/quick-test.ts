@@ -69,7 +69,7 @@ const q = makeQuery();
 const results = await q.toArray();
 
 console.dir({
-  allres: results,
+  // allres: results,
   rescnt: results.length,
 }, {
   depth: 100 

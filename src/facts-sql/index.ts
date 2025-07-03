@@ -1,6 +1,5 @@
 import knex from "knex";
 import type { Knex } from "knex";
-import { ConfigurationManager } from "../shared/config.ts";
 import { SimpleLogger, getDefaultLogger } from "../shared/simple-logger.ts";
 import type { BaseConfig as Configuration } from "../shared/types.ts";
 import type { Term, Goal } from "../core/types.ts";
@@ -80,9 +79,6 @@ export const makeRelDB = async (
   configOverrides?: Partial<Configuration>,
 ) => {
   options ??= {};
-
-  // Create configuration
-  const config = ConfigurationManager.create(configOverrides);
   
   // Create core dependencies
   const logger = getDefaultLogger();

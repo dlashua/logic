@@ -1,5 +1,5 @@
 import { CacheType, CacheConfig } from './types.ts';
-import { Logger } from './logger.ts';
+import { SimpleLogger } from './simple-logger.ts';
 
 interface CacheEntry {
   value: any;
@@ -17,7 +17,7 @@ export class BaseCache {
 
   constructor(
     protected config: CacheConfig,
-    protected logger: Logger
+    protected logger: SimpleLogger
   ) {
     this.maxSize = config.maxSize || 10000;
     this.ttlMs = config.ttlMs || 30 * 60 * 1000; // 30 minutes default

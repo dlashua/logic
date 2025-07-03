@@ -1,6 +1,6 @@
 import { Term, Subst } from "../core/types.ts";
 import { isVar } from "../core/kernel.ts";
-import { Logger } from "../shared/logger.ts";
+import { SimpleLogger } from "../shared/simple-logger.ts";
 import { BaseCache } from "../shared/cache.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
 import { GoalFunction } from "../shared/types.ts";
@@ -13,7 +13,7 @@ export class MemoryObjRelation {
 
   constructor(
     private keys: string[],
-    private logger: Logger,
+    private logger: SimpleLogger,
     private cache: BaseCache,
     private config: FactRelationConfig
   ) {}
@@ -41,9 +41,13 @@ export class MemoryObjRelation {
 
   private createGoal(queryObj: Record<string, Term>, goalId: number): GoalFunction {
     return async function* (this: MemoryObjRelation, s: Subst) {
-      this.logger.log("RUN_START", `Starting memory object relation goal ${goalId}`, {
-        queryObj 
-      });
+      this.logger.log(
+        "RUN_START",
+        {
+          message: `Starting memory object relation goal ${goalId}`,
+          queryObj,
+        }
+      );
 
       const queryKeys = Object.keys(queryObj);
       const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
@@ -59,7 +63,12 @@ export class MemoryObjRelation {
       let candidateIndexes: Set<number> | null = null;
       
       if (indexedKeys.length > 0) {
-        this.logger.log("INDEX_LOOKUP", `Using indexes for keys: ${indexedKeys.join(', ')}`);
+        this.logger.log(
+          "INDEX_LOOKUP",
+          {
+            message: `Using indexes for keys: ${indexedKeys.join(', ')}`,
+          }
+        );
         
         for (const key of indexedKeys) {
           const value = walkedQuery[key];
@@ -82,7 +91,12 @@ export class MemoryObjRelation {
       }
 
       if (candidateIndexes === null) {
-        this.logger.log("MEMORY_SCAN", `Full scan of ${this.facts.length} object facts`);
+        this.logger.log(
+          "MEMORY_SCAN",
+          {
+            message: `Full scan of ${this.facts.length} object facts`,
+          }
+        );
         
         for (const fact of this.facts) {
           const s1 = await unificationUtils.unifyRowWithWalkedQ(
@@ -92,15 +106,24 @@ export class MemoryObjRelation {
             s
           );
           if (s1) {
-            this.logger.log("FACT_MATCH", "Object fact matched", {
-              fact,
-              queryObj 
-            });
+            this.logger.log(
+              "FACT_MATCH",
+              {
+                message: "Object fact matched",
+                fact,
+                queryObj,
+              }
+            );
             yield s1;
           }
         }
       } else {
-        this.logger.log("INDEX_LOOKUP", `Checking ${candidateIndexes.size} indexed object facts`);
+        this.logger.log(
+          "INDEX_LOOKUP",
+          {
+            message: `Checking ${candidateIndexes.size} indexed object facts`,
+          }
+        );
         
         for (const factIndex of candidateIndexes) {
           const fact = this.facts[factIndex];
@@ -111,16 +134,25 @@ export class MemoryObjRelation {
             s
           );
           if (s1) {
-            this.logger.log("FACT_MATCH", "Indexed object fact matched", {
-              fact,
-              queryObj 
-            });
+            this.logger.log(
+              "FACT_MATCH",
+              {
+                message: "Indexed object fact matched",
+                fact,
+                queryObj,
+              }
+            );
             yield s1;
           }
         }
       }
 
-      this.logger.log("RUN_END", `Completed memory object relation goal ${goalId}`);
+      this.logger.log(
+        "RUN_END",
+        {
+          message: `Completed memory object relation goal ${goalId}`,
+        }
+      );
     }.bind(this);
   }
 
@@ -144,8 +176,12 @@ export class MemoryObjRelation {
       }
     }
 
-    this.logger.log("FACT_ADDED", `Added object fact at index ${factIndex}`, {
-      fact 
-    });
+    this.logger.log(
+      "FACT_ADDED",
+      {
+        message: `Added object fact at index ${factIndex}`,
+        fact,
+      }
+    );
   }
 }

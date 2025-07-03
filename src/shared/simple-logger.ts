@@ -13,7 +13,7 @@ const DEFAULT_CONFIG = {
     "STORED_QUERY",
     "DB_ROWS",
     "CACHE_WRITTEN",
-    // "CACHE_LOOKUP",
+    "CACHE_LOOKUP",
   ]), // specific ids to deny
 };
 
@@ -26,18 +26,22 @@ export interface SimpleLoggerConfig {
 export class SimpleLogger {
   constructor(private config: SimpleLoggerConfig) {}
 
-  log(id: string, data: Record<string, any>): void {
+  log(id: string, data: Record<string, any> | string): void {
     if (!this.config.enabled) return;
     
     if (this.config.deniedIds.has(id)) return;
     
     if (this.config.allowedIds.size > 0 && !this.config.allowedIds.has(id)) return;
     
-    console.log(`[${id}]`);
-    console.log(util.inspect(data, {
-      depth: null,
-      colors: true 
-    }));
+    if(typeof data === "string") {
+      console.log(`[${id}] ${data}`);
+    } else {
+      console.log(`[${id}]`, util.inspect(data, {
+        depth: null,
+        colors: true 
+      }));
+    }
+    // console.log();
   }
 }
 

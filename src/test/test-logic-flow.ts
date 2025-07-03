@@ -1,52 +1,34 @@
 import { Subst, Term } from "../core/types.ts";
 import { walk } from "../core/kernel.ts";
 import { eq, and, or } from "../core/combinators.ts";
-import { createLogicVarProxy } from "../query.ts";
+import { createLogicVarProxy, query } from "../query.ts";
+import { membero } from "../relations/lists.ts";
+import { not } from "../relations/control.ts";
+import { familytree, info_color, info_number } from "./familytree-sql-facts.ts";
+
+const {
+  parent_kid
+} = familytree;
 
 const log = console.log;
 const { proxy: $ } = createLogicVarProxy("test_");
 const S = new Map();
 
-const forceVar = (id: string) => ({
-  tag: "var",
-  id,
-});
+await query()
+  .where(($) => [
 
-let outcnt = 0;
-const outAll = async (format: Record<string, Term>, s: AsyncGenerator<Subst>) => {
-  const myOutCnt = ++outcnt;
-  let cnt = 0;
-  for await (const one of s) {
-    const t: Record<string, any> = {};
-    t.__s__ = one;
-    // t.__d__ = one;
-    for (const [k,v] of Object.entries(format)) {
-      t[k] = await walk(v, one)
-    }
+    // parent_kid($.top, $.kid1),
+    // parent_kid($.kid1, $.kid2),
+    // parent_kid($.kid2, $.kid3),
+    // parent_kid($.kid3, $.kid4),
+    // and(
+    //   membero($.oneperson, [$.top, $.kid1, $.kid2, $.kid3, $.kid4]),
+    //   info_number($.oneperson, 4),
+    //   info_color($.oneperson, "blue"),
+    // )
 
-    console.log(myOutCnt, ++cnt, t);
-  }
-}
+    info_number($.person, 4),
+    // not(info_color($.person, "blue")),
+    parent_kid($.parent, $.person),
 
-const goal = and(
-  or(
-    eq($.x, 20),
-    eq($.x, 3),
-    eq($.x, 4),
-  ),
-  or(
-    eq($.y, 7),
-    eq($.y, 3),
-    eq($.y, 20),
-  ),
-  eq($.x,$.y),
-);
-
-
-await(outAll(
-  {
-    x: $.x,
-    y: $.y,
-  },
-  goal(S)
-));
+  ]).toArray().then(x => x.forEach(x => log(x)));

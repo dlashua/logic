@@ -29,18 +29,35 @@ const R = await relDB.relSym(
     selectColumns: ["a", "b"],
   } 
 );
+const I = await relDB.rel(
+  "people_info"
+);
 
-const parent_kid = (p: Term, k: Term) =>
+export const parent_kid = (p: Term, k: Term) =>
   PK({
     parent: p,
     kid: k,
   });
 
-const relationship = (a: Term<string|number>, b: Term<string|number>) => 
+export const relationship = (a: Term<string|number>, b: Term<string|number>) => 
   R({
     a,
     b,
   });
+
+export const info_color = (person: Term<string>, color: Term<string>) =>
+  I({
+    person,
+    color,
+  });
+
+export const info_number = (person: Term<string>, number: Term<number>) =>
+  I({
+    person,
+    number,
+  })
+
+
     
 // RELATIONS
 export const familytree = new FamilytreeRelations(parent_kid, relationship);

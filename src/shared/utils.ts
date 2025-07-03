@@ -1,4 +1,5 @@
-import { Term, Subst } from '../core/types.ts';
+import { keyBy } from 'lodash';
+import { Term, Subst, Var } from '../core/types.ts';
 import { isVar , walk, unify } from "../core/kernel.ts";
 import { WhereClause } from './types.ts';
 
@@ -76,6 +77,22 @@ export const queryUtils = {
       whereClauses,
       walkedQ 
     };
+  },
+
+  onlyGrounded<T>(params: Record<string, Term<T>>) {
+    return Object.fromEntries(
+      Object.entries(params).filter(
+        ([key, value]) => !isVar(value)
+      )
+    ) as Record<string, T>;
+  },
+
+  onlyVars(params: Record<string, Term>) {
+    return Object.fromEntries(
+      Object.entries(params).filter(
+        ([key, value]) => isVar(value)
+      )
+    ) as Record<string, Var>;
   }
 };
 

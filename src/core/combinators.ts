@@ -117,3 +117,26 @@ export function lift<T extends (...args: any) => any>(fn: T): LiftedArgs<T> {
     };
   }) as LiftedArgs<T>;
 }
+
+/**
+ * Soft-cut if-then-else combinator.
+ * ifte(ifGoal, thenGoal, elseGoal) succeeds with thenGoal if ifGoal succeeds,
+ * otherwise succeeds with elseGoal.
+ */
+export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
+  return async function* ifteGoal(s: Subst) {
+    let succeeded = false;
+    const results: Subst[] = [];
+    for await (const s1 of ifGoal(s)) {
+      succeeded = true;
+      results.push(s1);
+    }
+    if (succeeded) {
+      for (const s1 of results) {
+        yield* thenGoal(s1);
+      }
+    } else {
+      yield* elseGoal(s);
+    }
+  };
+}

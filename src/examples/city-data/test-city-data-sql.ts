@@ -1,3 +1,4 @@
+import util from "node:util";
 import { query } from "../../query.ts";
 import { and } from "../../core/combinators.ts";
 import { gto } from "../../relations/numeric.ts";
@@ -31,8 +32,17 @@ await timeit("sql", async () => {
         }),
         city({
           id: $.id,
-          state: $.in_state 
+          state: $.in_state
         }),
+
+        // city({
+        //   id: $.id,
+        //   country_code: "AU" 
+        // }),
+        // city({
+        //   id: $.id2,
+        //   state: $.in_state2
+        // }),
 
 
         // group_by_collecto(
@@ -70,6 +80,7 @@ await timeit("sql", async () => {
   }
   console.log("all sql queries", relDB.getQueries());
   console.log({
+    results: res,
     results_count: res.length,
     queries_count: relDB.getQueryCount() 
   });

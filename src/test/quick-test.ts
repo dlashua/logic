@@ -1,5 +1,12 @@
-import { or } from "../core/combinators.ts";
+import {
+  and,
+  conde,
+  eq,
+  ifte,
+  or
+} from "../core/combinators.ts"
 import { query } from "../query.ts";
+import { not } from "../relations/control.ts";
 import { membero } from "../relations/lists.ts";
 
 console.log("START quick-test");
@@ -47,13 +54,20 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      membero($.person, ["celeste", "alexh"]),
+      membero($.person, ["celeste", "carter"]),
+      // familytree.parent_kid($.parent, $.person),
+      // not(eq($.parent, "daniel")),
+      // ifte(
+      //   familytree.relationship($.parent, $.stepparent),
+      //   eq(1,1),
+      //   eq($.stepparent, "none"),
+      // )
 
-      familytree.person($.person),
+      // familytree.person($.person),
       
       familytree.parentAgg($.person, $.parents),
       familytree.stepParentAgg($.person, $.step_parents),
-      familytree.grandparentAgg($.person, $.grand_parents),
+      // familytree.grandparentAgg($.person, $.grand_parents),
       // familytree.greatgrandparentAgg($.person, $.great_grand_parents),
       // familytree.uncleAgg($.person, $.uncle, 1),
   

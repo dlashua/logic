@@ -1,18 +1,31 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: true,
-  allowedIds: new Set<string>(), // empty means allow all
+  enabled: false,
+  allowedIds: new Set<string>([
+  ]), // empty means allow all
   deniedIds: new Set<string>([
-    "SHARED_GOALS",
-    "DB_QUERY",
-    "NO_DB_ROWS",
-    "UNIFY_SUCCESS",
+    // "UNIFY_SUCCESS",
     "UNIFY_FAILED",
+
+    // "ALL_GOAL_ROWS",
     "DB_ROWS",
-    // "GOAL_CREATED", // Enabled to see queryObj values
-    // "MERGEABLE_CHECK", // Enabled to see merge detection
-    // "PENDING_QUERIES_DEBUG", // Enabled to debug pending queries
+    "COMMON_GOALS",
+    "DB_QUERY",
+
+    // "GOAL_STARTED",
+    // "SHARED_GOALS", // Disabled to reduce noise
+    // "DB_QUERY", // Disabled to reduce noise
+    // "NO_DB_ROWS",
+    // "DB_ROWS",
+    // "GOAL_CREATED", // Disabled to reduce noise
+    // "MERGEABLE_CHECK", // Disabled to reduce noise  
+    // "PENDING_QUERIES_DEBUG", // Disabled to reduce noise
+    // "MERGE_DEBUG", // Disabled to reduce noise
+    // "PENDING_ADD", // Disabled to reduce noise
+
+    // "CACHE_HIT", // Enabled to see cache hits
+    // "SHARED_UNIFY", // Enabled to see shared unification
   ]), // specific ids to deny
 };
 

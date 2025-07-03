@@ -62,13 +62,27 @@ export class RegularRelationWithMerger {
   private async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
     // Walk all terms with current Subst to create cache key
     const walkedTerms: Record<string, any> = {};
+    const groundedTerms: Record<string, any> = {};
     for (const [key, term] of Object.entries(queryObj)) {
-      walkedTerms[key] = await walk(term, s);
+      const walkedTerm = await walk(term, s);
+      walkedTerms[key] = walkedTerm;
+      
+      // Only include grounded (non-variable) terms in cache key
+      if (!isVar(walkedTerm)) {
+        groundedTerms[key] = walkedTerm;
+      }
     }
-    const cacheKey = `${goalId}_${JSON.stringify(walkedTerms)}`;
+    const cacheKey = `${this.table}_${JSON.stringify(groundedTerms)}`;
     
     // Check if this specific goal+subst combination has been cached
     if (CACHE_ENABLED) {
+      this.logger.log("CACHE_LOOKUP", {
+        goalId,
+        walkedTerms,
+        cacheKey,
+        allCacheKeys: Array.from(this.dbObj.getStoredQueries().keys())
+      });
+      
       const storedQuery = this.dbObj.findStoredQueryByKey(cacheKey);
       if (storedQuery) {
         this.logger.log("CACHE_HIT", {
@@ -110,7 +124,7 @@ export class RegularRelationWithMerger {
 
     const query = this.buildQuery(queryObj, whereCols, joinStructure);
     
-    this.dbObj.addQuery(query.toString());
+    this.dbObj.addQuery(`goalId:${goalId} - ${query.toString()}`);
     this.logger.log("DB_QUERY", {
       table: this.table,
       sql: query.toString(),
@@ -136,6 +150,7 @@ export class RegularRelationWithMerger {
         table: this.table,
         sql: query.toString(),
         goalId,
+        cacheKey,
         rows,
       });
     } else {
@@ -143,6 +158,7 @@ export class RegularRelationWithMerger {
         table: this.table,
         sql: query.toString(),
         goalId,
+        cacheKey,
         rows,
       });
     }

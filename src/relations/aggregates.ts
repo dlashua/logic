@@ -1,6 +1,13 @@
-import type { Subst, Term, Goal, Var } from "../core/types.ts";
-import { walk , arrayToLogicList } from "../core/kernel.ts";
+import type {
+  Subst,
+  Term,
+  Goal,
+  Var,
+  Observable
+} from "../core/types.ts"
+import { walk, arrayToLogicList } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
+import { SimpleObservable } from "../core/observable.ts";
 
 /**
  * Helper: deduplicate an array of items using JSON.stringify for deep equality.
@@ -22,41 +29,65 @@ function deduplicate<T>(items: T[]): T[] {
  * Helper: group by key for logic goals, then apply a callback per group.
  * Calls cb(s, key, items) for each group, where key is the group key and items is the array of values.
  */
-export async function* groupByGoal(
+export function groupByGoal(
   keyVar: Term,
   valueVar: Term,
   goal: Goal,
   s: Subst,
-  cb: (s: Subst, key: any, items: any[]) => AsyncGenerator<Subst>,
-): AsyncGenerator<Subst> {
-  // Collect all (key, value) pairs
-  const pairs: { key: any; value: any }[] = [];
-  for await (const s1 of goal(s)) {
-    const key = await walk(keyVar, s1);
-    const value = await walk(valueVar, s1);
-    pairs.push({
-      key,
-      value,
+  cb: (s: Subst, key: any, items: any[]) => SimpleObservable<Subst>,
+): SimpleObservable<Subst> {
+  return new SimpleObservable<Subst>((observer) => {
+    // Collect all (key, value) pairs
+    const pairs: { key: any; value: any }[] = [];
+    
+    goal(s).subscribe({
+      next: (s1) => {
+        const key = walk(keyVar, s1);
+        const value = walk(valueVar, s1);
+        pairs.push({
+          key,
+          value 
+        });
+      },
+      complete: () => {
+        // Group by key (map to array of values)
+        const grouped = new Map<string, { key: any; items: any[] }>();
+        for (const { key, value } of pairs) {
+          const k = JSON.stringify(key); // Use JSON.stringify for deep equality
+          if (!grouped.has(k))
+            grouped.set(k, {
+              key,
+              items: [],
+            });
+          const group = grouped.get(k);
+          if (group) group.items.push(value);
+        }
+        
+        // For each group, yield using the callback
+        let completedGroups = 0;
+        const totalGroups = grouped.size;
+        
+        if (totalGroups === 0) {
+          observer.complete?.();
+          return;
+        }
+        
+        for (const { key, items } of grouped.values()) {
+          cb(s, key, items).subscribe({
+            next: observer.next,
+            error: observer.error,
+            complete: () => {
+              completedGroups++;
+              if (completedGroups === totalGroups) {
+                observer.complete?.();
+              }
+            }
+          });
+        }
+      },
+      error: observer.error
     });
-  }
-  // Group by key (map to array of values)
-  const grouped = new Map<string, { key: any; items: any[] }>();
-  for (const { key, value } of pairs) {
-    const k = JSON.stringify(key); // Use JSON.stringify for deep equality
-    if (!grouped.has(k))
-      grouped.set(k, {
-        key,
-        items: [],
-      });
-    const group = grouped.get(k);
-    if (group) group.items.push(value);
-  }
-  // For each group, yield using the callback
-  for (const { key, items } of grouped.values()) {
-    for await (const s2 of cb(s, key, items)) {
-      yield s2;
-    }
-  }
+  });
 }
 
 /**
@@ -72,15 +103,25 @@ export function aggregateRelFactory(
   dedup = false,
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return async function* aggregateRelFactory (s: Subst) {
+    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
       const results: Term[] = [];
-      for await (const s1 of goal(s)) {
-        const val = await walk(x, s1);
-        results.push(val);
-      }
-      const agg = aggFn(dedup ? deduplicate(results) : results);
-      yield* eq(out, agg)(s);
-    };
+      
+      goal(s).subscribe({
+        next: (s1) => {
+          const val = walk(x, s1);
+          results.push(val);
+        },
+        complete: () => {
+          const agg = aggFn(dedup ? deduplicate(results) : results);
+          eq(out, agg)(s).subscribe({
+            next: observer.next,
+            error: observer.error,
+            complete: observer.complete
+          });
+        },
+        error: observer.error
+      });
+    });
   };
 }
 
@@ -98,20 +139,31 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outAgg: Term,
     dedup = false,
   ): Goal =>
-    async function* (s: Subst) {
-      yield* groupByGoal(
+    (s: Subst) => {
+      return groupByGoal(
         keyVar,
         valueVar,
         goal,
         s,
-        async function* (s, key, items) {
+        (s, key, items) => {
           const groupItems = dedup ? deduplicate(items) : items;
           const agg = aggFn(groupItems);
-          for await (const s2 of eq(outKey, key)(s)) {
-            for await (const s3 of eq(outAgg, agg)(s2)) {
-              yield s3;
-            }
-          }
+          return new SimpleObservable<Subst>((observer) => {
+            eq(outKey, key)(s).subscribe({
+              next: (s2) => {
+                eq(outAgg, agg)(s2).subscribe({
+                  next: observer.next,
+                  error: observer.error,
+                  complete: observer.complete
+                });
+              },
+              error: observer.error,
+              complete: () => {
+                // If eq(outKey, key) fails, still complete
+                observer.complete?.();
+              }
+            });
+          });
         },
       );
     };
@@ -142,5 +194,3 @@ export const collect_distincto = aggregateRelFactory(
  * Usage: counto(x, goal, n)
  */
 export const counto = aggregateRelFactory((arr) => arr.length);
-
-

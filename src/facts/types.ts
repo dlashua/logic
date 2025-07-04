@@ -1,15 +1,14 @@
-import { Term, Subst } from "../core/types.ts";
-import { GoalFunction } from "../shared/types.ts";
+import { Term, Subst, Goal } from "../core/types.ts";
 
 export interface FactRelation {
-  (...query: Term[]): GoalFunction;
+  (...query: Term[]): Goal;
   set: (...fact: Term[]) => void;
   raw: Term[][];
   indexes: Map<number, Map<any, Set<number>>>;
 }
 
 export interface FactObjRelation {
-  (queryObj: Record<string, Term>): GoalFunction;
+  (queryObj: Record<string, Term>): Goal;
   set: (factObj: Record<string, Term>) => void;
   raw: Record<string, Term>[];
   indexes: Map<string, Map<any, Set<number>>>;

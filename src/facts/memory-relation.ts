@@ -1,8 +1,8 @@
-import { Term, Subst } from "../core/types.ts";
-import { isVar } from "../core/kernel.ts";
+import { Term, Subst, Goal } from "../core/types.ts";
+import { isVar, walk, unify } from "../core/kernel.ts";
 import { Logger } from "../shared/logger.ts";
 import { queryUtils, unificationUtils, indexUtils } from "../shared/utils.ts";
-import type { GoalFunction } from "../shared/types.ts";
+import { SimpleObservable } from "../core/observable.ts";
 import { FactRelation, FactRelationConfig } from "./types.ts";
 
 export class MemoryRelation {
@@ -16,7 +16,7 @@ export class MemoryRelation {
   ) {}
 
   createRelation(): FactRelation {
-    const goalFn = (...query: Term[]): GoalFunction => {
+    const goalFn = (...query: Term[]): Goal => {
       const goalId = this.generateGoalId();
       return this.createGoal(query, goalId);
     };
@@ -35,8 +35,10 @@ export class MemoryRelation {
     return ++this.goalIdCounter;
   }
 
-  private createGoal(query: Term[], goalId: number): GoalFunction {
-    return async function* (this: MemoryRelation, s: Subst) {
+  private createGoal(query: Term[], goalId: number): Goal {
+    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+      let cancelled = false;
+      
       this.logger.log(
         "RUN_START",
         {
@@ -45,100 +47,124 @@ export class MemoryRelation {
         }
       );
 
-      const walkedQuery = await queryUtils.walkAllArray(query, s);
-      
-      // Try to use indexes for optimization
-      const indexedPositions: number[] = [];
-      walkedQuery.forEach((term, i) => {
-        if (!isVar(term) && this.indexes.has(i)) {
-          indexedPositions.push(i);
-        }
-      });
+      const processQuery = async () => {
+        try {
+          const walkedQuery = await queryUtils.walkAllArray(query, s);
+          
+          // Try to use indexes for optimization
+          const indexedPositions: number[] = [];
+          walkedQuery.forEach((term, i) => {
+            if (!isVar(term) && this.indexes.has(i)) {
+              indexedPositions.push(i);
+            }
+          });
 
-      let candidateIndexes: Set<number> | null = null;
-      
-      if (indexedPositions.length > 0) {
-        this.logger.log(
-          "INDEX_LOOKUP",
-          {
-            message: `Using indexes for positions: ${indexedPositions.join(', ')}`,
-          }
-        );
-        
-        for (const pos of indexedPositions) {
-          const term = walkedQuery[pos];
-          const index = this.indexes.get(pos);
-          if (!index) continue;
+          let candidateIndexes: Set<number> | null = null;
           
-          const factNums = index.get(term);
-          if (!factNums || factNums.size === 0) {
-            candidateIndexes = new Set();
-            break;
+          if (indexedPositions.length > 0) {
+            this.logger.log(
+              "INDEX_LOOKUP",
+              {
+                message: `Using indexes for positions: ${indexedPositions.join(', ')}`,
+              }
+            );
+            
+            for (const pos of indexedPositions) {
+              const term = walkedQuery[pos];
+              const index = this.indexes.get(pos);
+              if (!index) continue;
+              
+              const factNums = index.get(term);
+              if (!factNums || factNums.size === 0) {
+                candidateIndexes = new Set();
+                break;
+              }
+              
+              if (candidateIndexes === null) {
+                candidateIndexes = new Set(factNums);
+              } else {
+                candidateIndexes = indexUtils.intersect(candidateIndexes, factNums);
+                if (candidateIndexes.size === 0) break;
+              }
+            }
           }
-          
+
           if (candidateIndexes === null) {
-            candidateIndexes = new Set(factNums);
+            this.logger.log(
+              "MEMORY_SCAN",
+              {
+                message: `Full scan of ${this.facts.length} facts`,
+              }
+            );
+            
+            // Process facts one by one with cancellation support
+            await this.processFacts(this.facts, query, s, observer, () => cancelled);
           } else {
-            candidateIndexes = indexUtils.intersect(candidateIndexes, factNums);
-            if (candidateIndexes.size === 0) break;
-          }
-        }
-      }
-
-      if (candidateIndexes === null) {
-        this.logger.log(
-          "MEMORY_SCAN",
-          {
-            message: `Full scan of ${this.facts.length} facts`,
-          }
-        );
-        
-        for (const fact of this.facts) {
-          const s1 = await unificationUtils.unifyArrays(query, fact, s);
-          if (s1) {
             this.logger.log(
-              "FACT_MATCH",
+              "INDEX_LOOKUP",
               {
-                message: "Fact matched",
-                fact,
-                query,
+                message: `Checking ${candidateIndexes.size} indexed facts`,
               }
             );
-            yield s1;
+            
+            // Process indexed facts
+            const indexedFacts = Array.from(candidateIndexes).map(i => this.facts[i]);
+            await this.processFacts(indexedFacts, query, s, observer, () => cancelled);
           }
-        }
-      } else {
-        this.logger.log(
-          "INDEX_LOOKUP",
-          {
-            message: `Checking ${candidateIndexes.size} indexed facts`,
-          }
-        );
-        
-        for (const factIndex of candidateIndexes) {
-          const fact = this.facts[factIndex];
-          const s1 = await unificationUtils.unifyArrays(query, fact, s);
-          if (s1) {
+
+          if (!cancelled) {
             this.logger.log(
-              "FACT_MATCH",
+              "RUN_END",
               {
-                message: "Indexed fact matched",
-                fact,
-                query,
+                message: `Completed memory relation goal ${goalId}`,
               }
             );
-            yield s1;
+            observer.complete?.();
+          }
+        } catch (error) {
+          if (!cancelled) {
+            observer.error?.(error);
           }
         }
-      }
+      };
 
-      this.logger.log(
-        "RUN_END",
-        {
-          message: `Completed memory relation goal ${goalId}`,
-        }
-      );
-    }.bind(this);
+      processQuery();
+
+      return () => {
+        cancelled = true;
+      };
+    });
+  }
+
+  private async processFacts(
+    facts: Term[][],
+    query: Term[],
+    s: Subst,
+    observer: any,
+    isCancelled: () => boolean
+  ): Promise<void> {
+    for (let i = 0; i < facts.length; i++) {
+      if (isCancelled()) break;
+      
+      const fact = facts[i];
+      const s1 = await unificationUtils.unifyArrays(query, fact, s);
+      if (s1 && !isCancelled()) {
+        this.logger.log(
+          "FACT_MATCH",
+          {
+            message: "Fact matched",
+            fact,
+            query,
+          }
+        );
+        observer.next(s1);
+      }
+      
+      // Yield control periodically to allow cancellation
+      if (i % 10 === 0) {
+        await new Promise(resolve => queueMicrotask(() => resolve(null)));
+      }
+    }
   }
 
   private addFact(fact: Term[]): void {

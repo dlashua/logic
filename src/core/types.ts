@@ -1,5 +1,7 @@
-// Section 1: Core Data Structures and Types
+// Observable-based Core Types for Logic Programming
 // -----------------------------------------------------------------------------
+
+import { SimpleObservable } from "./observable.ts";
 
 /**
  * Represents a logic variable, a placeholder for a value.
@@ -42,10 +44,34 @@ export type Subst = Map<string | symbol, Term>;
 export type Term<T = unknown> = Var | LogicList | T | Term<T>[] | null | undefined;
 
 /**
- * A Goal is a function that takes a substitution and returns a stream of
- * possible resulting substitutions.
+ * Observable interface for lazy evaluation and backpressure control
  */
-export type Goal = (s: Subst) => AsyncGenerator<Subst>;
+export interface Observable<T> {
+  subscribe(observer: Observer<T>): Subscription;
+}
+
+/**
+ * Observer interface for consuming observable streams
+ */
+export interface Observer<T> {
+  next(value: T): void;
+  error?(error: any): void;
+  complete?(): void;
+}
+
+/**
+ * Subscription interface for managing observable lifecycle
+ */
+export interface Subscription {
+  unsubscribe(): void;
+  readonly closed: boolean;
+}
+
+/**
+ * A Goal is a function that takes a substitution and returns an Observable
+ * stream of possible resulting substitutions.
+ */
+export type Goal = (s: Subst) => SimpleObservable<Subst>;
 
 /**
  * The shape of a single result from a query.
@@ -54,8 +80,35 @@ export type RunResult<Fmt> = {
   [K in keyof Fmt]: Term;
 };
 
+/**
+ * Type for lifted function arguments
+ */
 export type LiftedArgs<T extends (...args: any) => any> = T extends (
   ...args: infer A
 ) => infer R
   ? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<R>]) => Goal
   : never;
+
+/**
+ * Stream configuration for controlling evaluation behavior
+ */
+export interface StreamConfig {
+
+  /** Maximum number of results to produce */
+  maxResults?: number;
+
+  /** Timeout in milliseconds */
+  timeout?: number;
+
+  /** Enable lazy evaluation (default: true) */
+  lazy?: boolean;
+}
+
+/**
+ * Result of stream evaluation
+ */
+export interface StreamResult<T> {
+  values: T[];
+  completed: boolean;
+  error?: any;
+}

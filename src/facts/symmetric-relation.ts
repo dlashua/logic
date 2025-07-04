@@ -1,5 +1,5 @@
 import { Term } from "../core/types.ts";
-import { eq, or } from "../core/combinators.ts";
+import { eq } from "../core/combinators.ts";
 import { Logger } from "../shared/logger.ts";
 import { MemoryRelation } from "./memory-relation.ts";
 import { MemoryObjRelation } from "./memory-obj-relation.ts";
@@ -21,7 +21,7 @@ export class SymmetricMemoryRelation {
 
     const symGoal = (...query: Term[]) => {
       if (query.length !== 2) {
-        return eq(1,0); //fail
+        return eq(1, 0); // fail
       }
       return baseRelation(...query);
     };
@@ -50,24 +50,45 @@ export class SymmetricMemoryObjRelation {
     logger: Logger,
     config: FactRelationConfig
   ) {
+    if (keys.length !== 2) {
+      throw new Error("Symmetric object relations must have exactly 2 keys");
+    }
     this.memoryObjRelation = new MemoryObjRelation(keys, logger, config);
   }
 
   createRelation(): FactObjRelation {
     const baseRelation = this.memoryObjRelation.createRelation();
+    const origSet = baseRelation.set;
 
     const symGoal = (queryObj: Record<string, Term>) => {
-      if (this.keys.length === 2) {
-        const [k1, k2] = this.keys;
-        const swapped: Record<string, Term> = {};
-        swapped[k1] = queryObj[k2];
-        swapped[k2] = queryObj[k1];
-        return or(baseRelation(queryObj), baseRelation(swapped));
-      }
-      return eq(1,0); // fail
+      return baseRelation(queryObj);
     };
 
-    Object.assign(symGoal, baseRelation);
+    symGoal.set = (factObj: Record<string, Term>) => {
+      const [key1, key2] = this.keys;
+      
+      if (!(key1 in factObj) || !(key2 in factObj)) {
+        throw new Error(`Symmetric object fact must have both keys: ${key1}, ${key2}`);
+      }
+
+      // Add both directions
+      origSet(factObj);
+      
+      // Add reversed fact
+      const reversedFact = {
+        [key1]: factObj[key2],
+        [key2]: factObj[key1],
+        ...Object.fromEntries(
+          Object.entries(factObj).filter(([k]) => k !== key1 && k !== key2)
+        )
+      };
+      origSet(reversedFact);
+    };
+
+    symGoal.raw = baseRelation.raw;
+    symGoal.indexes = baseRelation.indexes;
+    symGoal.keys = baseRelation.keys;
+
     return symGoal as FactObjRelation;
   }
 }

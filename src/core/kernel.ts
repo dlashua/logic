@@ -4,8 +4,10 @@ import {
   Term,
   ConsNode,
   LogicList,
-  NilNode
-} from "./types.ts"
+  NilNode,
+  Observable
+} from "./types.ts";
+import { SimpleObservable } from "./observable.ts";
 
 let varCounter = 0;
 
@@ -33,7 +35,7 @@ export function resetVarCounter(): void {
  * @param u The term to resolve.
  * @param s The substitution map.
  */
-export async function walk(u: Term, s: Subst): Promise<Term> {
+export function walk(u: Term, s: Subst): Term {
   let current = u;
   
   // Fast path for variable chains - use iteration instead of recursion
@@ -44,18 +46,18 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
   // If we ended up with a non-variable, check if it needs structural walking
   if (isCons(current)) {
     // Walk both parts of the cons cell
-    return cons(await walk(current.head, s), await walk(current.tail, s));
+    return cons(walk(current.head, s), walk(current.tail, s));
   }
   
   if (Array.isArray(current)) {
-    return Promise.all(current.map((x) => walk(x, s)));
+    return current.map((x) => walk(x, s));
   }
   
   if (current && typeof current === "object" && !isVar(current) && !isLogicList(current)) {
     const out: Record<string, Term> = {};
     for (const k in current) {
       if (Object.hasOwn(current, k)) {
-        out[k] = await walk((current as any)[k], s);
+        out[k] = walk((current as any)[k], s);
       }
     }
     return out;
@@ -67,8 +69,8 @@ export async function walk(u: Term, s: Subst): Promise<Term> {
 /**
  * Extends a substitution by binding a variable to a value, with an occurs check.
  */
-export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | null> {
-  if (await occursCheck(v, val, s)) {
+export function extendSubst(v: Var, val: Term, s: Subst): Subst | null {
+  if (occursCheck(v, val, s)) {
     return null; // Occurs check failed
   }
   const s2 = new Map(s);
@@ -79,17 +81,17 @@ export async function extendSubst(v: Var, val: Term, s: Subst): Promise<Subst | 
 /**
  * Checks if a variable `v` occurs within a term `x` to prevent infinite loops.
  */
-async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
-  const resolvedX = await walk(x, s);
+function occursCheck(v: Var, x: Term, s: Subst): boolean {
+  const resolvedX = walk(x, s);
   if (isVar(resolvedX)) {
     return v.id === resolvedX.id;
   }
   if (isCons(resolvedX)) {
-    return await occursCheck(v, resolvedX.head, s) || await occursCheck(v, resolvedX.tail, s);
+    return occursCheck(v, resolvedX.head, s) || occursCheck(v, resolvedX.tail, s);
   }
   if (Array.isArray(resolvedX)) {
     for (const item of resolvedX) {
-      if (await occursCheck(v, item, s)) {
+      if (occursCheck(v, item, s)) {
         return true;
       }
     }
@@ -101,7 +103,7 @@ async function occursCheck(v: Var, x: Term, s: Subst): Promise<boolean> {
  * The core unification algorithm. It attempts to make two terms structurally equivalent.
  * Optimized with fast paths for common cases.
  */
-export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | null> {
+export function unify(u: Term, v: Term, s: Subst | null): Subst | null {
   if (s === null) {
     return null;
   }
@@ -111,8 +113,8 @@ export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | 
     return s;
   }
 
-  const uWalked = await walk(u, s);
-  const vWalked = await walk(v, s);
+  const uWalked = walk(u, s);
+  const vWalked = walk(v, s);
 
   // Fast path: after walking, if they're still identical, succeed
   if (uWalked === vWalked) {
@@ -133,7 +135,7 @@ export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | 
 
   if (isNil(uWalked) && isNil(vWalked)) return s;
   if (isCons(uWalked) && isCons(vWalked)) {
-    const s1 = await unify(uWalked.head, vWalked.head, s);
+    const s1 = unify(uWalked.head, vWalked.head, s);
     if (s1 === null) return null;
     return unify(uWalked.tail, vWalked.tail, s1);
   }
@@ -145,7 +147,7 @@ export async function unify(u: Term, v: Term, s: Subst | null): Promise<Subst | 
   ) {
     let currentSubst: Subst | null = s;
     for (let i = 0; i < uWalked.length; i++) {
-      currentSubst = await unify(uWalked[i], vWalked[i], currentSubst);
+      currentSubst = unify(uWalked[i], vWalked[i], currentSubst);
       if (currentSubst === null) return null;
     }
     return currentSubst;
@@ -174,8 +176,6 @@ export const nil: NilNode = {
 
 /**
  * Creates a `cons` cell (a node in a logic list).
- * @param head The value of the node.
- * @param tail The rest of the list.
  */
 export function cons(head: Term, tail: Term): ConsNode {
   return {
@@ -187,8 +187,6 @@ export function cons(head: Term, tail: Term): ConsNode {
 
 /**
  * Converts a JavaScript array into a logic list.
- * @param arr The array to convert.
- * @returns A logic list (`cons` cells ending in `nil`).
  */
 export function arrayToLogicList(arr: Term[]): LogicList {
   return arr.reduceRight<LogicList>((tail, head) => cons(head, tail), nil);
@@ -196,8 +194,6 @@ export function arrayToLogicList(arr: Term[]): LogicList {
 
 /**
  * A convenience function to create a logic list from arguments.
- * @param items The items to include in the list.
- * @example logicList(1, 2, 3) // equivalent to cons(1, cons(2, cons(3, nil)))
  */
 export function logicList<T = unknown>(...items: T[]): LogicList {
   return arrayToLogicList(items);
@@ -226,7 +222,6 @@ export function isLogicList(x: Term): x is LogicList {
 
 /**
  * Converts a logic list to a JavaScript array.
- * @param list The logic list to convert.
  */
 export function logicListToArray(list: Term): Term[] {
   const out = [];
@@ -240,4 +235,3 @@ export function logicListToArray(list: Term): Term[] {
   }
   return out;
 }
-

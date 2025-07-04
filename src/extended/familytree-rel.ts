@@ -87,13 +87,6 @@ export class FamilytreeRelations {
     return collecto(in_s, this.stepParentOf(k, in_s), p);
   };
 
-  tap = (msg: any) => {
-    return function* (s: any) {
-      console.log(msg, s);
-      yield s;
-    };
-  };
-
   fullSiblingOf = (out_v: Term<string>, out_s: Term<string>) => {
     const p1 = lvar("fullsibof_p1");
     const p2 = lvar("fullsibof_p2");

@@ -3,7 +3,8 @@ import {
   RunResult,
   Subst,
   Term,
-  Var
+  Var,
+  Observable
 } from "./core/types.ts"
 import {
   walk,
@@ -67,25 +68,31 @@ export function createLogicVarProxy<K extends string | symbol = string>(
 /**
  * Formats the raw substitution streams into user-friendly result objects.
  */
-async function* formatSubstitutions<Fmt>(
-  substs: AsyncGenerator<Subst | null>,
+function formatSubstitutions<Fmt>(
+  substs: Observable<Subst>,
   formatter: Fmt,
   limit: number
-): AsyncGenerator<RunResult<Fmt>> {
-  let count = 0;
-  for await (const s of substs) {
-    if (s === null) {
-      continue;
+): Observable<RunResult<Fmt>> {
+  // Use the built-in take operator which properly handles cleanup
+  const limitedSubsts = limit === Infinity ? substs : (substs as any).take(limit);
+  
+  return {
+    subscribe(observer) {
+      return limitedSubsts.subscribe({
+        next: (s: Subst) => {
+          const result: Partial<RunResult<Fmt>> = {};
+          for (const key in formatter) {
+            const term = formatter[key];
+            result[key] = walk(term, s);
+          }
+          // Convert logic lists to arrays before yielding the final result
+          observer.next(deepListWalk(result) as RunResult<Fmt>);
+        },
+        error: observer.error,
+        complete: observer.complete
+      });
     }
-    if (count++ >= limit) break;
-    const result: Partial<RunResult<Fmt>> = {};
-    for (const key in formatter) {
-      const term = formatter[key];
-      result[key] = await walk(term, s);
-    }
-    // Convert logic lists to arrays before yielding the final result
-    yield deepListWalk(result) as RunResult<Fmt>;
-  }
+  };
 }
 
 type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
@@ -150,7 +157,7 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
     return this;
   }
 
-  private async *runQuery(): AsyncGenerator<any> {
+  private getObservable(): Observable<any> {
     if (this._goals.length === 0) {
       throw new Error("Query must have at least one .where() clause.");
     }
@@ -175,31 +182,83 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
     const substStream = combinedGoal(initialSubst);
     const results = formatSubstitutions(substStream, formatter, this._limit);
 
-    for await (const result of results) {
-      if (this._rawSelector) {
-        yield result.result;
-      } else {
-        yield result;
+    const rawSelector = this._rawSelector;
+    return {
+      subscribe(observer) {
+        return results.subscribe({
+          next: (result) => {
+            if (rawSelector) {
+              observer.next(result.result);
+            } else {
+              observer.next(result);
+            }
+          },
+          error: observer.error,
+          complete: observer.complete
+        });
       }
-    }
+    };
   }
 
   /**
    * Makes the Query object itself an async iterable.
    */
-  [Symbol.asyncIterator](): AsyncGenerator<QueryOutput<Fmt, Sel>> {
-    return this.runQuery();
+  async *[Symbol.asyncIterator](): AsyncGenerator<QueryOutput<Fmt, Sel>> {
+    const observable = this.getObservable();
+    const results: QueryOutput<Fmt, Sel>[] = [];
+    let completed = false;
+    let error: any = null;
+
+    observable.subscribe({
+      next: (result) => {
+        results.push(result);
+      },
+      error: (err) => {
+        error = err;
+        completed = true;
+      },
+      complete: () => {
+        completed = true;
+      }
+    });
+
+    // Wait for completion
+    while (!completed) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    for (const result of results) {
+      yield result;
+    }
   }
 
   /**
    * Executes the query and returns all results as an array.
    */
   async toArray(): Promise<QueryOutput<Fmt, Sel>[]> {
+    const observable = this.getObservable();
     const results: QueryOutput<Fmt, Sel>[] = [];
-    for await (const result of this.runQuery()) {
-      results.push(result);
-    }
-    return results;
+    
+    return new Promise((resolve, reject) => {
+      observable.subscribe({
+        next: (result) => {
+          results.push(result);
+        },
+        error: reject,
+        complete: () => resolve(results)
+      });
+    });
+  }
+
+  /**
+   * Returns the observable stream directly for reactive programming.
+   */
+  toObservable(): Observable<QueryOutput<Fmt, Sel>> {
+    return this.getObservable();
   }
 }
 

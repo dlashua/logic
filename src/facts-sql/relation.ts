@@ -3,6 +3,7 @@ import type { Term, Subst, Goal } from "../core/types.ts";
 import { unify, isVar, walk } from "../core/kernel.ts";
 import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import { queryUtils } from "../shared/utils.ts";
+import { SimpleObservable } from "../core/observable.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager, GoalRecord } from "./index.ts";
 
@@ -71,7 +72,8 @@ export class RegularRelationWithMerger {
     const myGoal = this.dbObj.getGoalById(goalId);
     if(!myGoal) return [];
 
-    const commonGoals = await this.processGoal(myGoal, s);
+    // const commonGoals = await this.processGoal(myGoal, s);
+    const commonGoals = [];
 
     this.logger.log("COMMON_GOALS", {
       myGoal,
@@ -186,57 +188,29 @@ export class RegularRelationWithMerger {
             if(rowcnt % (maxAlias + 1 - goalcnt) !== 0) continue; 
 
             const alias = goalAliasMap[goal.goalId];
-            // this.logger.log("GOAL_ALIAS_MAP", {
-            //   goalId,
-            //   alias,
-            //   goal,
-            // });
             const newRow = {};
             if (!goalRows[goal.goalId]) goalRows[goal.goalId] = [];
             for (const col of Object.keys(goal.queryObj)) {
               // Use the variable id as the value for this goal's column
               const varId = (goal.queryObj[col] as any)?.id;
               // The value from the SQL row
-              const value = row[`${alias}__${col}`];
-              // Store as: key = col, value = value from row
-              newRow[col] = value;
-              // Optionally, you could also store the varId mapping if needed
-              // goalRows[goal.goalId][col + "_varId"] = varId;
+              const rowValue = row[`${alias}__${col}`];
+              newRow[col] = rowValue;
             }
             goalRows[goal.goalId].push(newRow);
-            // this.logger.log("ADDED_ONE_GOALROW", {
-            //   topGoalId: goalId,
-            //   inGoalId: goal.goalId,
-            //   alias,
-            //   newRow,
-            // })
           }
         }
 
-        this.logger.log("ALL_GOAL_ROWS", {
-          goalId,
-          sql: sqlString,
-          goalRows,
-        })
-
-        
-        // Optionally, store in the forward pass cache for later use
-        if (!s.has(ROW_CACHE)) {
-          s.set(ROW_CACHE, new Map());
-        }
-        const cache = s.get(ROW_CACHE) as Map<number, Record<string, any>[]>;
-        for (const oneGoalId of Object.keys(goalRows)) {
-          const id = Number(oneGoalId);
-          if (id === goalId) continue;
-          if (!cache.has(id)) cache.set(id, []);
-          goalRows[id].forEach(x => cache.get(id)!.push(x));
+        // Store results for other goals in their caches
+        const passed = this.getForwardPass(s);
+        for (const goal of allGoals) {
+          if (goal.goalId !== goalId && goalRows[goal.goalId]) {
+            passed.set(goal.goalId, goalRows[goal.goalId]);
+          }
         }
 
-
-
-        this.logger.log("THIS_GOAL_ROWS", {
+        this.logger.log("GOAL_ROWS", {
           goalId,
-          sql: sqlString,
           rows: goalRows[goalId],
         })
 
@@ -259,103 +233,98 @@ export class RegularRelationWithMerger {
       queryObj
     });
 
-    return async function* factsSql(this: RegularRelationWithMerger, s: Subst) {
+    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+      let cancelled = false;
+      
       this.logger.log("GOAL_STARTED", {
         goalId,
         table: this.table,
         queryObj,
         s,
       });
-      const new_s = new Map(s);
-      const old_pass = s.get(ROW_CACHE) || new Map();
-      new_s.set(ROW_CACHE, new Map(old_pass))
-      const rows = await this.cacheOrQuery(goalId, queryObj, new_s);
 
-      let yielded = 0;
-      for (const row of rows) {
-        const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new_s);
-        if (unifiedSubst) {
-          this.logger.log("UNIFY_SUCCESS", {
-            goalId,
-            queryObj,
-            row,
-            unifiedSubst,
-          });
-          
-          yielded++;
-          yield new Map(unifiedSubst);
-        } else {
-          this.logger.log("UNIFY_FAILED", {
-            goalId,
-            queryObj,
-            row,
-          });
+      const processQuery = async () => {
+        try {
+          const new_s = new Map(s);
+          const old_pass = s.get(ROW_CACHE) || new Map();
+          new_s.set(ROW_CACHE, new Map(old_pass))
+          const rows = await this.cacheOrQuery(goalId, queryObj, new_s) || [];
+
+          let yielded = 0;
+          for (let i = 0; i < rows.length; i++) {
+            if (cancelled) break;
+            
+            const row = rows[i];
+            const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new_s);
+            if (unifiedSubst && !cancelled) {
+              this.logger.log("UNIFY_SUCCESS", {
+                goalId,
+                queryObj,
+                row,
+                unifiedSubst,
+              });
+              
+              yielded++;
+              observer.next(new Map(unifiedSubst));
+            } else if (!cancelled) {
+              this.logger.log("UNIFY_FAILED", {
+                goalId,
+                queryObj,
+                row,
+              });
+            }
+            
+            // Yield control periodically to allow cancellation
+            if (i % 10 === 0) {
+              await new Promise(resolve => queueMicrotask(resolve));
+            }
+          }
+
+          if (!cancelled) {
+            observer.complete?.();
+          }
+        } catch (error) {
+          if (!cancelled) {
+            observer.error?.(error);
+          }
         }
-      }
-    }.bind(this);
+      };
+
+      processQuery();
+
+      return () => {
+        cancelled = true;
+      };
+    });
   }
 
   private async executeQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
-    // const sharedGoals = this.dbObj.findGoalsWithSharedKeys(goalId);
-    // const joinStructure = this.createJoinStructure(goalId, queryObj, sharedGoals);
-
-    // this.logger.log("SHARED_GOALS", {
-    //   goalId,
-    //   sharedGoals,
-    //   joinStructure,
-    //   allGoals: this.dbObj.getGoals().map(g => ({
-    //     goalId: g.goalId,
-    //     table: g.table,
-    //     queryObj: g.queryObj 
-    //   }))
-    // });
-
-    // const walkedQuery: Record<string, Term> = {};
-    // const selectCols: Record<string, Term> = {};
-    // const whereCols: Record<string, Term> = {};
-    
-    // for (const [column, term] of Object.entries(queryObj)) {
-    //   const walkedTerm = await walk(term, s);
-    //   walkedQuery[column] = walkedTerm;
-      
-    //   if (isVar(walkedTerm)) {
-    //     selectCols[column] = walkedTerm;
-    //   } else {
-    //     whereCols[column] = walkedTerm;
-    //   }
-    // }
-
-    // Check if this query can be merged with pending queries
-    // const mergeableQueries = await this.findMergeableQueries(goalId, queryObj, whereCols);
-    // if (mergeableQueries.length > 0) {
-    //   return await this.executeMergedQuery(goalId, queryObj, whereCols, mergeableQueries, joinStructure);
-    // }
-
     const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
     const whereCols = queryUtils.onlyGrounded(walkedQuery);
 
     const query = this.buildQuery(queryObj, whereCols);
     const sqlString = query.toString();
     
-    this.dbObj.addQuery(`goalId:${goalId} - ${sqlString}`);
+    this.dbObj.addQuery(sqlString);
     this.logger.log("DB_QUERY", {
       table: this.table,
       sql: sqlString,
       goalId,
     });
+
     const rows = await query;
     
     if (rows.length) {
       this.logger.log("DB_ROWS", {
         table: this.table,
-        sql: query.toString(),
+        sql: sqlString,
         goalId,
         rows,
       });
     } else {
       this.logger.log("NO_DB_ROWS", {
         table: this.table,
-        sql: query.toString(),
+        sql: sqlString,
         goalId,
         rows,
       });
@@ -364,354 +333,38 @@ export class RegularRelationWithMerger {
     return rows;
   }
 
-  private async findMergeableQueries(goalId: number, queryObj: Record<string, Term>, whereCols: Record<string, Term>): Promise<any[]> {
-    // Add this query to pending queries
-    this.dbObj.addPendingQuery(this.table, goalId, queryObj, whereCols);
+  private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, any>) {
+    let query = this.dbObj.db(this.table);
     
-    // Wait longer for other queries to arrive (extended batching)
-    await new Promise(resolve => sleep(resolve, 10));
-    
-    // Find other pending queries with the same pattern
-    const mergeable = this.dbObj.findPendingQueries(this.table, goalId, queryObj, whereCols);
-    
-    // Only merge if we have at least 2 queries (current + 1 other)
-    if (mergeable.length >= 1) {
-      this.logger.log("MERGEABLE_CHECK", {
-        goalId,
-        table: this.table,
-        queryObj,
-        whereCols,
-        mergeableCount: mergeable.length,
-        mergeableGoals: mergeable.map(m => m.goalId),
-        status: "MERGING"
-      });
-      
-      return mergeable;
-    } else {
-      this.logger.log("MERGEABLE_CHECK", {
-        goalId,
-        table: this.table,
-        queryObj,
-        whereCols,
-        mergeableCount: mergeable.length,
-        mergeableGoals: [],
-        status: "NO_MERGE"
-      });
-      
-      return [];
+    // Add WHERE clauses for grounded values
+    for (const [column, value] of Object.entries(whereCols)) {
+      query = query.where(column, value);
     }
-  }
 
-  private async executeMergedQuery(
-    goalId: number, 
-    queryObj: Record<string, Term>, 
-    whereCols: Record<string, Term>, 
-    mergeableQueries: any[], 
-    joinStructure: any
-  ): Promise<any[]> {
-    // Check if we can merge multiple WHERE values for the same column
-    const allQueries = [{
-      goalId,
-      queryObj,
-      whereCols 
-    }, ...mergeableQueries];
-    
-    // Find common WHERE columns and group by them
-    const commonColumns = this.findCommonWhereColumns(allQueries);
-    
-    if (commonColumns.length > 0) {
-      // We can merge! Create a single query with WHERE IN clause
-      const mergedQuery = this.buildMergedQuery(queryObj, allQueries, commonColumns, joinStructure);
-      const sqlString = mergedQuery.toString();
-      
-      this.dbObj.addQuery(`goalId:${goalId} - MERGED(${allQueries.length}) - ${sqlString}`);
-      this.logger.log("DB_QUERY", {
-        table: this.table,
-        sql: sqlString,
-        goalId,
-        joinStructure,
-        note: `merged query for ${allQueries.length} goals`,
-        mergedGoals: allQueries.map(q => q.goalId)
-      });
-      
-      const rows = await mergedQuery;
-      
-      // TODO: Remove only the specific merged queries from pending, not all pending queries
-      // this.dbObj.clearPendingQueries(this.table);
-      
-      return rows;
+    // Select all columns if no specific columns are configured
+    if (this.options?.selectColumns) {
+      query = query.select(this.options.selectColumns);
     } else {
-      // Can't merge, execute original query
-      const query = this.buildQuery(queryObj, whereCols, joinStructure);
-      const sqlString = query.toString();
-      
-      this.dbObj.addQuery(`goalId:${goalId} - ${sqlString}`);
-      this.logger.log("DB_QUERY", {
-        table: this.table,
-        sql: sqlString,
-        goalId,
-        joinStructure
-      });
-      const rows = await query;
-      
-      return rows;
+      query = query.select('*');
     }
-  }
 
-  private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, Term>, joinStructure?: any) {
-    // Build select columns - include all query columns and primary key if specified
-    const selectCols = Object.keys(queryObj);
-    
-    // Add columns from shared goals that share variables with this goal
-    const sharedGoals = joinStructure?.sharedGoals || [];
-    for (const sharedGoal of sharedGoals) {
-      if (sharedGoal.table === this.table) {
-        // Same table - add their columns to our SELECT
-        for (const column of Object.keys(sharedGoal.queryObj)) {
-          if (!selectCols.includes(column)) {
-            selectCols.push(column);
-          }
-        }
-      }
-    }
-    
-    // Ensure primary key is included for fast matching
-    if (this.primaryKey && !selectCols.includes(this.primaryKey)) {
-      selectCols.push(this.primaryKey);
-    }
-    
-    // If we have joins, we need to use table aliases and qualified column names
-    if (joinStructure && joinStructure.joins.length > 0) {
-      const baseAlias = this.table;
-      
-      // Build qualified select columns
-      const qualifiedSelectCols = selectCols.map(col => `${baseAlias}.${col}`);
-      
-      // Build qualified where clauses
-      const qualifiedWhereCols: Record<string, any> = {};
-      for (const [col, value] of Object.entries(whereCols)) {
-        qualifiedWhereCols[`${baseAlias}.${col}`] = value;
-      }
-      
-      let query = this.dbObj.db(`${this.table} as ${baseAlias}`)
-        .distinct()
-        .select(qualifiedSelectCols)
-        .where(qualifiedWhereCols);
-      
-      query = this.applyJoins(query, baseAlias, joinStructure);
-      return query;
-    } else {
-      // No joins, use simple query
-      const query = this.dbObj.db(this.table)
-        .distinct()
-        .select(selectCols)
-        .where(whereCols);
-      
-      return query;
-    }
-  }
-
-  private applyJoins(query: any, baseAlias: string, joinStructure: any) {
-    let aliasCounter = 1;
-    
-    for (const join of joinStructure.joins) {
-      const alias = `${join.table}_${aliasCounter}`;
-      aliasCounter++;
-      
-      if (join.conditions.length > 0) {
-        const firstCondition = join.conditions[0];
-        query = query.join(
-          `${join.table} as ${alias}`,
-          `${baseAlias}.${firstCondition.leftCol}`,
-          `${alias}.${firstCondition.rightCol}`
-        );
-        
-        for (let i = 1; i < join.conditions.length; i++) {
-          const condition = join.conditions[i];
-          query = query.andWhere(
-            `${baseAlias}.${condition.leftCol}`,
-            '=',
-            query.client.raw(`${alias}.${condition.rightCol}`)
-          );
-        }
-      }
-    }
-    
     return query;
   }
 
-  private createJoinStructure(
-    currentGoalId: number,
-    currentQueryObj: Record<string, Term>,
-    sharedGoals: { goalId: number; table: string; queryObj: Record<string, Term> }[]
-  ) {
-    if (!JOINS_ENABLED || sharedGoals.length === 0) {
-      return {
-        baseTable: this.table,
-        joins: []
-      };
-    }
-
-    const joins: {
-      table: string;
-      conditions: { leftCol: string; rightCol: string; termId: any }[]
-    }[] = [];
-
-    for (const sharedGoal of sharedGoals) {
-      // Only create joins for different tables (cross-table joins)
-      if (sharedGoal.table === this.table) {
-        continue; // Skip same-table goals - they won't benefit from joins
-      }
-      
-      const conditions: { leftCol: string; rightCol: string; termId: any }[] = [];
-      
-      for (const [currentKey, currentTerm] of Object.entries(currentQueryObj)) {
-        for (const [sharedKey, sharedTerm] of Object.entries(sharedGoal.queryObj)) {
-          if (currentKey === sharedKey && currentTerm === sharedTerm) {
-            conditions.push({
-              leftCol: currentKey,
-              rightCol: sharedKey,
-              termId: currentTerm
-            });
-          }
-        }
-      }
-      
-      if (conditions.length > 0) {
-        joins.push({
-          table: sharedGoal.table,
-          conditions
-        });
-      }
-    }
-
-    // Also collect same-table goals that share variables for column expansion
-    const sameTableSharedGoals = [];
-    for (const sharedGoal of sharedGoals) {
-      if (sharedGoal.table === this.table) {
-        // Check if they share variables
-        const hasSharedVars = Object.entries(currentQueryObj).some(([currentKey, currentTerm]) =>
-          Object.entries(sharedGoal.queryObj).some(([sharedKey, sharedTerm]) =>
-            currentTerm === sharedTerm // Same variable reference
-          )
-        );
-        
-        if (hasSharedVars) {
-          sameTableSharedGoals.push(sharedGoal);
-        }
-      }
-    }
-
-    return {
-      baseTable: this.table,
-      joins,
-      sharedGoals: sameTableSharedGoals
-    };
-  }
-
-  private findCommonWhereColumns(allQueries: any[]): string[] {
-    if (allQueries.length < 2) return [];
+  private async unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Promise<Subst | null> {
+    let result = s;
     
-    // Get the WHERE columns from the first query
-    const firstWhereColumns = Object.keys(allQueries[0].whereCols);
-    
-    // Check if all other queries have the same WHERE columns
-    const commonColumns = firstWhereColumns.filter(col => {
-      return allQueries.every(query => col in query.whereCols);
-    });
-    
-    return commonColumns;
-  }
-
-  private buildMergedQuery(
-    baseQueryObj: Record<string, Term>, 
-    allQueries: any[], 
-    commonColumns: string[], 
-    joinStructure: any
-  ) {
-    // Build select columns - include all query columns and primary key if specified
-    const selectCols = Object.keys(baseQueryObj);
-    
-    // Ensure primary key is included for fast matching
-    if (this.primaryKey && !selectCols.includes(this.primaryKey)) {
-      selectCols.push(this.primaryKey);
-    }
-    
-    // Collect all unique values for each common column
-    const columnValueMap: Record<string, Set<any>> = {};
-    
-    for (const col of commonColumns) {
-      columnValueMap[col] = new Set();
-      for (const query of allQueries) {
-        if (col in query.whereCols) {
-          columnValueMap[col].add(query.whereCols[col]);
-        }
-      }
-    }
-    
-    // If we have joins, we need to use table aliases and qualified column names
-    if (joinStructure && joinStructure.joins.length > 0) {
-      const baseAlias = this.table;
+    for (const [column, term] of Object.entries(queryObj)) {
+      const value = row[column];
+      if (value === undefined) continue;
       
-      // Build qualified select columns
-      const qualifiedSelectCols = selectCols.map(col => `${baseAlias}.${col}`);
-      
-      let query = this.dbObj.db(`${this.table} as ${baseAlias}`)
-        .distinct()
-        .select(qualifiedSelectCols);
-      
-      // Add WHERE IN clauses for common columns
-      for (const col of commonColumns) {
-        const values = Array.from(columnValueMap[col]);
-        if (values.length > 1) {
-          query = query.whereIn(`${baseAlias}.${col}`, values);
-        } else {
-          query = query.where(`${baseAlias}.${col}`, values[0]);
-        }
-      }
-      
-      query = this.applyJoins(query, baseAlias, joinStructure);
-      return query;
-    } else {
-      // No joins, use simple query
-      let query = this.dbObj.db(this.table)
-        .distinct()
-        .select(selectCols);
-      
-      // Add WHERE IN clauses for common columns
-      for (const col of commonColumns) {
-        const values = Array.from(columnValueMap[col]);
-        if (values.length > 1) {
-          query = query.whereIn(col, values);
-        } else {
-          query = query.where(col, values[0]);
-        }
-      }
-      
-      return query;
-    }
-  }
-  
-  private async unifyRowWithQuery(
-    row: any,
-    queryObj: Record<string, Term>,
-    s: Subst
-  ): Promise<Subst | null> {
-    let resultSubst = s;
-    
-    for (const [col, term] of Object.entries(queryObj)) {
-      const rowValue = row[col];
-      if (rowValue === undefined) {
+      const unified = unify(term, value, result);
+      if (unified === null) {
         return null;
       }
-
-      const unified = await unify(term, rowValue, resultSubst);
-      if (!unified) {
-        return null;
-      }
-      resultSubst = unified;
+      result = unified;
     }
     
-    return resultSubst;
+    return result;
   }
 }

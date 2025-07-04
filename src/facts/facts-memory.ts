@@ -61,7 +61,7 @@ export const makeFactsObjSym = (
   factConfig?: FactRelationConfig
 ): FactObjRelation => {
   const logger = getDefaultLogger();
-
+  
   const factory = new FactRelationFactory({
     logger,
     config: factConfig || {
@@ -72,4 +72,3 @@ export const makeFactsObjSym = (
 
   return factory.createSymmetricObjectRelation(keys);
 };
-

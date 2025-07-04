@@ -11,62 +11,101 @@ import {
   logicListToArray
 } from "../core/kernel.ts"
 import { and, eq } from "../core/combinators.ts";
+import { SimpleObservable } from "../core/observable.ts";
 
 /**
  * A goal that succeeds if `x` is a member of the logic `list`.
  * Optimized for both arrays and logic lists.
  */
 export function membero(x: Term, list: Term): Goal {
-  return async function* (s) {
-    const l = await walk(list, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    let cancelled = false;
+    const l = walk(list, s);
     
     // Fast path for arrays
     if (Array.isArray(l)) {
-      for (const item of l) {
-        const s2 = await unify(x, item, s);
-        if (s2) yield s2;
-      }
-      return;
+      // Process items synchronously, but check for cancellation
+      // Use microtask scheduling to allow cancellation between items
+      let currentIndex = 0;
+      
+      const processNext = () => {
+        while (currentIndex < l.length && !cancelled) {
+          const item = l[currentIndex++];
+          const s2 = unify(x, item, s);
+          if (s2) observer.next(s2);
+          
+          // Allow cancellation between items by yielding control
+          if (currentIndex < l.length) {
+            queueMicrotask(processNext);
+            return;
+          }
+        }
+        
+        if (!cancelled) observer.complete?.();
+      };
+      
+      queueMicrotask(processNext);
+      
+      return () => {
+        cancelled = true;
+      };
     }
     
     // Logic list traversal with iterative approach when possible
     if (l && typeof l === "object" && "tag" in l) {
       if ((l as any).tag === "cons") {
-        const s1 = await unify(x, (l as any).head, s);
-        if (s1) yield s1;
+        const s1 = unify(x, (l as any).head, s);
+        if (s1) observer.next(s1);
+        
         // Recursive call for tail
-        for await (const s2 of membero(x, (l as any).tail)(s)) yield s2;
+        const tailSubscription = membero(x, (l as any).tail)(s).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: observer.complete
+        });
+        return () => {
+          cancelled = true;
+          tailSubscription.unsubscribe();
+        };
       }
     }
-  };
+    
+    observer.complete?.();
+
+    return () => {
+      cancelled = true;
+    }
+  });
 }
 
 /**
  * A goal that succeeds if `h` is the head of the logic list `l`.
  */
 export function firsto(x: Term, xs: Term): Goal {
-  return async function* (s) {
-    const l = await walk(xs, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    const l = walk(xs, s);
     if (isCons(l)) {
       const consNode = l as { tag: "cons"; head: Term; tail: Term };
-      const s1 = await unify(x, consNode.head, s);
-      if (s1) yield s1;
+      const s1 = unify(x, consNode.head, s);
+      if (s1) observer.next(s1);
     }
-  };
+    observer.complete?.();
+  });
 }
 
 /**
  * A goal that succeeds if `t` is the tail of the logic list `l`.
  */
 export function resto(xs: Term, tail: Term): Goal {
-  return async function* (s) {
-    const l = await walk(xs, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    const l = walk(xs, s);
     if (isCons(l)) {
       const consNode = l as { tag: "cons"; head: Term; tail: Term };
-      const s1 = await unify(tail, consNode.tail, s);
-      if (s1) yield s1;
+      const s1 = unify(tail, consNode.tail, s);
+      if (s1) observer.next(s1);
     }
-  };
+    observer.complete?.();
+  });
 }
 
 /**
@@ -74,14 +113,15 @@ export function resto(xs: Term, tail: Term): Goal {
  * logic list `ys` to `xs`.
  */
 export function appendo(xs: Term, ys: Term, zs: Term): Goal {
-  return async function* (s) {
-    const xsVal = await walk(xs, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    const xsVal = walk(xs, s);
+    
     if (isCons(xsVal)) {
       const consNode = xsVal as { tag: "cons"; head: Term; tail: Term };
       const head = consNode.head;
       const tail = consNode.tail;
       const rest = lvar();
-      const s1 = await unify(
+      const s1 = unify(
         zs,
         {
           tag: "cons",
@@ -91,13 +131,20 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
         s,
       );
       if (s1) {
-        for await (const s2 of appendo(tail, ys, rest)(s1)) yield s2;
+        appendo(tail, ys, rest)(s1).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: observer.complete
+        });
+        return;
       }
     } else if (isNil(xsVal)) {
-      const s1 = await unify(ys, zs, s);
-      if (s1) yield s1;
+      const s1 = unify(ys, zs, s);
+      if (s1) observer.next(s1);
     }
-  };
+    
+    observer.complete?.();
+  });
 }
 
 /**
@@ -106,9 +153,9 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
  * @param length The length to unify with
  */
 export function lengtho(arrayOrList: Term, length: Term): Goal {
-  return async function* arrayLengthGoal(s: Subst) {
-    const walkedArray = await walk(arrayOrList, s);
-    const walkedLength = await walk(length, s);
+  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+    const walkedArray = walk(arrayOrList, s);
+    const walkedLength = walk(length, s);
     
     let actualLength: number;
     
@@ -122,43 +169,68 @@ export function lengtho(arrayOrList: Term, length: Term): Goal {
     }
     // If neither array nor logic list, fail
     else {
+      observer.complete?.();
       return;
     }
     
     // Unify the actual length with the length term
-    const unified = await unify(actualLength, walkedLength, s);
+    const unified = unify(actualLength, walkedLength, s);
     if (unified !== null) {
-      yield unified;
+      observer.next(unified);
     }
-  };
+    
+    observer.complete?.();
+  });
 }
 
 export function permuteo(xs: Term, ys: Term): Goal {
-  return async function* (s) {
+  return (s) => new SimpleObservable<Subst>((observer) => {
     const xsVal = walk(xs, s);
     if (isNil(xsVal)) {
-      yield* eq(ys, nil)(s);
+      eq(ys, nil)(s).subscribe({
+        next: observer.next,
+        error: observer.error,
+        complete: observer.complete
+      });
       return;
     }
     if (isCons(xsVal)) {
       const arr = logicListToArray(xsVal as LogicList);
+      let completedCount = 0;
+      
       for (const head of arr) {
         const rest = lvar();
-        for await (const s1 of and(
+        and(
           removeFirsto(xsVal, head, rest),
           permuteo(rest, lvar()),
           eq(ys, cons(head, lvar())),
-        )(s)) {
-          const ysVal2 = walk(ys, s1);
-          if (isCons(ysVal2)) {
-            for await (const s2 of eq(ysVal2.tail, walk(lvar(), s1))(s1)) {
-              yield s2;
+        )(s).subscribe({
+          next: (s1) => {
+            const ysVal2 = walk(ys, s1);
+            if (isCons(ysVal2)) {
+              eq(ysVal2.tail, walk(lvar(), s1))(s1).subscribe({
+                next: observer.next,
+                error: observer.error
+              });
+            }
+          },
+          error: observer.error,
+          complete: () => {
+            completedCount++;
+            if (completedCount === arr.length) {
+              observer.complete?.();
             }
           }
-        }
+        });
       }
+      
+      if (arr.length === 0) {
+        observer.complete?.();
+      }
+    } else {
+      observer.complete?.();
     }
-  };
+  });
 }
 
 export function mapo(
@@ -166,10 +238,14 @@ export function mapo(
   xs: Term,
   ys: Term,
 ): Goal {
-  return async function* (s) {
-    const xsVal = await walk(xs, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    const xsVal = walk(xs, s);
     if (isNil(xsVal)) {
-      yield* eq(ys, nil)(s);
+      eq(ys, nil)(s).subscribe({
+        next: observer.next,
+        error: observer.error,
+        complete: observer.complete
+      });
       return;
     }
     if (isCons(xsVal)) {
@@ -177,51 +253,64 @@ export function mapo(
       const xTail = xsVal.tail;
       const yHead = lvar();
       const yTail = lvar();
-      for await (const s1 of and(
+      and(
         eq(ys, cons(yHead, yTail)),
         rel(xHead, yHead),
         mapo(rel, xTail, yTail),
-      )(s)) {
-        yield s1;
-      }
+      )(s).subscribe({
+        next: observer.next,
+        error: observer.error,
+        complete: observer.complete
+      });
+    } else {
+      observer.complete?.();
     }
-  };
+  });
 }
 
 export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
-  return async function* (s) {
-    const xsVal = await walk(xs, s);
+  return (s) => new SimpleObservable<Subst>((observer) => {
+    const xsVal = walk(xs, s);
     if (isNil(xsVal)) {
       // If we reach nil without finding the element, fail
+      observer.complete?.();
       return;
     }
     if (isCons(xsVal)) {
-      const walkedX = await walk(x, s);
-      const walkedHead = await walk(xsVal.head, s);
+      const walkedX = walk(x, s);
+      const walkedHead = walk(xsVal.head, s);
       
       if (JSON.stringify(walkedHead) === JSON.stringify(walkedX)) {
         // Found the element, remove it
-        yield* eq(ys, xsVal.tail)(s);
+        eq(ys, xsVal.tail)(s).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: observer.complete
+        });
       } else {
         // Element not at head, try to remove from tail
         const rest = lvar();
-        for await (const s1 of and(
+        and(
           eq(ys, cons(xsVal.head, rest)),
           removeFirsto(xsVal.tail, x, rest),
-        )(s)) {
-          yield s1;
-        }
+        )(s).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: observer.complete
+        });
       }
+    } else {
+      observer.complete?.();
     }
-  };
+  });
 }
 
 /**
  * alldistincto(xs): true if all elements of xs are distinct.
  */
 export function alldistincto(xs: Term): Goal {
-  return async function* (s: Subst) {
-    const arr = await walk(xs, s);
+  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+    const arr = walk(xs, s);
     let jsArr: any[] = [];
     if (arr && typeof arr === "object" && "tag" in arr) {
       // Convert logic list to JS array
@@ -243,8 +332,7 @@ export function alldistincto(xs: Term): Goal {
       }
       seen.add(key);
     }
-    if (allDistinct) yield s;
-  };
+    if (allDistinct) observer.next(s);
+    observer.complete?.();
+  });
 }
-
-

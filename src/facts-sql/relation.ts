@@ -136,6 +136,45 @@ async function collectAllWhereClauses(goals: GoalRecord[], s: Subst): Promise<Re
   return allWhereClauses;
 }
 
+// --- Query Building Utilities ---
+
+/**
+ * Build a select query for a table with given where clauses and columns.
+ * whereClauses: { col: Set<any> } (values in set will be used with whereIn if >1, else where)
+ */
+function buildSelectQuery(dbObj: DBManager, table: string, whereClauses: Record<string, Set<any>>, selectColumns?: string[] | '*') {
+  let query = dbObj.db(table);
+  for (const [col, values] of Object.entries(whereClauses)) {
+    if (values.size === 1) {
+      query = query.where(col, Array.from(values)[0]);
+    } else {
+      query = query.whereIn(col, Array.from(values));
+    }
+  }
+  if (selectColumns && selectColumns !== '*') {
+    query = query.select(selectColumns);
+  } else {
+    query = query.select('*');
+  }
+  return query;
+}
+
+/**
+ * Build a simple select query for a table with grounded columns only.
+ */
+function buildSimpleQuery(dbObj: DBManager, table: string, queryObj: Record<string, Term>, whereCols: Record<string, any>, selectColumns?: string[] | '*') {
+  let query = dbObj.db(table);
+  for (const [column, value] of Object.entries(whereCols)) {
+    query = query.where(column, value);
+  }
+  if (selectColumns && selectColumns !== '*') {
+    query = query.select(selectColumns);
+  } else {
+    query = query.select(Object.keys(queryObj));
+  }
+  return query;
+}
+
 export class RegularRelationWithMerger {
   private logger: Logger;
   private primaryKey?: string;
@@ -246,19 +285,7 @@ export class RegularRelationWithMerger {
       const allGoalsToMerge = [myGoal, ...compatibleGoals];
       const allWhereClauses = await collectAllWhereClauses(allGoalsToMerge, s);
       // Build merged query
-      let query = this.dbObj.db(this.table);
-      for (const [col, values] of Object.entries(allWhereClauses)) {
-        if (values.size === 1) {
-          query = query.where(col, Array.from(values)[0]);
-        } else {
-          query = query.whereIn(col, Array.from(values));
-        }
-      }
-      if (this.options?.selectColumns) {
-        query = query.select(this.options.selectColumns);
-      } else {
-        query = query.select('*');
-      }
+      const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, this.options?.selectColumns || '*');
       const sqlString = query.toString();
       this.dbObj.addQuery(sqlString);
       this.logger.log("DB_QUERY_MERGED", {
@@ -541,8 +568,7 @@ export class RegularRelationWithMerger {
   private async executeQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
     const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
     const whereCols = queryUtils.onlyGrounded(walkedQuery);
-
-    const query = this.buildQuery(queryObj, whereCols);
+    const query = buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
     const sqlString = query.toString();
     
     this.dbObj.addQuery(sqlString);
@@ -574,21 +600,8 @@ export class RegularRelationWithMerger {
   }
 
   private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, any>) {
-    let query = this.dbObj.db(this.table);
-    
-    // Add WHERE clauses for grounded values
-    for (const [column, value] of Object.entries(whereCols)) {
-      query = query.where(column, value);
-    }
-
-    // Select all columns if no specific columns are configured
-    if (this.options?.selectColumns) {
-      query = query.select(this.options.selectColumns);
-    } else {
-      query = query.select(Object.keys(queryObj));
-    }
-
-    return query;
+    // Deprecated: use buildSimpleQuery instead
+    return buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
   }
 
   private unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Subst | null {

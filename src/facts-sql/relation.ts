@@ -22,6 +22,74 @@ const BATCH_SIZE = 100;
 // Adjustable debounce window for batching (ms)
 const BATCH_DEBOUNCE_MS = 50;
 
+// --- Batching & Debounce Utilities ---
+
+/**
+ * Create a batch processor for streaming input, with batch size and debounce window.
+ * Calls flushFn(batch) when batch is full or debounce window elapses.
+ * Returns a handler for input and a cancel function.
+ */
+function createBatchProcessor<T>(options: {
+  batchSize: number,
+  debounceMs: number,
+  onFlush: (batch: T[]) => Promise<void> | void,
+}): {
+  addItem: (item: T) => void,
+  complete: () => Promise<void>,
+  cancel: () => void,
+} {
+  let batch: T[] = [];
+  let debounceTimer: NodeJS.Timeout | null = null;
+  let flushingPromise: Promise<void> | null = null;
+  let cancelled = false;
+
+  const clearDebounce = () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  };
+
+  const flushBatch = async () => {
+    clearDebounce();
+    if (flushingPromise) return flushingPromise;
+    if (batch.length === 0 || cancelled) return Promise.resolve();
+    const toFlush = batch;
+    batch = [];
+    flushingPromise = Promise.resolve(options.onFlush(toFlush)).finally(() => {
+      flushingPromise = null;
+    });
+    return flushingPromise;
+  };
+
+  const addItem = (item: T) => {
+    if (cancelled) return;
+    batch.push(item);
+    if (batch.length >= options.batchSize) {
+      flushBatch();
+    } else {
+      clearDebounce();
+      debounceTimer = setTimeout(() => flushBatch(), options.debounceMs);
+    }
+  };
+
+  const complete = async () => {
+    await flushBatch();
+  };
+
+  const cancel = () => {
+    cancelled = true;
+    clearDebounce();
+    batch = [];
+  };
+
+  return {
+    addItem,
+    complete,
+    cancel 
+  };
+}
+
 // --- Cache Management Utilities ---
 
 /**
@@ -340,162 +408,111 @@ export class RegularRelationWithMerger {
 
   createGoal(queryObj: Record<string, Term>): Goal {
     const goalId = this.dbObj.getNextGoalId();
-    
     this.logger.log("GOAL_CREATED", {
       goalId,
       table: this.table,
       queryObj
     });
-
     // Register goal immediately when the goal function is called, before any processing
     this.dbObj.addGoal(goalId, this.table, queryObj, undefined);
-    
     this.logger.log("GOAL_REGISTERED_EARLY", {
       goalId,
       table: this.table,
       queryObj
     });
-
     // Streaming protocol: always accept Observable<Subst> as input
     const mySubstHandler = (input$: any) => {
       const resultObservable = new SimpleObservable<Subst>((observer) => {
         let cancelled = false;
-        let batch: Subst[] = [];
         let batchIndex = 0;
-        let debounceTimer: NodeJS.Timeout | null = null;
-        let flushingPromise: Promise<void> | null = null;
-      
+        let input_complete = false;
+        let batchKeyUpdated = false;
         this.logger.log("GOAL_STARTED", {
           goalId,
           table: this.table,
           queryObj,
         });
-
-        const clearDebounce = () => {
-          if (debounceTimer) {
-            clearTimeout(debounceTimer);
-            debounceTimer = null;
-          }
-        };
-
-        const scheduleDebounce = () => {
-          clearDebounce();
-          debounceTimer = setTimeout(() => {
-            flushBatch();
-          }, BATCH_DEBOUNCE_MS);
-        };
-
-        const flushBatch = async () => {
-          clearDebounce();
-          if (flushingPromise) return flushingPromise;
-          if (batch.length === 0 || cancelled) return Promise.resolve();
-          flushingPromise = (async () => {
-            try {
-              this.logger.log("FLUSH_BATCH", {
-                goalId,
-                batchIndex,
-                batchSize: batch.length,
-              });
-              // Use cacheOrQuery for each substitution to enable query merging
-              for (const subst of batch) {
-                if (cancelled) {
-                  this.logger.log("FLUSH_BATCH_CANCELLED_DURING_SUBST", {
-                    goalId,
-                    batchIndex 
-                  });
-                  return;
-                }
-              
-                this.logger.log("ABOUT_TO_CALL_CACHE_OR_QUERY", {
+        // Use the batch processor utility
+        const batchProcessor = createBatchProcessor<Subst>({
+          batchSize: BATCH_SIZE,
+          debounceMs: BATCH_DEBOUNCE_MS,
+          onFlush: async (batch) => {
+            if (cancelled) return;
+            this.logger.log("FLUSH_BATCH", {
+              goalId,
+              batchIndex,
+              batchSize: batch.length,
+            });
+            for (const subst of batch) {
+              if (cancelled) {
+                this.logger.log("FLUSH_BATCH_CANCELLED_DURING_SUBST", {
                   goalId,
                   batchIndex
                 });
-                const rows = await this.cacheOrQuery(goalId, queryObj, subst) || [];
-              
-                for (const row of rows) {
-                  if (cancelled) {
-                    this.logger.log("FLUSH_BATCH_CANCELLED_DURING_ROWS", {
-                      goalId,
-                      batchIndex 
+                return;
+              }
+              this.logger.log("ABOUT_TO_CALL_CACHE_OR_QUERY", {
+                goalId,
+                batchIndex
+              });
+              const rows = await this.cacheOrQuery(goalId, queryObj, subst) || [];
+              for (const row of rows) {
+                if (cancelled) {
+                  this.logger.log("FLUSH_BATCH_CANCELLED_DURING_ROWS", {
+                    goalId,
+                    batchIndex
+                  });
+                  return;
+                }
+                const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
+                if (unifiedSubst && !cancelled) {
+                  const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
+                    this.dbObj,
+                    unifiedSubst,
+                    goalId,
+                    row,
+                    this.logger
+                  );
+                  const log_s = new Map(updatedSubst);
+                  const log_c = log_s.get(ROW_CACHE) as Map<number, Record<string, any>>;
+                  const cacheRowCounts: Record<number, number> = {};
+                  if (log_c && typeof log_c.forEach === "function") {
+                    log_c.forEach((rows, key) => {
+                      cacheRowCounts[key] = Array.isArray(rows) ? rows.length : 0;
                     });
-                    return;
                   }
-                
-                  const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
-                
-                  if (unifiedSubst && !cancelled) {
-                  // Create updated substitution with proper cache management and populate cache for other goals
-                    const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
-                      this.dbObj,
-                      unifiedSubst,
-                      goalId,
-                      row,
-                      this.logger
-                    );
-                  
-                    const log_s = new Map(updatedSubst);
-                    const log_c = log_s.get(ROW_CACHE) as Map<number, Record<string, any>>;
-                    // log_s.delete(ROW_CACHE);
-                    // count the rows in each key of log_c and provide a variable with details about the counts for each key
-                    const cacheRowCounts: Record<number, number> = {};
-                    if (log_c && typeof log_c.forEach === "function") {
-                      log_c.forEach((rows, key) => {
-                        cacheRowCounts[key] = Array.isArray(rows) ? rows.length : 0;
-                      });
-                    }
-          
-                    this.logger.log("UNIFY_SUCCESS", {
-                      goalId,
-                      queryObj,
-                      row,
-                      log_s,
-                      cacheRowCounts
-                    // unifiedSubst: updatedSubst,
-                    });
-                    observer.next(new Map(updatedSubst));
-                    // let other things do their work
-                    await new Promise(resolve => nextTick(resolve));
-                  }
+                  this.logger.log("UNIFY_SUCCESS", {
+                    goalId,
+                    queryObj,
+                    row,
+                    log_s,
+                    cacheRowCounts
+                  });
+                  observer.next(new Map(updatedSubst));
+                  await new Promise(resolve => nextTick(resolve));
                 }
               }
-              batch = [];
-              batchIndex++;
-            } catch (error) {
-              if (!cancelled) {
-                observer.error?.(error);
-              }
-            } finally {
-              flushingPromise = null;
-              this.logger.log("FLUSH_BATCH_COMPLETE", {
-                goalId,
-                batchIndex,
-                batchSize: batch.length,
-              });
             }
-          })();
-          return flushingPromise;
-        };
-
-        let input_complete = false;
-        let batchKeyUpdated = false;
-      
+            batchIndex++;
+            this.logger.log("FLUSH_BATCH_COMPLETE", {
+              goalId,
+              batchIndex,
+              batchSize: 0,
+            });
+          }
+        });
         const subscription = input$.subscribe({
           next: (subst: Subst) => {
             if (cancelled) return;
-          
-            // Register in global registry and log group information on first substitution
             if (!batchKeyUpdated) {
               const groupId = subst.get(SQL_GROUP_ID) as number | undefined;
               batchKeyUpdated = true;
-              
-              // Register this goal in the global registry for its group
               if (groupId !== undefined) {
                 if (!goalsByGroupId.has(groupId)) {
                   goalsByGroupId.set(groupId, new Set());
                 }
                 goalsByGroupId.get(groupId)!.add(goalId);
               }
-            
               this.logger.log("GOAL_GROUP_INFO", {
                 goalId,
                 table: this.table,
@@ -504,19 +521,13 @@ export class RegularRelationWithMerger {
                 queryObj
               });
             }
-          
-            batch.push(subst);
+            batchProcessor.addItem(subst);
             this.logger.log("GOAL_NEXT", {
               goalId,
               input_complete,
               subst,
-              batchLength: batch.length,
+              // batchLength: batch.length, // batch length is internal to batchProcessor
             });
-            if (batch.length >= BATCH_SIZE) {
-              flushBatch();
-            } else {
-              scheduleDebounce();
-            }
           },
           error: (err: any) => {
             if (!cancelled) observer.error?.(err);
@@ -527,16 +538,16 @@ export class RegularRelationWithMerger {
               batchIndex,
               input_complete,
               cancelled,
-              batchSize: batch.length,
+              // batchSize: batch.length, // batch length is internal
             });
             input_complete = true;
-            flushBatch().then(() => {
+            batchProcessor.complete().then(() => {
               this.logger.log("GOAL_COMPLETE", {
                 goalId,
                 batchIndex,
                 input_complete,
                 cancelled,
-                batchSize: batch.length,
+                // batchSize: batch.length,
               });
               observer.complete?.();
             });
@@ -548,20 +559,16 @@ export class RegularRelationWithMerger {
             batchIndex,
             input_complete,
             cancelled,
-            batchSize: batch.length,
+            // batchSize: batch.length,
           });
           cancelled = true;
-          clearDebounce();
+          batchProcessor.cancel();
           subscription.unsubscribe?.();
         };
       });
-      
       return resultObservable;
     };
-    
-    // Register this handler with its goal ID
     observableToGoalId.set(mySubstHandler as unknown as Observable<any>, goalId);
-    
     return mySubstHandler;
   }
 
@@ -570,16 +577,13 @@ export class RegularRelationWithMerger {
     const whereCols = queryUtils.onlyGrounded(walkedQuery);
     const query = buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
     const sqlString = query.toString();
-    
     this.dbObj.addQuery(sqlString);
     this.logger.log("DB_QUERY", {
       table: this.table,
       sql: sqlString,
       goalId,
     });
-
     const rows = await query;
-    
     if (rows.length) {
       this.logger.log("DB_ROWS", {
         table: this.table,
@@ -595,7 +599,6 @@ export class RegularRelationWithMerger {
         rows,
       });
     }
-
     return rows;
   }
 
@@ -604,20 +607,18 @@ export class RegularRelationWithMerger {
     return buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
   }
 
-  private unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Subst | null {
+  // Make unifyRowWithQuery public so it can be used by batch processor
+  public unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Subst | null {
     let result = s;
-    
     for (const [column, term] of Object.entries(queryObj)) {
       const value = row[column];
       if (value === undefined) continue;
-      
       const unified = unify(term, value, result);
       if (unified === null) {
         return null;
       }
       result = unified;
     }
-    
     return result;
   }
 }

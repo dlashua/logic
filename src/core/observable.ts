@@ -217,28 +217,23 @@ export class SimpleObservable<T> implements Observable<T> {
           if (taken < count) {
             observer.next(value);
             taken++;
-            console.log('[SimpleObservable.take] yielded', value, 'taken', taken, 'of', count);
             if (taken >= count) {
               observer.complete?.();
               subscription.unsubscribe();
               upstreamUnsubscribed = true;
-              console.log('[SimpleObservable.take] completed and unsubscribed upstream');
             }
           }
         },
         error: (err) => {
-          console.log('[SimpleObservable.take] error', err);
           observer.error?.(err);
         },
         complete: () => {
-          console.log('[SimpleObservable.take] upstream complete');
           observer.complete?.();
         }
       });
       return () => {
         if (!upstreamUnsubscribed) {
           subscription.unsubscribe();
-          console.log('[SimpleObservable.take] manual unsubscribe');
         }
       };
     });

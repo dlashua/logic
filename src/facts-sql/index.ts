@@ -12,6 +12,7 @@ export interface GoalRecord {
     goalId: number;
     table: string;
     queryObj: Record<string, Term>;
+    batchKey?: string;
 }
 
 export type DBManager = Awaited<ReturnType<typeof createDBManager>>;
@@ -36,12 +37,14 @@ export async function createDBManager (
     clearQueries: () => queries.splice(0, queries.length),
     getQueryCount: () => queries.length,
     
-    addGoal: (goalId: number, table: string, queryObj: Record<string, Term>) => goals.push({
+    addGoal: (goalId: number, table: string, queryObj: Record<string, Term>, batchKey?: string) => goals.push({
       goalId,
       table,
-      queryObj 
+      queryObj,
+      batchKey
     }),
     getGoalById: (id: number) => goals.find(x => x.goalId === id),
+    getGoalsByBatchKey: (batchKey: string) => goals.filter(x => x.batchKey === batchKey),
     getGoals: () => goals,
     clearGoals: () => goals.splice(0, goals.length),
 

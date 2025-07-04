@@ -1,11 +1,11 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: false,
+  enabled: true,
   allowedIds: new Set<string>([
-    "FLUSH_BATCH",
+    // "FLUSH_BATCH",
     "FLUSH_BATCH_COMPLETE",
-    "GOAL_NEXT",
+    // "GOAL_NEXT",
     "UPSTREAM_GOAL_COMPLETE",
     "GOAL_COMPLETE",
     "GOAL_CANCELLED",
@@ -13,9 +13,15 @@ const DEFAULT_CONFIG = {
     "FLUSH_BATCH_CANCELLED_DURING_ROWS",
     "FLUSH_BATCH_CANCELLED_DURING_SUBST",
     "DB_QUERY_BATCH",
-
-    // "UNIFY_SUCCESS",
-
+    "CACHE_HIT",
+    "CACHE_MISS",
+    "UNIFY_SUCCESS",
+    "GOAL_BATCH_KEY_UPDATED",
+    "ABOUT_TO_CALL_CACHE_OR_QUERY",
+    "CACHE_OR_QUERY_START",
+    "COMPATIBLE_GOALS",
+    "ABOUT_TO_PROCESS_GOAL",
+    "GOAL_GROUP_INFO",
 
   ]), // empty means allow all
   deniedIds: new Set<string>([

@@ -15,6 +15,14 @@ import {
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
 
+// Well-known symbols for SQL query coordination
+export const SQL_GROUP_ID = Symbol('sql-group-id');
+export const SQL_GROUP_PATH = Symbol('sql-group-path');
+export const SQL_GROUP_GOALS = Symbol('sql-group-goals');
+
+// Counter for generating unique group IDs
+let groupIdCounter = 0;
+
 /**
  * A goal that succeeds if two terms can be unified.
  */
@@ -71,17 +79,59 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
  * Logical disjunction (OR).
  */
 export function disj(g1: Goal, g2: Goal): Goal {
-  return (input$) => g1(input$).merge(g2(input$));
+  return (input$) => {
+    const disjId = ++groupIdCounter;
+    
+    const branch1Input$ = input$.map(s => {
+      const parentPath = s.get(SQL_GROUP_PATH) || [];
+      const newPath = [...parentPath, { type: Symbol('disj'), id: disjId, branch: 0 }];
+      
+      return new Map([
+        ...s,
+        [SQL_GROUP_ID, disjId],
+        [SQL_GROUP_PATH, newPath],
+        [SQL_GROUP_GOALS, []] // Each branch gets its own goals list
+      ]);
+    });
+    
+    const branch2Input$ = input$.map(s => {
+      const parentPath = s.get(SQL_GROUP_PATH) || [];
+      const newPath = [...parentPath, { type: Symbol('disj'), id: disjId, branch: 1 }];
+      
+      return new Map([
+        ...s,
+        [SQL_GROUP_ID, disjId],
+        [SQL_GROUP_PATH, newPath],
+        [SQL_GROUP_GOALS, []] // Each branch gets its own goals list
+      ]);
+    });
+    
+    return g1(branch1Input$).merge(g2(branch2Input$));
+  };
 }
 
 /**
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  // Streaming conjunction: for each subst from g1, immediately stream results from g2
-  // return (input$) => g1(input$).flatMap(subst => g2(SimpleObservable.of(subst)));
-  return (input$) => g2(g1(input$));
-
+  return (input$) => {
+    const conjId = ++groupIdCounter;
+    
+    const enrichedInput$ = input$.map(s => {
+      const parentPath = s.get(SQL_GROUP_PATH) || [];
+      const newPath = [...parentPath, { type: Symbol('conj'), id: conjId }];
+      
+      return new Map([
+        ...s,
+        [SQL_GROUP_ID, conjId],
+        [SQL_GROUP_PATH, newPath],
+        [SQL_GROUP_GOALS, [g1, g2]] // Include both goals in the group
+      ]);
+    });
+    
+    // Stream conjunction: g2 processes results from g1
+    return g2(g1(enrichedInput$));
+  };
 }
 
 /**

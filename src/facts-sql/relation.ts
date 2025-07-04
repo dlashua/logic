@@ -7,8 +7,11 @@ import { SimpleObservable } from "../core/observable.ts";
 import { RelationOptions } from "./types.ts";
 import type { DBManager, GoalRecord } from "./index.ts";
 
-const JOINS_ENABLED = true;
+const JOINS_ENABLED = false;
 const ROW_CACHE = Symbol.for("sql-row-cache");
+
+// Adjustable batch size for IN queries
+const BATCH_SIZE = 50;
 
 export class RegularRelationWithMerger {
   private logger: Logger;
@@ -72,8 +75,12 @@ export class RegularRelationWithMerger {
     const myGoal = this.dbObj.getGoalById(goalId);
     if(!myGoal) return [];
 
-    // const commonGoals = await this.processGoal(myGoal, s);
-    const commonGoals = [];
+    let commonGoals: {goal: GoalRecord, matchingIds: string[]}[] = [];
+    if (!JOINS_ENABLED) {
+      commonGoals = []
+    } else {
+      commonGoals = await this.processGoal(myGoal, s);
+    }
 
     this.logger.log("COMMON_GOALS", {
       myGoal,
@@ -235,7 +242,6 @@ export class RegularRelationWithMerger {
 
     return (s: Subst) => new SimpleObservable<Subst>((observer) => {
       let cancelled = false;
-      
       this.logger.log("GOAL_STARTED", {
         goalId,
         table: this.table,
@@ -243,46 +249,59 @@ export class RegularRelationWithMerger {
         s,
       });
 
-      const processQuery = async () => {
+      // Batching logic for incoming substitutions
+      let batch: Subst[] = [];
+      let batchIndex = 0;
+      let completed = false;
+      let upstreamComplete = false;
+      let upstreamError: any = null;
+
+      const flushBatch = async () => {
+        if (batch.length === 0 || cancelled) return;
         try {
-          const new_s = new Map(s);
-          const old_pass = s.get(ROW_CACHE) || new Map();
-          new_s.set(ROW_CACHE, new Map(old_pass))
-          const rows = await this.cacheOrQuery(goalId, queryObj, new_s) || [];
-
-          let yielded = 0;
-          for (let i = 0; i < rows.length; i++) {
-            if (cancelled) break;
-            
-            const row = rows[i];
-            const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new_s);
-            if (unifiedSubst && !cancelled) {
-              this.logger.log("UNIFY_SUCCESS", {
-                goalId,
-                queryObj,
-                row,
-                unifiedSubst,
-              });
-              
-              yielded++;
-              observer.next(new Map(unifiedSubst));
-            } else if (!cancelled) {
-              this.logger.log("UNIFY_FAILED", {
-                goalId,
-                queryObj,
-                row,
-              });
-            }
-            
-            // Yield control periodically to allow cancellation
-            if (i % 10 === 0) {
-              await new Promise(resolve => queueMicrotask(resolve));
+          // Build a batched query using IN for grounded columns
+          const walkedBatch = await Promise.all(batch.map(subst => queryUtils.walkAllKeys(queryObj, subst)));
+          const colValues: Record<string, Set<any>> = {};
+          for (const walked of walkedBatch) {
+            for (const [col, value] of Object.entries(queryUtils.onlyGrounded(walked))) {
+              if (!colValues[col]) colValues[col] = new Set();
+              colValues[col].add(value);
             }
           }
-
-          if (!cancelled) {
-            observer.complete?.();
+          let query = this.dbObj.db(this.table);
+          for (const [col, values] of Object.entries(colValues)) {
+            query = query.whereIn(col, Array.from(values));
           }
+          if (this.options?.selectColumns) {
+            query = query.select(this.options.selectColumns);
+          } else {
+            query = query.select('*');
+          }
+          const sqlString = query.toString();
+          this.dbObj.addQuery(sqlString);
+          this.logger.log("DB_QUERY_BATCH", {
+            table: this.table,
+            sql: sqlString,
+            goalId,
+            batchIndex,
+          });
+          const rows = await query;
+          for (const row of rows) {
+            for (const subst of batch) {
+              const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new Map(subst));
+              if (unifiedSubst && !cancelled) {
+                this.logger.log("UNIFY_SUCCESS", {
+                  goalId,
+                  queryObj,
+                  row,
+                  unifiedSubst,
+                });
+                observer.next(new Map(unifiedSubst));
+              }
+            }
+          }
+          batch = [];
+          batchIndex++;
         } catch (error) {
           if (!cancelled) {
             observer.error?.(error);
@@ -290,11 +309,45 @@ export class RegularRelationWithMerger {
         }
       };
 
-      processQuery();
-
-      return () => {
-        cancelled = true;
-      };
+      // Listen for incoming substitutions from upstream observable
+      const upstream = s as any;
+      if (typeof upstream.subscribe === 'function') {
+        // s is an observable (chained goal)
+        const subscription = upstream.subscribe({
+          next: (subst: Subst) => {
+            if (cancelled) return;
+            batch.push(subst);
+            if (batch.length >= BATCH_SIZE) {
+              flushBatch();
+            }
+          },
+          error: (err: any) => {
+            upstreamError = err;
+            completed = true;
+            if (!cancelled) observer.error?.(err);
+          },
+          complete: () => {
+            upstreamComplete = true;
+            completed = true;
+            flushBatch().then(() => {
+              if (!cancelled) observer.complete?.();
+            });
+          }
+        });
+        return () => {
+          cancelled = true;
+          subscription.unsubscribe?.();
+        };
+      } else {
+        // s is a single substitution (not an observable)
+        batch.push(s);
+        flushBatch().then(() => {
+          if (!cancelled) observer.complete?.();
+        });
+        return () => {
+          cancelled = true;
+        };
+      }
     });
   }
 

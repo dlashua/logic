@@ -9,6 +9,15 @@ import { walk, arrayToLogicList } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
+function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
+  return (input$ instanceof SimpleObservable)
+    ? input$
+    : new SimpleObservable<T>(observer => {
+      const sub = input$.subscribe(observer);
+      return () => sub.unsubscribe();
+    });
+}
+
 /**
  * Helper: deduplicate an array of items using JSON.stringify for deep equality.
  */
@@ -33,61 +42,56 @@ export function groupByGoal(
   keyVar: Term,
   valueVar: Term,
   goal: Goal,
-  s: Subst,
+  input$: Observable<Subst>,
   cb: (s: Subst, key: any, items: any[]) => SimpleObservable<Subst>,
 ): SimpleObservable<Subst> {
-  return new SimpleObservable<Subst>((observer) => {
-    // Collect all (key, value) pairs
-    const pairs: { key: any; value: any }[] = [];
-    
-    goal(s).subscribe({
-      next: (s1) => {
-        const key = walk(keyVar, s1);
-        const value = walk(valueVar, s1);
-        pairs.push({
-          key,
-          value 
-        });
-      },
-      complete: () => {
-        // Group by key (map to array of values)
-        const grouped = new Map<string, { key: any; items: any[] }>();
-        for (const { key, value } of pairs) {
-          const k = JSON.stringify(key); // Use JSON.stringify for deep equality
-          if (!grouped.has(k))
-            grouped.set(k, {
-              key,
-              items: [],
-            });
-          const group = grouped.get(k);
-          if (group) group.items.push(value);
-        }
-        
-        // For each group, yield using the callback
-        let completedGroups = 0;
-        const totalGroups = grouped.size;
-        
-        if (totalGroups === 0) {
-          observer.complete?.();
-          return;
-        }
-        
-        for (const { key, items } of grouped.values()) {
-          cb(s, key, items).subscribe({
-            next: observer.next,
-            error: observer.error,
-            complete: () => {
-              completedGroups++;
-              if (completedGroups === totalGroups) {
-                observer.complete?.();
-              }
-            }
+  return toSimple(input$).flatMap((s: Subst) =>
+    new SimpleObservable<Subst>((observer) => {
+      const pairs: { key: any; value: any }[] = [];
+      toSimple(goal(SimpleObservable.of(s))).subscribe({
+        next: (s1) => {
+          const key = walk(keyVar, s1);
+          const value = walk(valueVar, s1);
+          pairs.push({
+            key,
+            value 
           });
-        }
-      },
-      error: observer.error
-    });
-  });
+        },
+        complete: () => {
+          const grouped = new Map<string, { key: any; items: any[] }>();
+          for (const { key, value } of pairs) {
+            const k = JSON.stringify(key);
+            if (!grouped.has(k))
+              grouped.set(k, {
+                key,
+                items: []
+              });
+            const group = grouped.get(k);
+            if (group) group.items.push(value);
+          }
+          let completedGroups = 0;
+          const totalGroups = grouped.size;
+          if (totalGroups === 0) {
+            observer.complete?.();
+            return;
+          }
+          for (const { key, items } of grouped.values()) {
+            cb(s, key, items).subscribe({
+              next: observer.next,
+              error: observer.error,
+              complete: () => {
+                completedGroups++;
+                if (completedGroups === totalGroups) {
+                  observer.complete?.();
+                }
+              }
+            });
+          }
+        },
+        error: observer.error
+      });
+    })
+  );
 }
 
 /**
@@ -103,25 +107,26 @@ export function aggregateRelFactory(
   dedup = false,
 ) {
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const results: Term[] = [];
-      
-      goal(s).subscribe({
-        next: (s1) => {
-          const val = walk(x, s1);
-          results.push(val);
-        },
-        complete: () => {
-          const agg = aggFn(dedup ? deduplicate(results) : results);
-          eq(out, agg)(s).subscribe({
-            next: observer.next,
-            error: observer.error,
-            complete: observer.complete
-          });
-        },
-        error: observer.error
-      });
-    });
+    return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+      new SimpleObservable<Subst>((observer) => {
+        const results: Term[] = [];
+        toSimple(goal(SimpleObservable.of(s))).subscribe({
+          next: (s1) => {
+            const val = walk(x, s1);
+            results.push(val);
+          },
+          complete: () => {
+            const agg = aggFn(dedup ? deduplicate(results) : results);
+            toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
+              next: observer.next,
+              error: observer.error,
+              complete: observer.complete
+            });
+          },
+          error: observer.error
+        });
+      })
+    );
   };
 }
 
@@ -139,34 +144,31 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outAgg: Term,
     dedup = false,
   ): Goal =>
-    (s: Subst) => {
-      return groupByGoal(
-        keyVar,
-        valueVar,
-        goal,
-        s,
-        (s, key, items) => {
-          const groupItems = dedup ? deduplicate(items) : items;
-          const agg = aggFn(groupItems);
-          return new SimpleObservable<Subst>((observer) => {
-            eq(outKey, key)(s).subscribe({
-              next: (s2) => {
-                eq(outAgg, agg)(s2).subscribe({
-                  next: observer.next,
-                  error: observer.error,
-                  complete: observer.complete
-                });
-              },
-              error: observer.error,
-              complete: () => {
-                // If eq(outKey, key) fails, still complete
-                observer.complete?.();
-              }
-            });
+    (input$: Observable<Subst>) => groupByGoal(
+      keyVar,
+      valueVar,
+      goal,
+      input$,
+      (s, key, items) => {
+        const groupItems = dedup ? deduplicate(items) : items;
+        const agg = aggFn(groupItems);
+        return new SimpleObservable<Subst>((observer) => {
+          toSimple(eq(outKey, key)(SimpleObservable.of(s))).subscribe({
+            next: (s2) => {
+              toSimple(eq(outAgg, agg)(SimpleObservable.of(s2))).subscribe({
+                next: observer.next,
+                error: observer.error,
+                complete: observer.complete
+              });
+            },
+            error: observer.error,
+            complete: () => {
+              observer.complete?.();
+            }
           });
-        },
-      );
-    };
+        });
+      },
+    );
 }
 
 export const group_by_collecto = groupAggregateRelFactory(arrayToLogicList);

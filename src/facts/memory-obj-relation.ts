@@ -38,9 +38,8 @@ export class MemoryObjRelation {
   }
 
   private createGoal(queryObj: Record<string, Term>, goalId: number): Goal {
-    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+    return (input$) => new SimpleObservable<Subst>((observer) => {
       let cancelled = false;
-      
       this.logger.log(
         "RUN_START",
         {
@@ -48,91 +47,88 @@ export class MemoryObjRelation {
           queryObj,
         }
       );
-
-      const processQuery = async () => {
+      const processAll = async () => {
         try {
-          const queryKeys = Object.keys(queryObj);
-          const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
-          
-          // Find indexable, grounded keys
-          const indexedKeys: string[] = [];
-          for (const key of queryKeys) {
-            if (!isVar(walkedQuery[key]) && this.indexes.has(key)) {
-              indexedKeys.push(key);
+          // For each incoming substitution, process as before
+          const subs: Subst[] = [];
+          input$.subscribe({
+            next: (s: Subst) => subs.push(s),
+            complete: async () => {
+              for (const s of subs) {
+                const queryKeys = Object.keys(queryObj);
+                const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
+                // Find indexable, grounded keys
+                const indexedKeys: string[] = [];
+                for (const key of queryKeys) {
+                  if (!isVar(walkedQuery[key]) && this.indexes.has(key)) {
+                    indexedKeys.push(key);
+                  }
+                }
+                let candidateIndexes: Set<number> | null = null;
+                if (indexedKeys.length > 0) {
+                  this.logger.log(
+                    "INDEX_LOOKUP",
+                    {
+                      message: `Using indexes for keys: ${indexedKeys.join(', ')}`,
+                    }
+                  );
+                  for (const key of indexedKeys) {
+                    const value = walkedQuery[key];
+                    const index = this.indexes.get(key);
+                    if (!index) continue;
+                    const factNums = index.get(value);
+                    if (!factNums || factNums.size === 0) {
+                      candidateIndexes = new Set();
+                      break;
+                    }
+                    if (candidateIndexes === null) {
+                      candidateIndexes = new Set(factNums);
+                    } else {
+                      candidateIndexes = indexUtils.intersect(candidateIndexes, factNums);
+                      if (candidateIndexes.size === 0) break;
+                    }
+                  }
+                }
+                if (candidateIndexes === null) {
+                  this.logger.log(
+                    "MEMORY_SCAN",
+                    {
+                      message: `Full scan of ${this.facts.length} object facts`,
+                    }
+                  );
+                  await this.processFacts(this.facts, queryObj, walkedQuery, queryKeys, s, observer, () => cancelled);
+                } else {
+                  this.logger.log(
+                    "INDEX_LOOKUP",
+                    {
+                      message: `Checking ${candidateIndexes.size} indexed object facts`,
+                    }
+                  );
+                  const indexedFacts = Array.from(candidateIndexes).map(i => this.facts[i]);
+                  await this.processFacts(indexedFacts, queryObj, walkedQuery, queryKeys, s, observer, () => cancelled);
+                }
+              }
+              if (!cancelled) {
+                this.logger.log(
+                  "RUN_END",
+                  {
+                    message: `Completed memory object relation goal ${goalId}`,
+                  }
+                );
+                observer.complete?.();
+              }
+            },
+            error: (err) => {
+              if (!cancelled) observer.error?.(err);
             }
-          }
-
-          let candidateIndexes: Set<number> | null = null;
-          
-          if (indexedKeys.length > 0) {
-            this.logger.log(
-              "INDEX_LOOKUP",
-              {
-                message: `Using indexes for keys: ${indexedKeys.join(', ')}`,
-              }
-            );
-            
-            for (const key of indexedKeys) {
-              const value = walkedQuery[key];
-              const index = this.indexes.get(key);
-              if (!index) continue;
-              
-              const factNums = index.get(value);
-              if (!factNums || factNums.size === 0) {
-                candidateIndexes = new Set();
-                break;
-              }
-              
-              if (candidateIndexes === null) {
-                candidateIndexes = new Set(factNums);
-              } else {
-                candidateIndexes = indexUtils.intersect(candidateIndexes, factNums);
-                if (candidateIndexes.size === 0) break;
-              }
-            }
-          }
-
-          if (candidateIndexes === null) {
-            this.logger.log(
-              "MEMORY_SCAN",
-              {
-                message: `Full scan of ${this.facts.length} object facts`,
-              }
-            );
-            
-            // Process all facts with cancellation support
-            await this.processFacts(this.facts, queryObj, walkedQuery, queryKeys, s, observer, () => cancelled);
-          } else {
-            this.logger.log(
-              "INDEX_LOOKUP",
-              {
-                message: `Checking ${candidateIndexes.size} indexed object facts`,
-              }
-            );
-            
-            // Process indexed facts
-            const indexedFacts = Array.from(candidateIndexes).map(i => this.facts[i]);
-            await this.processFacts(indexedFacts, queryObj, walkedQuery, queryKeys, s, observer, () => cancelled);
-          }
-
-          if (!cancelled) {
-            this.logger.log(
-              "RUN_END",
-              {
-                message: `Completed memory object relation goal ${goalId}`,
-              }
-            );
-            observer.complete?.();
-          }
+          });
         } catch (error) {
           if (!cancelled) {
             observer.error?.(error);
           }
         }
       };
-
-      processQuery();
-
+      processAll();
       return () => {
         cancelled = true;
       };

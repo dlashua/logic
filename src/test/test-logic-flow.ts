@@ -4,15 +4,13 @@ import { eq, and, or } from "../core/combinators.ts";
 import { createLogicVarProxy, query } from "../query.ts";
 import { membero } from "../relations/lists.ts";
 import { not } from "../relations/control.ts";
-import { familytree, info_color, info_number } from "./familytree-sql-facts.ts";
+import { familytree, info_color, info_number, relDB } from "./familytree-sql-facts.ts";
 
 const {
   parent_kid
 } = familytree;
 
 const log = console.log;
-const { proxy: $ } = createLogicVarProxy("test_");
-const S = new Map();
 
 await query()
   .where(($) => [
@@ -33,3 +31,6 @@ await query()
     parent_kid($.gp, $.parent),
 
   ]).toArray().then(x => x.forEach(x => log(x)));
+
+console.log("queries", relDB.getQueries());
+process.exit(0);

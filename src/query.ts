@@ -14,6 +14,7 @@ import {
   logicListToArray
 } from "./core/kernel.ts"
 import { and } from "./core/combinators.ts";
+import { SimpleObservable } from "./core/observable.ts";
 
 /**
  * Recursively walks a result object, converting any logic lists into JS arrays.
@@ -179,7 +180,8 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
 
     const initialSubst: Subst = new Map();
     const combinedGoal = and(...this._goals);
-    const substStream = combinedGoal(initialSubst);
+    // Updated for streaming protocol: pass Observable<Subst> to the goal
+    const substStream = combinedGoal(SimpleObservable.of(initialSubst));
     const results = formatSubstitutions(substStream, formatter, this._limit);
 
     const rawSelector = this._rawSelector;

@@ -1,67 +1,73 @@
-import { ConsNode, Goal, Subst, Term } from "../core/types.ts";
+import {
+  ConsNode,
+  Goal,
+  Subst,
+  Term,
+  Observable
+} from "../core/types.ts"
 import { walk, isVar } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
-export const uniqueo = (t: Term, g: Goal) => 
-  (s: Subst) => new SimpleObservable<Subst>((observer) => {
+function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
+  return (input$ instanceof SimpleObservable)
+    ? input$
+    : new SimpleObservable<T>(observer => {
+      const sub = input$.subscribe(observer);
+      return () => sub.unsubscribe();
+    });
+}
+
+export const uniqueo = (t: Term, g: Goal): Goal =>
+  (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
     const seen = new Set();
-    
-    g(s).subscribe({
-      next: (s2) => {
-        const w_t = walk(t, s2);
-        if (isVar(w_t)) {
-          observer.next(s2);
-          return;
-        }
-        const key = JSON.stringify(w_t);
-        if (seen.has(key)) return;
-        seen.add(key);
-        observer.next(s2);
-      },
-      error: observer.error,
-      complete: observer.complete
+    return toSimple(g(SimpleObservable.of(s))).flatMap((s2: Subst) => {
+      const w_t = walk(t, s2);
+      if (isVar(w_t)) {
+        return SimpleObservable.of(s2);
+      }
+      const key = JSON.stringify(w_t);
+      if (seen.has(key)) return SimpleObservable.empty();
+      seen.add(key);
+      return SimpleObservable.of(s2);
     });
   });
 
 export function not(goal: Goal): Goal {
-  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
     let found = false;
-    
-    goal(s).subscribe({
-      next: (subst) => {
-        // Check if this result only added bindings that were already in the original substitution
-        // If it added new variable bindings, we don't consider this a "safe" success
-        let addedNewBindings = false;
-        for (const [key, value] of subst) {
-          if (!s.has(key)) {
-            addedNewBindings = true;
-            break;
+    return new SimpleObservable<Subst>((observer) => {
+      goal(SimpleObservable.of(s)).subscribe({
+        next: (subst) => {
+          let addedNewBindings = false;
+          for (const [key, value] of subst) {
+            if (!s.has(key)) {
+              addedNewBindings = true;
+              break;
+            }
           }
+          if (!addedNewBindings) {
+            found = true;
+          }
+        },
+        error: observer.error,
+        complete: () => {
+          if (!found) observer.next(s);
+          observer.complete?.();
         }
-        
-        // If the goal succeeded without adding new bindings, it's a genuine success
-        if (!addedNewBindings) {
-          found = true;
-        }
-      },
-      error: observer.error,
-      complete: () => {
-        if (!found) observer.next(s);
-        observer.complete?.();
-      }
+      });
     });
   });
 }
 
-export const neqo = (x: Term, y: Term) => not(eq(x, y));
+export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));
 
 /**
  * A goal that succeeds if the given goal succeeds exactly once.
  * Useful for cut-like behavior.
  */
 export function onceo(goal: Goal): Goal {
-  return (s: Subst) => goal(s).take(1);
+  return (input$: Observable<Subst>) => toSimple(goal(toSimple(input$))).take(1);
 }
 
 /**
@@ -69,10 +75,12 @@ export function onceo(goal: Goal): Goal {
  * Useful as a base case or for testing.
  */
 export function succeedo(): Goal {
-  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
-    observer.next(s);
-    observer.complete?.();
-  });
+  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+    new SimpleObservable<Subst>((observer) => {
+      observer.next(s);
+      observer.complete?.();
+    })
+  );
 }
 
 /**
@@ -80,43 +88,41 @@ export function succeedo(): Goal {
  * Useful for testing or as a base case.
  */
 export function failo(): Goal {
-  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
-    observer.complete?.();
-  });
+  return (_input$: Observable<Subst>) => SimpleObservable.empty<Subst>();
 }
 
 /**
  * A goal that succeeds if the term is ground (contains no unbound variables).
  */
 export function groundo(term: Term): Goal {
-  return (s: Subst) => new SimpleObservable<Subst>((observer) => {
-    const walked = walk(term, s);
-    
-    function isGround(t: Term): boolean {
-      if (isVar(t)) return false;
-      if (Array.isArray(t)) {
-        return t.every(isGround);
-      }
-      if (t && typeof t === "object" && "tag" in t) {
-        if (t.tag === "cons") {
-          const l = t as ConsNode;
-          return isGround(l.head) && isGround(l.tail);
+  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+    new SimpleObservable<Subst>((observer) => {
+      const walked = walk(term, s);
+      function isGround(t: Term): boolean {
+        if (isVar(t)) return false;
+        if (Array.isArray(t)) {
+          return t.every(isGround);
         }
-        if (t.tag === "nil") {
-          return true;
+        if (t && typeof t === "object" && "tag" in t) {
+          if (t.tag === "cons") {
+            const l = t as ConsNode;
+            return isGround(l.head) && isGround(l.tail);
+          }
+          if (t.tag === "nil") {
+            return true;
+          }
         }
+        if (t && typeof t === "object" && !("tag" in t)) {
+          return Object.values(t).every(isGround);
+        }
+        return true; // primitives are ground
       }
-      if (t && typeof t === "object" && !("tag" in t)) {
-        return Object.values(t).every(isGround);
+      if (isGround(walked)) {
+        observer.next(s);
       }
-      return true; // primitives are ground
-    }
-    
-    if (isGround(walked)) {
-      observer.next(s);
-    }
-    observer.complete?.();
-  });
+      observer.complete?.();
+    })
+  );
 }
 
 /**

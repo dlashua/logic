@@ -235,3 +235,30 @@ export function logicListToArray(list: Term): Term[] {
   }
   return out;
 }
+
+// New: Goal protocol is now (Observable<Subst>) => Observable<Subst>
+export type Goal = (input$: Observable<Subst>) => Observable<Subst>;
+
+// Helper: Convert a single-substitution goal to the new protocol
+export function liftGoal(singleGoal: (s: Subst) => Observable<Subst>): Goal {
+  return (input$) => new SimpleObservable(observer => {
+    const subs = input$.subscribe({
+      next: (s) => {
+        const out$ = singleGoal(s);
+        out$.subscribe({
+          next: (s2) => observer.next(s2),
+          error: (e) => observer.error?.(e),
+          complete: () => {} // wait for all
+        });
+      },
+      error: (e) => observer.error?.(e),
+      complete: () => observer.complete?.()
+    });
+    return () => subs.unsubscribe?.();
+  });
+}
+
+// Helper: Chain goals (like flatMap for observables)
+export function chainGoals(goals: Goal[], initial$: Observable<Subst>): Observable<Subst> {
+  return goals.reduce((input$, goal) => goal(input$), initial$);
+}

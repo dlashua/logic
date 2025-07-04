@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { query } from '../query.ts';
 import { lvar, resetVarCounter } from './kernel.ts';
 import { eq, and, or, run } from './combinators.ts';
-import { query } from '../query.ts';
+import { SimpleObservable } from './observable.ts';
 
 describe('Logic Combinators', () => {
   beforeEach(() => {
@@ -19,7 +20,9 @@ describe('Logic Combinators', () => {
 
     it('should unify variable with value', async () => {
       const results = await query()
-        .select($ => ({ x: $.x }))
+        .select($ => ({
+          x: $.x 
+        }))
         .where($ => eq($.x, 42))
         .toArray();
       
@@ -46,7 +49,10 @@ describe('Logic Combinators', () => {
 
     it('should unify two variables', async () => {
       const results = await query()
-        .select($ => ({ x: $.x, y: $.y }))
+        .select($ => ({
+          x: $.x,
+          y: $.y 
+        }))
         .where($ => eq($.x, $.y))
         .toArray();
       
@@ -72,7 +78,10 @@ describe('Logic Combinators', () => {
   describe('and (conjunction)', () => {
     it('should succeed when all goals succeed', async () => {
       const results = await query()
-        .select($ => ({ x: $.x, y: $.y }))
+        .select($ => ({
+          x: $.x,
+          y: $.y 
+        }))
         .where($ => and(
           eq($.x, 42),
           eq($.y, 'hello')
@@ -86,7 +95,9 @@ describe('Logic Combinators', () => {
 
     it('should fail when any goal fails', async () => {
       const results = await query()
-        .select($ => ({ x: $.x }))
+        .select($ => ({
+          x: $.x 
+        }))
         .where($ => and(
           eq($.x, 42),
           eq($.x, 43) // This should fail
@@ -98,7 +109,11 @@ describe('Logic Combinators', () => {
 
     it('should handle variable propagation', async () => {
       const results = await query()
-        .select($ => ({ x: $.x, y: $.y, z: $.z }))
+        .select($ => ({
+          x: $.x,
+          y: $.y,
+          z: $.z 
+        }))
         .where($ => and(
           eq($.x, $.y),
           eq($.y, $.z),
@@ -134,7 +149,9 @@ describe('Logic Combinators', () => {
   describe('or (disjunction)', () => {
     it('should succeed with multiple solutions', async () => {
       const results = await query()
-        .select($ => ({ x: $.x }))
+        .select($ => ({
+          x: $.x 
+        }))
         .where($ => or(
           eq($.x, 42),
           eq($.x, 43)
@@ -148,7 +165,9 @@ describe('Logic Combinators', () => {
 
     it('should succeed with at least one solution', async () => {
       const results = await query()
-        .select($ => ({ x: $.x }))
+        .select($ => ({
+          x: $.x 
+        }))
         .where($ => or(
           eq($.x, 42),
           eq(42, 43) // This fails but first succeeds
@@ -174,7 +193,10 @@ describe('Logic Combinators', () => {
   describe('complex combinations', () => {
     it('should handle nested and/or correctly', async () => {
       const results = await query()
-        .select($ => ({ x: $.x, y: $.y }))
+        .select($ => ({
+          x: $.x,
+          y: $.y 
+        }))
         .where($ => and(
           or(
             eq($.x, 1),

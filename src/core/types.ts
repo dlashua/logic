@@ -68,10 +68,10 @@ export interface Subscription {
 }
 
 /**
- * A Goal is a function that takes a substitution and returns an Observable
- * stream of possible resulting substitutions.
+ * A Goal is a function that takes an Observable stream of substitutions and returns
+ * an Observable stream of possible resulting substitutions.
  */
-export type Goal = (s: Subst) => SimpleObservable<Subst>;
+export type Goal = (input$: Observable<Subst>) => Observable<Subst>;
 
 /**
  * The shape of a single result from a query.

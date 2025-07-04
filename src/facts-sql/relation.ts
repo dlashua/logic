@@ -25,35 +25,19 @@ const BATCH_DEBOUNCE_MS = 50;
 // --- Observable/Goal Registration Utilities ---
 
 /**
- * Register a goal handler (observable) with a goalId.
- */
-function registerGoalHandler(observableToGoalId: WeakMap<Observable<any>, number>, handler: any, goalId: number) {
-  observableToGoalId.set(handler as unknown as Observable<any>, goalId);
-}
-
-/**
- * Get a goalId for a handler (observable).
- */
-function getGoalIdForHandler(observableToGoalId: WeakMap<Observable<any>, number>, handler: any): number | undefined {
-  return observableToGoalId.get(handler as unknown as Observable<any>);
-}
-
-/**
  * Register a goalId in a group.
  */
-function registerGoalInGroup(goalsByGroupId: Map<number, Set<number>>, groupId: number, goalId: number) {
+function registerGoalInGroup(
+  goalsByGroupId: Map<number, Set<number>>,
+  groupId: number,
+  goalId: number
+): void {
   if (!goalsByGroupId.has(groupId)) {
     goalsByGroupId.set(groupId, new Set());
   }
   goalsByGroupId.get(groupId)!.add(goalId);
 }
 
-/**
- * Get all goalIds in a group.
- */
-function getGoalsInGroup(goalsByGroupId: Map<number, Set<number>>, groupId: number): Set<number> | undefined {
-  return goalsByGroupId.get(groupId);
-}
 
 // --- Batching & Debounce Utilities ---
 
@@ -76,14 +60,14 @@ function createBatchProcessor<T>(options: {
   let flushingPromise: Promise<void> | null = null;
   let cancelled = false;
 
-  const clearDebounce = () => {
+  const clearDebounce = (): void => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
   };
 
-  const flushBatch = async () => {
+  const flushBatch = async (): Promise<void> => {
     clearDebounce();
     if (flushingPromise) return flushingPromise;
     if (batch.length === 0 || cancelled) return Promise.resolve();
@@ -95,10 +79,10 @@ function createBatchProcessor<T>(options: {
     return flushingPromise;
   };
 
-  const addItem = (item: T) => {
+  const addItem = (item: T): void => {
     if (cancelled) return;
     batch.push(item);
-    if (batch.length >= options.batchSize) {
+    if (shouldFlushBatch(batch, options.batchSize)) {
       flushBatch();
     } else {
       clearDebounce();
@@ -106,11 +90,11 @@ function createBatchProcessor<T>(options: {
     }
   };
 
-  const complete = async () => {
+  const complete = async (): Promise<void> => {
     await flushBatch();
   };
 
-  const cancel = () => {
+  const cancel = (): void => {
     cancelled = true;
     clearDebounce();
     batch = [];
@@ -121,6 +105,11 @@ function createBatchProcessor<T>(options: {
     complete,
     cancel 
   };
+}
+
+// --- Helper for batch flush condition (task #7) ---
+function shouldFlushBatch<T>(batch: T[], batchSize: number): boolean {
+  return batch.length >= batchSize;
 }
 
 // --- Cache Management Utilities ---
@@ -594,7 +583,8 @@ export class RegularRelationWithMerger {
       });
       return resultObservable;
     };
-    registerGoalHandler(observableToGoalId, mySubstHandler, goalId);
+    // Inline registerGoalHandler here since it's only used once
+    observableToGoalId.set(mySubstHandler as unknown as Observable<any>, goalId);
     return mySubstHandler;
   }
 
@@ -626,11 +616,6 @@ export class RegularRelationWithMerger {
       });
     }
     return rows;
-  }
-
-  private buildQuery(queryObj: Record<string, Term>, whereCols: Record<string, any>) {
-    // Deprecated: use buildSimpleQuery instead
-    return buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
   }
 
   // Make unifyRowWithQuery public so it can be used by batch processor

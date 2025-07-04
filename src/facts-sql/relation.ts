@@ -84,7 +84,7 @@ export class RegularRelationWithMerger {
       const joinableGoals = commonGoals.filter(g => g && g.matchingIds && g.matchingIds.length > 0);
       if (joinableGoals.length > 0) {
       // Build a single query with outer joins for all joinable goals
-        let query = this.dbObj.db(`${myGoal.table} as t0`);
+        let query = this.dbObj.db(`${myGoal.table} as t0`).distinct();
         const baseAlias = "t0";
         const aliases = [baseAlias];
         let aliasCounter = 1;
@@ -112,7 +112,7 @@ export class RegularRelationWithMerger {
                 `${otherTable} as ${otherAlias}`,
                 `${baseAlias}.${myCol}`,
                 `${otherAlias}.${otherCol}`
-              );
+              ).distinct();
             }
           }
         }
@@ -127,7 +127,7 @@ export class RegularRelationWithMerger {
             selectCols.push(`${alias}.${col} as ${alias}__${col}`);
           }
         }
-        query = query.select(selectCols);
+        query = query.distinct().select(selectCols);
 
         // Add WHERE clauses for grounded terms from all goals
         for (const goal of allGoals) {
@@ -147,6 +147,8 @@ export class RegularRelationWithMerger {
           goalId,
         });
         const rows = await query;
+
+        
         if (rows.length) {
           this.logger.log("DB_ROWS", {
             table: myGoal.table,
@@ -165,11 +167,32 @@ export class RegularRelationWithMerger {
 
         // map each row into an object keyed by goalId filled with the keys that goal cares about with those keys equal to the Var Id in the goal
         const goalRows: Record<number, Record<string, any>> = {};
-        for (const goal of allGoals) {
-          const alias = goalAliasMap[goal.goalId];
-          for (const row of rows) {
-            if (!goalRows[goal.goalId]) goalRows[goal.goalId] = [];
+        let rowcnt = 0;
+        const maxAlias = aliasCounter;
+        for (const row of rows) {
+          rowcnt++;
+          let goalcnt = 0;
+          for (const goal of allGoals) {
+            goalcnt++;
+            const goalmod = maxAlias - goalcnt;
+            this.logger.log("ROW_SKIPPER", {
+              goalId: goal.goalId,
+              goalcnt,
+              rowcnt,
+              maxAlias,
+              mod: maxAlias + 1 - goalcnt,
+              ans: rowcnt % (maxAlias + 1 - goalcnt),
+            })
+            if(rowcnt % (maxAlias + 1 - goalcnt) !== 0) continue; 
+
+            const alias = goalAliasMap[goal.goalId];
+            // this.logger.log("GOAL_ALIAS_MAP", {
+            //   goalId,
+            //   alias,
+            //   goal,
+            // });
             const newRow = {};
+            if (!goalRows[goal.goalId]) goalRows[goal.goalId] = [];
             for (const col of Object.keys(goal.queryObj)) {
               // Use the variable id as the value for this goal's column
               const varId = (goal.queryObj[col] as any)?.id;
@@ -181,8 +204,22 @@ export class RegularRelationWithMerger {
               // goalRows[goal.goalId][col + "_varId"] = varId;
             }
             goalRows[goal.goalId].push(newRow);
+            // this.logger.log("ADDED_ONE_GOALROW", {
+            //   topGoalId: goalId,
+            //   inGoalId: goal.goalId,
+            //   alias,
+            //   newRow,
+            // })
           }
         }
+
+        this.logger.log("ALL_GOAL_ROWS", {
+          goalId,
+          sql: sqlString,
+          goalRows,
+        })
+
+        
         // Optionally, store in the forward pass cache for later use
         if (!s.has(ROW_CACHE)) {
           s.set(ROW_CACHE, new Map());
@@ -195,11 +232,7 @@ export class RegularRelationWithMerger {
           goalRows[id].forEach(x => cache.get(id)!.push(x));
         }
 
-        this.logger.log("ALL_GOAL_ROWS", {
-          goalId,
-          sql: sqlString,
-          s,
-        })
+
 
         this.logger.log("THIS_GOAL_ROWS", {
           goalId,

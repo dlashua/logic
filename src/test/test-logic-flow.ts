@@ -30,5 +30,6 @@ await query()
     info_number($.person, 4),
     // not(info_color($.person, "blue")),
     parent_kid($.parent, $.person),
+    parent_kid($.gp, $.parent),
 
   ]).toArray().then(x => x.forEach(x => log(x)));

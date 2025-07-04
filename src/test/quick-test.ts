@@ -31,7 +31,7 @@ async function loadBackend(backend: string) {
     closeFns.push(
       async () => {
         const allQueries = module.relDB.getQueries();
-        console.log("sql queries", allQueries);
+        // console.log("sql queries", allQueries);
         console.log("queries performed", {
           queries: module.relDB.getQueryCount(),
         });
@@ -88,7 +88,7 @@ const q = makeQuery();
 const results = await q.toArray();
 
 console.dir({
-  allres: results,
+  // allres: results,
   oneres: results.filter(x => x.person === "celeste"),
   rescnt: results.length,
 }, {

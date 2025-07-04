@@ -1,19 +1,22 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: false,
+  enabled: true,
   allowedIds: new Set<string>([
   ]), // empty means allow all
   deniedIds: new Set<string>([
-    // "UNIFY_SUCCESS",
+    "UNIFY_SUCCESS",
     "UNIFY_FAILED",
 
+    "THIS_GOAL_ROWS",
     // "ALL_GOAL_ROWS",
-    "DB_ROWS",
+    // "DB_ROWS",
     "COMMON_GOALS",
     "DB_QUERY",
 
-    // "GOAL_STARTED",
+    "GOAL_STARTED",
+    "GOAL_CREATED",
+    "SAW_CACHE",
     // "SHARED_GOALS", // Disabled to reduce noise
     // "DB_QUERY", // Disabled to reduce noise
     // "NO_DB_ROWS",

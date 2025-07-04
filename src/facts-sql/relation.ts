@@ -9,7 +9,6 @@ import { SQL_GROUP_ID, SQL_GROUP_PATH, SQL_GROUP_GOALS } from "../core/combinato
 import { RelationOptions } from "./types.ts";
 import type { DBManager, GoalRecord } from "./index.ts";
 
-const COMPLEX_JOINS_ENABLED = false;
 const ROW_CACHE = Symbol.for("sql-row-cache");
 
 // WeakMap to link observables to their goal IDs
@@ -75,7 +74,10 @@ export class RegularRelationWithMerger {
       myGoalId: myGoal.goalId,
       groupGoalsCount: groupGoals.length,
       compatibleGoalIds: otherGoals.map(g => g.goalId),
-      allGoals: otherGoals.map(g => ({ goalId: g.goalId, table: g.table }))
+      allGoals: otherGoals.map(g => ({
+        goalId: g.goalId,
+        table: g.table 
+      }))
     });
     
     return otherGoals.map(x => this.haveAtLeastOneMatchingVar(myGoal, x)).filter(x => x !== null);
@@ -169,22 +171,14 @@ export class RegularRelationWithMerger {
     return newSubst;
   }
 
-  async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
-    this.logger.log("CACHE_OR_QUERY_START", {
-      goalId,
-      table: this.dbObj.getGoalById(goalId)?.table
-    });
-    
+  async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {    
     const cache = this.getCache(goalId, s);
-    this.logger.log("SAW_CACHE", {
-      goalId,
-      cache: cache ? `${cache.length} rows` : null,
-    });
     if(cache) {
       this.logger.log("CACHE_HIT", {
         goalId,
         rowCount: cache.length,
-        table: this.dbObj.getGoalById(goalId)?.table
+        table: this.dbObj.getGoalById(goalId)?.table,
+        rows: cache,
       });
       return cache;
     }
@@ -196,12 +190,6 @@ export class RegularRelationWithMerger {
 
     const myGoal = this.dbObj.getGoalById(goalId);
     if(!myGoal) return [];
-
-    this.logger.log("ABOUT_TO_PROCESS_GOAL", {
-      goalId,
-      myGoalGroupId: myGoal.batchKey,
-      table: myGoal.table
-    });
 
     const commonGoals = await this.processGoal(myGoal, s);
 
@@ -221,179 +209,41 @@ export class RegularRelationWithMerger {
       })),
     });
 
-    // Combine all joinable goals (including myGoal) into one large query with outer joins on matching variable columns.
-    if (COMPLEX_JOINS_ENABLED && commonGoals && commonGoals.length > 0) {
-      // Only consider goals with matchingIds
-      const joinableGoals = commonGoals.filter(g => g && g.matchingIds && g.matchingIds.length > 0);
-      if (joinableGoals.length > 0) {
-      // Build a single query with outer joins for all joinable goals
-        let query = this.dbObj.db(`${myGoal.table} as t0`).distinct();
-        const baseAlias = "t0";
-        const aliases = [baseAlias];
-        let aliasCounter = 1;
-
-        // Map of goalId to alias
-        const goalAliasMap: Record<number, string> = {
-          [myGoal.goalId]: baseAlias 
-        };
-
-        // Join each joinable goal
-        for (const goalInfo of joinableGoals) {
-          const otherGoal = goalInfo.goal;
-          const otherTable = otherGoal.table;
-          const otherAlias = `t${aliasCounter++}`;
-          goalAliasMap[otherGoal.goalId] = otherAlias;
-          aliases.push(otherAlias);
-
-          // Join on all matching variable columns
-          for (const varId of goalInfo.matchingIds) {
-            // Find the column names in both tables for this varId
-            const myCol = Object.entries(myGoal.queryObj).find(([k, v]) => v.id === varId)?.[0];
-            const otherCol = Object.entries(otherGoal.queryObj).find(([k, v]) => v.id === varId)?.[0];
-            if (myCol && otherCol) {
-              query = query.leftJoin(
-                `${otherTable} as ${otherAlias}`,
-                `${baseAlias}.${myCol}`,
-                `${otherAlias}.${otherCol}`
-              ).distinct();
-            }
-          }
-        }
-
-        // Collect all columns from all involved goals
-        const allGoals = [myGoal, ...joinableGoals.map(g => g.goal)];
-        const selectCols: string[] = [];
-        for (let i = 0; i < allGoals.length; ++i) {
-          const goal = allGoals[i];
-          const alias = goalAliasMap[goal.goalId];
-          for (const col of Object.keys(goal.queryObj)) {
-            selectCols.push(`${alias}.${col} as ${alias}__${col}`);
-          }
-        }
-        query = query.distinct().select(selectCols);
-
-        // Add WHERE clauses for grounded terms from all goals
-        for (const goal of allGoals) {
-          const alias = goalAliasMap[goal.goalId];
-          const walked = await queryUtils.walkAllKeys(goal.queryObj, s);
-          const whereCols = queryUtils.onlyGrounded(walked);
-          for (const [col, value] of Object.entries(whereCols)) {
-            query = query.where(`${alias}.${col}`, value);
-          }
-        }
-
-        const sqlString = query.toString();
-        this.dbObj.addQuery(sqlString);
-        this.logger.log("DB_QUERY", {
-          table: myGoal.table,
-          sql: sqlString,
-          goalId,
-        });
-        const rows = await query;
-
-        
-        if (rows.length) {
-          this.logger.log("DB_ROWS", {
-            table: myGoal.table,
-            sql: sqlString,
-            goalId,
-            rows,
-          });
-        } else {
-          this.logger.log("NO_DB_ROWS", {
-            table: myGoal.table,
-            sql: sqlString,
-            goalId,
-            rows,
-          });
-        }
-
-        // map each row into an object keyed by goalId filled with the keys that goal cares about with those keys equal to the Var Id in the goal
-        const goalRows: Record<number, Record<string, any>> = {};
-        let rowcnt = 0;
-        const maxAlias = aliasCounter;
-        for (const row of rows) {
-          rowcnt++;
-          let goalcnt = 0;
-          for (const goal of allGoals) {
-            goalcnt++;
-            const goalmod = maxAlias - goalcnt;
-            this.logger.log("ROW_SKIPPER", {
-              goalId: goal.goalId,
-              goalcnt,
-              rowcnt,
-              maxAlias,
-              mod: maxAlias + 1 - goalcnt,
-              ans: rowcnt % (maxAlias + 1 - goalcnt),
-            })
-            if(rowcnt % (maxAlias + 1 - goalcnt) !== 0) continue; 
-
-            const alias = goalAliasMap[goal.goalId];
-            const newRow = {};
-            if (!goalRows[goal.goalId]) goalRows[goal.goalId] = [];
-            for (const col of Object.keys(goal.queryObj)) {
-              // Use the variable id as the value for this goal's column
-              const varId = (goal.queryObj[col] as any)?.id;
-              // The value from the SQL row
-              const rowValue = row[`${alias}__${col}`];
-              newRow[col] = rowValue;
-            }
-            goalRows[goal.goalId].push(newRow);
-          }
-        }
-
-        // Store results for other goals in their caches
-        const passed = this.getForwardPass(s);
-        for (const goal of allGoals) {
-          if (goal.goalId !== goalId && goalRows[goal.goalId]) {
-            passed.set(goal.goalId, goalRows[goal.goalId]);
-          }
-        }
-
-        this.logger.log("GOAL_ROWS", {
-          goalId,
-          rows: goalRows[goalId],
-        })
-
-        return goalRows[goalId];
-      }
-    }
-
     // If no joinable goals, check if we can merge WHERE clauses with other goals in the same batch
     if (commonGoals.length > 0) {
       // First, check if any other goal has already cached results we can use
-      for (const goalInfo of commonGoals) {
-        const otherGoal = goalInfo.goal;
-        if (otherGoal.table === myGoal.table) {
-          const otherCache = this.peekCache(otherGoal.goalId, s);
-          if (otherCache && otherCache.length > 0) {
-            this.logger.log("FOUND_CACHE_FROM_OTHER_GOAL", {
-              myGoalId: myGoal.goalId,
-              otherGoalId: otherGoal.goalId,
-              cacheRowCount: otherCache.length
-            });
+      // for (const goalInfo of commonGoals) {
+      //   const otherGoal = goalInfo.goal;
+      //   if (otherGoal.table === myGoal.table) {
+      //     const otherCache = this.peekCache(otherGoal.goalId, s);
+      //     if (otherCache && otherCache.length > 0) {
+      //       this.logger.log("FOUND_CACHE_FROM_OTHER_GOAL", {
+      //         myGoalId: myGoal.goalId,
+      //         otherGoalId: otherGoal.goalId,
+      //         cacheRowCount: otherCache.length
+      //       });
             
-            // Check if the cached rows satisfy our query requirements
-            const walked = await queryUtils.walkAllKeys(myGoal.queryObj, s);
-            const myWhereCols = queryUtils.onlyGrounded(walked);
+      //       // Check if the cached rows satisfy our query requirements
+      //       const walked = await queryUtils.walkAllKeys(myGoal.queryObj, s);
+      //       const myWhereCols = queryUtils.onlyGrounded(walked);
             
-            // Filter cached rows to match our WHERE conditions
-            const filteredRows = otherCache.filter(row => {
-              return Object.entries(myWhereCols).every(([col, value]) => row[col] === value);
-            });
+      //       // Filter cached rows to match our WHERE conditions
+      //       const filteredRows = otherCache.filter(row => {
+      //         return Object.entries(myWhereCols).every(([col, value]) => row[col] === value);
+      //       });
             
-            if (filteredRows.length > 0) {
-              this.logger.log("CACHE_HIT_FROM_OTHER_GOAL", {
-                myGoalId: myGoal.goalId,
-                otherGoalId: otherGoal.goalId,
-                filteredRowCount: filteredRows.length,
-                originalCacheCount: otherCache.length
-              });
-              return filteredRows;
-            }
-          }
-        }
-      }
+      //       if (filteredRows.length > 0) {
+      //         this.logger.log("CACHE_HIT_FROM_OTHER_GOAL", {
+      //           myGoalId: myGoal.goalId,
+      //           otherGoalId: otherGoal.goalId,
+      //           filteredRowCount: filteredRows.length,
+      //           originalCacheCount: otherCache.length
+      //         });
+      //         return filteredRows;
+      //       }
+      //     }
+      //   }
+      // }
       
       const compatibleGoals = commonGoals.filter(g => 
         g.goal.table === myGoal.table && // Same table
@@ -763,7 +613,7 @@ export class RegularRelationWithMerger {
     if (this.options?.selectColumns) {
       query = query.select(this.options.selectColumns);
     } else {
-      query = query.select('*');
+      query = query.select(Object.keys(queryObj));
     }
 
     return query;

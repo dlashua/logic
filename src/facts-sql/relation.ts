@@ -22,6 +22,89 @@ const BATCH_SIZE = 100;
 // Adjustable debounce window for batching (ms)
 const BATCH_DEBOUNCE_MS = 50;
 
+// --- Cache Management Utilities ---
+
+/**
+ * Get or create the ROW_CACHE map from a substitution.
+ */
+function getOrCreateRowCache(s: Map<string | Symbol, any>): Map<number, Record<string, any>[]> {
+  if (!s.has(ROW_CACHE)) {
+    s.set(ROW_CACHE, new Map());
+  }
+  return s.get(ROW_CACHE) as Map<number, Record<string, any>[]>;
+}
+
+/**
+ * Get and remove the cache for a goalId from the substitution's ROW_CACHE.
+ */
+function takeCache(goalId: number, s: Subst): Record<string, any>[] | null {
+  const cache = getOrCreateRowCache(s);
+  if (cache.has(goalId)) {
+    const rows = cache.get(goalId) as Record<string, any>[];
+    cache.delete(goalId);
+    return rows;
+  }
+  return null;
+}
+
+/**
+ * Peek at the cache for a goalId in the substitution's ROW_CACHE (does not remove).
+ */
+function peekCache(goalId: number, s: Subst): Record<string, any>[] | null {
+  const cache = getOrCreateRowCache(s);
+  if (cache.has(goalId)) {
+    return cache.get(goalId) as Record<string, any>[];
+  }
+  return null;
+}
+
+/**
+ * Create a new substitution with an updated ROW_CACHE, removing a goal's cache and/or adding new caches.
+ */
+function createUpdatedSubst(s: Subst, goalIdToRemove: number, newCaches?: Record<number, Record<string, any>[]>): Subst {
+  const newSubst = new Map(s);
+  const originalCache = getOrCreateRowCache(s);
+  const newCache = new Map(originalCache);
+  newCache.delete(goalIdToRemove);
+  if (newCaches) {
+    for (const [goalId, rows] of Object.entries(newCaches)) {
+      newCache.set(Number(goalId), rows);
+    }
+  }
+  newSubst.set(ROW_CACHE, newCache);
+  return newSubst;
+}
+
+/**
+ * Create a new substitution with cache for other compatible goals in the same batch.
+ */
+function createUpdatedSubstWithCacheForOtherGoals(dbObj: DBManager, s: Subst, myGoalId: number, currentRow: any, logger: Logger): Subst {
+  const newSubst = new Map(s);
+  const originalCache = getOrCreateRowCache(s);
+  const newCache = new Map(originalCache);
+  newCache.delete(myGoalId);
+  const myGoal = dbObj.getGoalById(myGoalId);
+  if (myGoal) {
+    const compatibleGoals = dbObj.getGoals().filter(g =>
+      g.goalId !== myGoalId &&
+      g.batchKey === myGoal.batchKey &&
+      g.batchKey !== undefined &&
+      g.table === myGoal.table
+    );
+    for (const otherGoal of compatibleGoals) {
+      newCache.set(otherGoal.goalId, [currentRow]);
+      logger.log("ADDED_CACHE_FOR_OTHER_GOAL", {
+        myGoalId,
+        otherGoalId: otherGoal.goalId,
+        rowCount: 1,
+        cachedRow: currentRow
+      });
+    }
+  }
+  newSubst.set(ROW_CACHE, newCache);
+  return newSubst;
+}
+
 export class RegularRelationWithMerger {
   private logger: Logger;
   private primaryKey?: string;
@@ -65,7 +148,7 @@ export class RegularRelationWithMerger {
     
     // Look up goal IDs for each goal function and get the corresponding goal records
     const otherGoals = groupGoals
-      .map(goalFn => observableToGoalId.get(goalFn))
+      .map(goalFn => observableToGoalId.get(goalFn as unknown as Observable<any>))
       .filter(goalId => goalId !== undefined && goalId !== myGoal.goalId)
       .map(goalId => this.dbObj.getGoalById(goalId!))
       .filter(goal => goal !== undefined) as GoalRecord[];
@@ -83,96 +166,8 @@ export class RegularRelationWithMerger {
     return otherGoals.map(x => this.haveAtLeastOneMatchingVar(myGoal, x)).filter(x => x !== null);
   }
 
-  getForwardPass(s: Map<string | Symbol, any>) {
-    if(!s.has(ROW_CACHE)) {
-      s.set(ROW_CACHE, new Map());
-    }
-    return s.get(ROW_CACHE) as Map<number, Record<string, any>>;
-  }
-
-  getCache(goalId: number, s: Subst) {
-    const passed = this.getForwardPass(s);
-    if(passed.has(goalId)) {
-      const cache = passed.get(goalId) as Record<string, any>[];
-      passed.delete(goalId);
-      return cache;
-    }
-    return null;
-  }
-
-  peekCache(goalId: number, s: Subst) {
-    const passed = this.getForwardPass(s);
-    if(passed.has(goalId)) {
-      return passed.get(goalId) as Record<string, any>[];
-    }
-    return null;
-  }
-
-  // Create a copy of the substitution with updated ROW_CACHE
-  createUpdatedSubst(s: Subst, goalIdToRemove: number, newCaches?: Record<number, Record<string, any>[]>): Subst {
-    // Create a copy of the substitution
-    const newSubst = new Map(s);
-    
-    // Create a copy of the ROW_CACHE
-    const originalCache = this.getForwardPass(s);
-    const newCache = new Map(originalCache);
-    
-    // Remove our goal's cache from the copy
-    newCache.delete(goalIdToRemove);
-    
-    // Add any new caches
-    if (newCaches) {
-      for (const [goalId, rows] of Object.entries(newCaches)) {
-        newCache.set(Number(goalId), rows);
-      }
-    }
-    
-    // Set the new cache in the new substitution
-    newSubst.set(ROW_CACHE, newCache);
-    
-    return newSubst;
-  }
-
-  // Create updated substitution with cache for other goals
-  createUpdatedSubstWithCacheForOtherGoals(s: Subst, myGoalId: number, currentRow: any): Subst {
-    // Create a copy of the substitution
-    const newSubst = new Map(s);
-    
-    // Create a copy of the ROW_CACHE and remove our goal's cache
-    const originalCache = this.getForwardPass(s);
-    const newCache = new Map(originalCache);
-    newCache.delete(myGoalId);
-    
-    // Find other compatible goals in the same batch and add cache for them
-    const myGoal = this.dbObj.getGoalById(myGoalId);
-    if (myGoal) {
-      const compatibleGoals = this.dbObj.getGoals().filter(g => 
-        g.goalId !== myGoalId && 
-        g.batchKey === myGoal.batchKey && 
-        g.batchKey !== undefined &&
-        g.table === myGoal.table
-      );
-      
-      for (const otherGoal of compatibleGoals) {
-        // Only cache the current row that was unified, not all rows
-        newCache.set(otherGoal.goalId, [currentRow]);
-        this.logger.log("ADDED_CACHE_FOR_OTHER_GOAL", {
-          myGoalId,
-          otherGoalId: otherGoal.goalId,
-          rowCount: 1,
-          cachedRow: currentRow
-        });
-      }
-    }
-    
-    // Set the new cache in the new substitution
-    newSubst.set(ROW_CACHE, newCache);
-    
-    return newSubst;
-  }
-
   async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {    
-    const cache = this.getCache(goalId, s);
+    const cache = takeCache(goalId, s);
     if(cache) {
       this.logger.log("CACHE_HIT", {
         goalId,
@@ -307,7 +302,7 @@ export class RegularRelationWithMerger {
         }
         
         // Cache results for other goals that can use this data
-        const passed = this.getForwardPass(s);
+        const passed = getOrCreateRowCache(s);
         for (const goalInfo of commonGoals) {
           const otherGoal = goalInfo.goal;
           if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
@@ -328,7 +323,7 @@ export class RegularRelationWithMerger {
     const rows = await this.executeQuery(goalId, queryObj, s);
     
     // Cache results for other compatible goals in the same batch
-    const passed = this.getForwardPass(s);
+    const passed = getOrCreateRowCache(s);
     for (const goalInfo of commonGoals) {
       const otherGoal = goalInfo.goal;
       if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
@@ -364,7 +359,7 @@ export class RegularRelationWithMerger {
     });
 
     // Streaming protocol: always accept Observable<Subst> as input
-    const mySubstHandler = (input$) => {
+    const mySubstHandler = (input$: any) => {
       const resultObservable = new SimpleObservable<Subst>((observer) => {
         let cancelled = false;
         let batch: Subst[] = [];
@@ -432,7 +427,13 @@ export class RegularRelationWithMerger {
                 
                   if (unifiedSubst && !cancelled) {
                   // Create updated substitution with proper cache management and populate cache for other goals
-                    const updatedSubst = this.createUpdatedSubstWithCacheForOtherGoals(unifiedSubst, goalId, row);
+                    const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
+                      this.dbObj,
+                      unifiedSubst,
+                      goalId,
+                      row,
+                      this.logger
+                    );
                   
                     const log_s = new Map(updatedSubst);
                     const log_c = log_s.get(ROW_CACHE) as Map<number, Record<string, any>>;
@@ -561,7 +562,7 @@ export class RegularRelationWithMerger {
     };
     
     // Register this handler with its goal ID
-    observableToGoalId.set(mySubstHandler, goalId);
+    observableToGoalId.set(mySubstHandler as unknown as Observable<any>, goalId);
     
     return mySubstHandler;
   }

@@ -22,6 +22,39 @@ const BATCH_SIZE = 100;
 // Adjustable debounce window for batching (ms)
 const BATCH_DEBOUNCE_MS = 50;
 
+// --- Observable/Goal Registration Utilities ---
+
+/**
+ * Register a goal handler (observable) with a goalId.
+ */
+function registerGoalHandler(observableToGoalId: WeakMap<Observable<any>, number>, handler: any, goalId: number) {
+  observableToGoalId.set(handler as unknown as Observable<any>, goalId);
+}
+
+/**
+ * Get a goalId for a handler (observable).
+ */
+function getGoalIdForHandler(observableToGoalId: WeakMap<Observable<any>, number>, handler: any): number | undefined {
+  return observableToGoalId.get(handler as unknown as Observable<any>);
+}
+
+/**
+ * Register a goalId in a group.
+ */
+function registerGoalInGroup(goalsByGroupId: Map<number, Set<number>>, groupId: number, goalId: number) {
+  if (!goalsByGroupId.has(groupId)) {
+    goalsByGroupId.set(groupId, new Set());
+  }
+  goalsByGroupId.get(groupId)!.add(goalId);
+}
+
+/**
+ * Get all goalIds in a group.
+ */
+function getGoalsInGroup(goalsByGroupId: Map<number, Set<number>>, groupId: number): Set<number> | undefined {
+  return goalsByGroupId.get(groupId);
+}
+
 // --- Batching & Debounce Utilities ---
 
 /**
@@ -508,25 +541,21 @@ export class RegularRelationWithMerger {
               const groupId = subst.get(SQL_GROUP_ID) as number | undefined;
               batchKeyUpdated = true;
               if (groupId !== undefined) {
-                if (!goalsByGroupId.has(groupId)) {
-                  goalsByGroupId.set(groupId, new Set());
-                }
-                goalsByGroupId.get(groupId)!.add(goalId);
+                registerGoalInGroup(goalsByGroupId, groupId, goalId);
+                this.logger.log("GOAL_GROUP_INFO", {
+                  goalId,
+                  table: this.table,
+                  groupId,
+                  registeredInGroup: groupId !== undefined,
+                  queryObj
+                });
               }
-              this.logger.log("GOAL_GROUP_INFO", {
-                goalId,
-                table: this.table,
-                groupId,
-                registeredInGroup: groupId !== undefined,
-                queryObj
-              });
             }
             batchProcessor.addItem(subst);
             this.logger.log("GOAL_NEXT", {
               goalId,
               input_complete,
               subst,
-              // batchLength: batch.length, // batch length is internal to batchProcessor
             });
           },
           error: (err: any) => {
@@ -538,7 +567,6 @@ export class RegularRelationWithMerger {
               batchIndex,
               input_complete,
               cancelled,
-              // batchSize: batch.length, // batch length is internal
             });
             input_complete = true;
             batchProcessor.complete().then(() => {
@@ -547,7 +575,6 @@ export class RegularRelationWithMerger {
                 batchIndex,
                 input_complete,
                 cancelled,
-                // batchSize: batch.length,
               });
               observer.complete?.();
             });
@@ -559,7 +586,6 @@ export class RegularRelationWithMerger {
             batchIndex,
             input_complete,
             cancelled,
-            // batchSize: batch.length,
           });
           cancelled = true;
           batchProcessor.cancel();
@@ -568,7 +594,7 @@ export class RegularRelationWithMerger {
       });
       return resultObservable;
     };
-    observableToGoalId.set(mySubstHandler as unknown as Observable<any>, goalId);
+    registerGoalHandler(observableToGoalId, mySubstHandler, goalId);
     return mySubstHandler;
   }
 

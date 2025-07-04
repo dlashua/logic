@@ -8,29 +8,28 @@ export const queryUtils = {
   /**
    * Walk all keys of an object with a substitution and return a new object
    */
-  async walkAllKeys<T extends Record<string, Term>>(
+  walkAllKeys<T extends Record<string, Term>>(
     obj: T,
     subst: Subst
-  ): Promise<Record<string, Term>> {
+  ): Record<string, Term> {
     const result: Record<string, Term> = {};
     const keys = Object.keys(obj);
-    
-    const walkPromises = keys.map(async key => {
-      result[key] = await walk(obj[key], subst);
-    });
-    
-    await Promise.all(walkPromises);
+
+    for (const key of keys) {
+      result[key] = walk(obj[key], subst);
+    }
+
     return result;
   },
 
   /**
    * Walk all values in an array with a substitution
    */
-  async walkAllArray(
+  walkAllArray(
     arr: Term[],
     subst: Subst
-  ): Promise<Term[]> {
-    return Promise.all(arr.map(term => walk(term, subst)));
+  ): Term[] {
+    return arr.map(term => walk(term, subst));
   },
 
   /**
@@ -57,13 +56,13 @@ export const queryUtils = {
   /**
    * Build query parts from parameters and substitution
    */
-  async buildQueryParts(params: Record<string, Term>, subst: Subst) {
+  buildQueryParts(params: Record<string, Term>, subst: Subst) {
     const selectCols = Object.keys(params).sort();
     const walkedQ: Record<string, Term> = {};
     const whereClauses: WhereClause[] = [];
     
     for (const col of selectCols) {
-      walkedQ[col] = await walk(params[col], subst);
+      walkedQ[col] = walk(params[col], subst);
       if (!isVar(walkedQ[col])) {
         whereClauses.push({
           column: col,

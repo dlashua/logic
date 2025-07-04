@@ -38,12 +38,32 @@ export function eq(u: Term, v: Term): Goal {
  * Introduces new (fresh) logic variables into a sub-goal.
  */
 export function fresh(f: (...vars: Var[]) => Goal): Goal {
-  return liftGoal((s: Subst) => {
-    const freshVars = Array.from({
-      length: f.length 
-    }, () => lvar());
-    const subGoal = f(...freshVars);
-    return subGoal(new SimpleObservable<Subst>(obs => { obs.next(s); obs.complete?.(); }));
+  return (input$) => new SimpleObservable<Subst>((observer) => {
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
+      next: (s) => {
+        active++;
+        const freshVars = Array.from({
+          length: f.length 
+        }, () => lvar());
+        const subGoal = f(...freshVars);
+        subGoal(SimpleObservable.of(s)).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: () => {
+            active--;
+            if (completed && active === 0) observer.complete?.();
+          }
+        });
+      },
+      error: observer.error,
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
+    });
+    return () => subscription.unsubscribe?.();
   });
 }
 
@@ -58,7 +78,21 @@ export function disj(g1: Goal, g2: Goal): Goal {
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return (input$) => g1(input$).flatMap(s1 => g2(SimpleObservable.of(s1)));
+  return (input$) => new SimpleObservable<Subst>((observer) => {
+    // Collect all substitutions from g1
+    g1(input$).toArray().then(substs => {
+      if (substs.length === 0) {
+        observer.complete?.();
+        return;
+      }
+      // Pass all substitutions as a stream to g2
+      g2(SimpleObservable.of(...substs)).subscribe({
+        next: observer.next,
+        error: observer.error,
+        complete: observer.complete
+      });
+    });
+  });
 }
 
 /**
@@ -97,27 +131,31 @@ export function lift<T extends (...args: any) => any>(fn: T): LiftedArgs<T> {
     // Extract the 'out' parameter (last argument)
     const out = args[args.length - 1];
     const inputArgs = args.slice(0, -1);
-    return liftGoal((s: Subst) => {
-      return new SimpleObservable<Subst>((observer) => {
-        try {
-          // Walk all input arguments to resolve any variables
-          const resolvedArgs = inputArgs.map(arg => walk(arg, s));
-          // Check if all arguments are ground (no variables)
-          const hasVariables = resolvedArgs.some(arg => isVar(arg));
-          if (!hasVariables) {
-            // All arguments are ground, we can call the function
-            const result = fn(...resolvedArgs);
-            // Unify the result with the output parameter
-            const unified = unify(out, result, s);
-            if (unified !== null) {
-              observer.next(unified);
+    return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
+      const subscription = input$.subscribe({
+        next: (s) => {
+          try {
+            // Walk all input arguments to resolve any variables
+            const resolvedArgs = inputArgs.map(arg => walk(arg, s));
+            // Check if all arguments are ground (no variables)
+            const hasVariables = resolvedArgs.some(arg => isVar(arg));
+            if (!hasVariables) {
+              // All arguments are ground, we can call the function
+              const result = fn(...resolvedArgs);
+              // Unify the result with the output parameter
+              const unified = unify(out, result, s);
+              if (unified !== null) {
+                observer.next(unified);
+              }
             }
+          } catch (error) {
+            observer.error?.(error);
           }
-          observer.complete?.();
-        } catch (error) {
-          observer.complete?.();
-        }
+        },
+        error: observer.error,
+        complete: observer.complete
       });
+      return () => subscription.unsubscribe?.();
     });
   }) as LiftedArgs<T>;
 }
@@ -257,7 +295,7 @@ export function run<T>(
     let completed = false;
     let error: any = undefined;
     const effectiveGoal = timeoutMs ? timeout(goal, timeoutMs) : goal;
-    const limitedGoal = maxResults ? (input$: Observable<Subst>) => effectiveGoal(input$).take(maxResults) : effectiveGoal;
+    const limitedGoal = maxResults ? (input$: SimpleObservable<Subst>) => effectiveGoal(input$).take(maxResults) : effectiveGoal;
     limitedGoal(SimpleObservable.of(new Map())).subscribe({
       next: (result) => {
         results.push(result);

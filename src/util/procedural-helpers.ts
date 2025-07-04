@@ -7,11 +7,16 @@ import { SimpleObservable } from "../core/observable.ts";
  */
 export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
   return (input$) => new SimpleObservable((observer) => {
-    input$.subscribe({
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
       next: (s) => {
+        active++;
         const results: Term[] = [];
+        let subgoalEmitted = false;
         subgoal(SimpleObservable.of(s)).subscribe({
           next: (subst) => {
+            subgoalEmitted = true;
             results.push(walk(sourceVar, subst));
           },
           error: observer.error,
@@ -19,13 +24,18 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
             const s2 = new Map(s);
             s2.set(sourceVar.id, results);
             observer.next(s2);
-            observer.complete?.();
+            active--;
+            if (completed && active === 0) observer.complete?.();
           }
         });
       },
       error: observer.error,
-      complete: observer.complete
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
     });
+    return () => subscription.unsubscribe?.();
   });
 }
 
@@ -34,8 +44,11 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
  */
 export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goal): Goal {
   return (input$) => new SimpleObservable((observer) => {
-    input$.subscribe({
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
       next: (s) => {
+        active++;
         const groupMap = new Map<string, Term[][]>();
         subgoal(SimpleObservable.of(s)).subscribe({
           next: (subst) => {
@@ -56,22 +69,26 @@ export function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goa
               const s2 = new Map(s);
               aggVars.forEach((v, i) => s2.set(v.id, []));
               observer.next(s2);
-              observer.complete?.();
-              return;
+            } else {
+              for (const [groupKey, aggArrays] of groupMap.entries()) {
+                const groupValues = JSON.parse(groupKey);
+                const s2 = new Map(s);
+                groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
+                aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index]));
+                observer.next(s2);
+              }
             }
-            for (const [groupKey, aggArrays] of groupMap.entries()) {
-              const groupValues = JSON.parse(groupKey);
-              const s2 = new Map(s);
-              groupVars.forEach((v, index) => s2.set(v.id, groupValues[index]));
-              aggVars.forEach((v, index) => s2.set(v.id, aggArrays[index]));
-              observer.next(s2);
-            }
-            observer.complete?.();
+            active--;
+            if (completed && active === 0) observer.complete?.();
           }
         });
       },
       error: observer.error,
-      complete: observer.complete
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
     });
+    return () => subscription.unsubscribe?.();
   });
 }

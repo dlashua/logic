@@ -21,6 +21,13 @@ export function membero(x: Term, list: Term): Goal {
   return (input$) => new SimpleObservable<Subst>((observer) => {
     const subscriptions: any[] = [];
     let cancelled = false;
+    let active = 0;
+    let inputComplete = false;
+    const checkComplete = () => {
+      if (inputComplete && active === 0) {
+        observer.complete?.();
+      }
+    };
     input$.subscribe({
       next: (s) => {
         const l = walk(list, s);
@@ -31,25 +38,28 @@ export function membero(x: Term, list: Term): Goal {
             const s2 = unify(x, item, s);
             if (s2) observer.next(s2);
           }
-          observer.complete?.();
         } else if (l && typeof l === "object" && "tag" in l && (l as any).tag === "cons") {
           const s1 = unify(x, (l as any).head, s);
           if (s1) observer.next(s1);
+          active++;
           // Recursive call for tail
           const sub = membero(x, (l as any).tail)(SimpleObservable.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
             complete: () => {
-              observer.complete?.();
+              active--;
+              checkComplete();
             }
           });
           subscriptions.push(sub);
-        } else {
-          observer.complete?.();
         }
+        // If neither array nor cons, do nothing (no result)
       },
       error: observer.error,
-      complete: observer.complete
+      complete: () => {
+        inputComplete = true;
+        checkComplete();
+      }
     });
     return () => {
       cancelled = true;
@@ -235,14 +245,20 @@ export function mapo(
   ys: Term,
 ): Goal {
   return (input$) => new SimpleObservable<Subst>((observer) => {
-    input$.subscribe({
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
       next: (s) => {
+        active++;
         const xsVal = walk(xs, s);
         if (isNil(xsVal)) {
           eq(ys, nil)(SimpleObservable.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
-            complete: observer.complete
+            complete: () => {
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            }
           });
           return;
         }
@@ -258,25 +274,37 @@ export function mapo(
           )(SimpleObservable.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
-            complete: observer.complete
+            complete: () => {
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            }
           });
         } else {
-          observer.complete?.();
+          active--;
+          if (completed && active === 0) observer.complete?.();
         }
       },
       error: observer.error,
-      complete: observer.complete
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
     });
+    return () => subscription.unsubscribe?.();
   });
 }
 
 export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
   return (input$) => new SimpleObservable<Subst>((observer) => {
-    input$.subscribe({
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
       next: (s) => {
+        active++;
         const xsVal = walk(xs, s);
         if (isNil(xsVal)) {
-          observer.complete?.();
+          active--;
+          if (completed && active === 0) observer.complete?.();
           return;
         }
         if (isCons(xsVal)) {
@@ -286,7 +314,10 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
             eq(ys, xsVal.tail)(SimpleObservable.of(s)).subscribe({
               next: observer.next,
               error: observer.error,
-              complete: observer.complete
+              complete: () => {
+                active--;
+                if (completed && active === 0) observer.complete?.();
+              }
             });
           } else {
             const rest = lvar();
@@ -296,16 +327,24 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
             )(SimpleObservable.of(s)).subscribe({
               next: observer.next,
               error: observer.error,
-              complete: observer.complete
+              complete: () => {
+                active--;
+                if (completed && active === 0) observer.complete?.();
+              }
             });
           }
         } else {
-          observer.complete?.();
+          active--;
+          if (completed && active === 0) observer.complete?.();
         }
       },
       error: observer.error,
-      complete: observer.complete
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
     });
+    return () => subscription.unsubscribe?.();
   });
 }
 

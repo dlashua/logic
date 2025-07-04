@@ -5,7 +5,8 @@ import {
   ConsNode,
   LogicList,
   NilNode,
-  Observable
+  Observable,
+  Goal,
 } from "./types.ts";
 import { SimpleObservable } from "./observable.ts";
 
@@ -236,11 +237,9 @@ export function logicListToArray(list: Term): Term[] {
   return out;
 }
 
-// New: Goal protocol is now (Observable<Subst>) => Observable<Subst>
-export type Goal = (input$: Observable<Subst>) => Observable<Subst>;
 
 // Helper: Convert a single-substitution goal to the new protocol
-export function liftGoal(singleGoal: (s: Subst) => Observable<Subst>): Goal {
+export function liftGoal(singleGoal: (s: Subst) => SimpleObservable<Subst>): Goal {
   return (input$) => new SimpleObservable(observer => {
     const subs = input$.subscribe({
       next: (s) => {
@@ -248,7 +247,7 @@ export function liftGoal(singleGoal: (s: Subst) => Observable<Subst>): Goal {
         out$.subscribe({
           next: (s2) => observer.next(s2),
           error: (e) => observer.error?.(e),
-          complete: () => {} // wait for all
+          complete: () => { /* pass */} // wait for all
         });
       },
       error: (e) => observer.error?.(e),
@@ -259,6 +258,6 @@ export function liftGoal(singleGoal: (s: Subst) => Observable<Subst>): Goal {
 }
 
 // Helper: Chain goals (like flatMap for observables)
-export function chainGoals(goals: Goal[], initial$: Observable<Subst>): Observable<Subst> {
+export function chainGoals(goals: Goal[], initial$: SimpleObservable<Subst>): SimpleObservable<Subst> {
   return goals.reduce((input$, goal) => goal(input$), initial$);
 }

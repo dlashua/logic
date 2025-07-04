@@ -136,7 +136,7 @@ export class SimpleObservable<T> implements Observable<T> {
   }
 
   // Operators
-  map<U>(transform: (value: T) => U): Observable<U> {
+  map<U>(transform: (value: T) => U): SimpleObservable<U> {
     return new SimpleObservable<U>((observer) => {
       const subscription = this.subscribe({
         next: (value) => observer.next(transform(value)),
@@ -152,10 +152,14 @@ export class SimpleObservable<T> implements Observable<T> {
       const subscriptions: Subscription[] = [];
       let outerCompleted = false;
       let activeInnerCount = 0;
+      let scheduledCompletion = false;
 
       const checkCompletion = () => {
-        if (outerCompleted && activeInnerCount === 0) {
-          observer.complete?.();
+        if (outerCompleted && activeInnerCount === 0 && !scheduledCompletion) {
+          scheduledCompletion = true;
+          Promise.resolve().then(() => {
+            observer.complete?.();
+          });
         }
       };
 
@@ -176,7 +180,8 @@ export class SimpleObservable<T> implements Observable<T> {
         error: observer.error,
         complete: () => {
           outerCompleted = true;
-          checkCompletion();
+          // Always defer completion check to next microtask
+          Promise.resolve().then(checkCompletion);
         }
       });
 
@@ -206,21 +211,36 @@ export class SimpleObservable<T> implements Observable<T> {
   take(count: number): SimpleObservable<T> {
     return new SimpleObservable<T>((observer) => {
       let taken = 0;
+      let upstreamUnsubscribed = false;
       const subscription = this.subscribe({
         next: (value) => {
           if (taken < count) {
             observer.next(value);
             taken++;
+            console.log('[SimpleObservable.take] yielded', value, 'taken', taken, 'of', count);
             if (taken >= count) {
               observer.complete?.();
               subscription.unsubscribe();
+              upstreamUnsubscribed = true;
+              console.log('[SimpleObservable.take] completed and unsubscribed upstream');
             }
           }
         },
-        error: observer.error,
-        complete: observer.complete
+        error: (err) => {
+          console.log('[SimpleObservable.take] error', err);
+          observer.error?.(err);
+        },
+        complete: () => {
+          console.log('[SimpleObservable.take] upstream complete');
+          observer.complete?.();
+        }
       });
-      return () => subscription.unsubscribe();
+      return () => {
+        if (!upstreamUnsubscribed) {
+          subscription.unsubscribe();
+          console.log('[SimpleObservable.take] manual unsubscribe');
+        }
+      };
     });
   }
 

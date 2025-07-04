@@ -1,6 +1,6 @@
 import util from "node:util";
 import { query } from "../../query.ts";
-import { and } from "../../core/combinators.ts";
+import { and, eq } from "../../core/combinators.ts";
 import { gto } from "../../relations/numeric.ts";
 import { lengtho } from "../../relations/lists.ts";
 import { group_by_collecto } from "../../relations/aggregates.ts";
@@ -19,24 +19,25 @@ const timeit = async (name: string, fn: () => any) => {
 await timeit("sql", async () => {
   console.log("sql way...");
 
-  const results = query()
+  const results = await query()
     // .select($ => ({
     //   state: $.state,
     //   city_cnt: $.city_cnt,
     // }))
     .where(
       ($) => [
+        // eq($.id, 12157107),
         city({
           id: $.id,
-          country_code: "US" 
+          country_code: "PE" 
         }),
         city({
           id: $.id,
-          state: $.in_state
+          city: $.in_city
         }),
 
         // city({
-        //   id: $.id,
+        //   id: $.id2,
         //   country_code: "AU" 
         // }),
         // city({
@@ -72,19 +73,18 @@ await timeit("sql", async () => {
         // ),
         // lengtho($.cities, $.city_cnt),
       ])
-    .limit(10);
+    .limit(10)
+    .toArray()
+    ;
 
-  const res = [];
-  for await (const item of results) {
-    res.push(item);
-  }
+
   console.log("all sql queries", relDB.getQueries());
   console.log({
-    results: res,
-    results_count: res.length,
+    results: results,
+    results_count: results.length,
     queries_count: relDB.getQueryCount() 
   });
-  return res;
+  return results;
 });
 
 process.exit();

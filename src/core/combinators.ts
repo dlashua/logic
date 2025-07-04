@@ -78,21 +78,10 @@ export function disj(g1: Goal, g2: Goal): Goal {
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return (input$) => new SimpleObservable<Subst>((observer) => {
-    // Collect all substitutions from g1
-    g1(input$).toArray().then(substs => {
-      if (substs.length === 0) {
-        observer.complete?.();
-        return;
-      }
-      // Pass all substitutions as a stream to g2
-      g2(SimpleObservable.of(...substs)).subscribe({
-        next: observer.next,
-        error: observer.error,
-        complete: observer.complete
-      });
-    });
-  });
+  // Streaming conjunction: for each subst from g1, immediately stream results from g2
+  // return (input$) => g1(input$).flatMap(subst => g2(SimpleObservable.of(subst)));
+  return (input$) => g2(g1(input$));
+
 }
 
 /**

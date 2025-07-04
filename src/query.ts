@@ -76,10 +76,9 @@ function formatSubstitutions<Fmt>(
 ): Observable<RunResult<Fmt>> {
   // Use the built-in take operator which properly handles cleanup
   const limitedSubsts = limit === Infinity ? substs : (substs as any).take(limit);
-  
   return {
     subscribe(observer) {
-      return limitedSubsts.subscribe({
+      const unsub = limitedSubsts.subscribe({
         next: (s: Subst) => {
           const result: Partial<RunResult<Fmt>> = {};
           for (const key in formatter) {
@@ -92,6 +91,9 @@ function formatSubstitutions<Fmt>(
         error: observer.error,
         complete: observer.complete
       });
+      if (typeof unsub === "function") return unsub;
+      if (unsub && typeof unsub.unsubscribe === "function") return () => unsub.unsubscribe();
+      return function noop() { /* pass */ };
     }
   };
 }
@@ -183,7 +185,7 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
     // Updated for streaming protocol: pass Observable<Subst> to the goal
     const substStream = combinedGoal(SimpleObservable.of(initialSubst));
     const results = formatSubstitutions(substStream, formatter, this._limit);
-
+    
     const rawSelector = this._rawSelector;
     return {
       subscribe(observer) {
@@ -204,37 +206,55 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
 
   /**
    * Makes the Query object itself an async iterable.
+   * Properly propagates cancellation upstream when the consumer stops early.
    */
   async *[Symbol.asyncIterator](): AsyncGenerator<QueryOutput<Fmt, Sel>> {
     const observable = this.getObservable();
-    const results: QueryOutput<Fmt, Sel>[] = [];
+    const queue: QueryOutput<Fmt, Sel>[] = [];
     let completed = false;
     let error: any = null;
+    let resolveNext: (() => void) | null = null;
+    // let unsub: (() => void) | null = null;
 
-    observable.subscribe({
+    const nextPromise = () => new Promise<void>(resolve => { resolveNext = resolve; });
+
+    const subcription = observable.subscribe({
       next: (result) => {
-        results.push(result);
+        queue.push(result);
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+        }
       },
       error: (err) => {
         error = err;
         completed = true;
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+        }
       },
       complete: () => {
         completed = true;
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+        }
       }
     });
 
-    // Wait for completion
-    while (!completed) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-
-    if (error) {
-      throw error;
-    }
-
-    for (const result of results) {
-      yield result;
+    try {
+      while (!completed || queue.length > 0) {
+        if (queue.length === 0) {
+          await nextPromise();
+        }
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
+        if (error) throw error;
+      }
+    } finally {
+      subcription.unsubscribe?.();
     }
   }
 

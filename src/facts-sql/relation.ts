@@ -1,4 +1,4 @@
-import { setTimeout as sleep } from "timers/promises";
+import { nextTick } from "process";
 import type { Term, Subst, Goal } from "../core/types.ts";
 import { unify, isVar, walk } from "../core/kernel.ts";
 import { Logger, getDefaultLogger } from "../shared/logger.ts";
@@ -11,7 +11,10 @@ const JOINS_ENABLED = false;
 const ROW_CACHE = Symbol.for("sql-row-cache");
 
 // Adjustable batch size for IN queries
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 100;
+// Adjustable debounce window for batching (ms)
+const BATCH_DEBOUNCE_MS = 50;
+
 
 export class RegularRelationWithMerger {
   private logger: Logger;
@@ -240,114 +243,186 @@ export class RegularRelationWithMerger {
       queryObj
     });
 
-    return (s: Subst) => new SimpleObservable<Subst>((observer) => {
+    // Streaming protocol: always accept Observable<Subst> as input
+    return (input$) => new SimpleObservable<Subst>((observer) => {
       let cancelled = false;
       this.logger.log("GOAL_STARTED", {
         goalId,
         table: this.table,
         queryObj,
-        s,
       });
 
-      // Batching logic for incoming substitutions
       let batch: Subst[] = [];
       let batchIndex = 0;
-      let completed = false;
-      let upstreamComplete = false;
-      let upstreamError: any = null;
+      let flushingPromise: Promise<void> | null = null;
+      let debounceTimer: NodeJS.Timeout | null = null;
 
-      const flushBatch = async () => {
-        if (batch.length === 0 || cancelled) return;
-        try {
-          // Build a batched query using IN for grounded columns
-          const walkedBatch = await Promise.all(batch.map(subst => queryUtils.walkAllKeys(queryObj, subst)));
-          const colValues: Record<string, Set<any>> = {};
-          for (const walked of walkedBatch) {
-            for (const [col, value] of Object.entries(queryUtils.onlyGrounded(walked))) {
-              if (!colValues[col]) colValues[col] = new Set();
-              colValues[col].add(value);
-            }
-          }
-          let query = this.dbObj.db(this.table);
-          for (const [col, values] of Object.entries(colValues)) {
-            query = query.whereIn(col, Array.from(values));
-          }
-          if (this.options?.selectColumns) {
-            query = query.select(this.options.selectColumns);
-          } else {
-            query = query.select('*');
-          }
-          const sqlString = query.toString();
-          this.dbObj.addQuery(sqlString);
-          this.logger.log("DB_QUERY_BATCH", {
-            table: this.table,
-            sql: sqlString,
-            goalId,
-            batchIndex,
-          });
-          const rows = await query;
-          for (const row of rows) {
-            for (const subst of batch) {
-              const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new Map(subst));
-              if (unifiedSubst && !cancelled) {
-                this.logger.log("UNIFY_SUCCESS", {
-                  goalId,
-                  queryObj,
-                  row,
-                  unifiedSubst,
-                });
-                observer.next(new Map(unifiedSubst));
-              }
-            }
-          }
-          batch = [];
-          batchIndex++;
-        } catch (error) {
-          if (!cancelled) {
-            observer.error?.(error);
-          }
+      const clearDebounce = () => {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
         }
       };
 
-      // Listen for incoming substitutions from upstream observable
-      const upstream = s as any;
-      if (typeof upstream.subscribe === 'function') {
-        // s is an observable (chained goal)
-        const subscription = upstream.subscribe({
-          next: (subst: Subst) => {
-            if (cancelled) return;
-            batch.push(subst);
-            if (batch.length >= BATCH_SIZE) {
-              flushBatch();
+      const scheduleDebounce = () => {
+        clearDebounce();
+        debounceTimer = setTimeout(() => {
+          flushBatch();
+        }, BATCH_DEBOUNCE_MS);
+      };
+
+      const flushBatch = (): Promise<void> => {
+        clearDebounce();
+        if (flushingPromise) return flushingPromise;
+        if (batch.length === 0 || cancelled) return Promise.resolve();
+        flushingPromise = (async () => {
+          try {
+            this.logger.log("FLUSH_BATCH", {
+              goalId,
+              batchIndex,
+              batchSize: batch.length,
+            });
+            // Build a batched query using IN for grounded columns
+            const walkedBatch = batch.map(subst => queryUtils.walkAllKeys(queryObj, subst));
+            const colValues: Record<string, Set<any>> = {};
+            for (const walked of walkedBatch) {
+              for (const [col, value] of Object.entries(queryUtils.onlyGrounded(walked))) {
+                if (!colValues[col]) colValues[col] = new Set();
+                colValues[col].add(value);
+              }
             }
-          },
-          error: (err: any) => {
-            upstreamError = err;
-            completed = true;
-            if (!cancelled) observer.error?.(err);
-          },
-          complete: () => {
-            upstreamComplete = true;
-            completed = true;
-            flushBatch().then(() => {
-              if (!cancelled) observer.complete?.();
+            let query = this.dbObj.db(this.table);
+            for (const [col, values] of Object.entries(colValues)) {
+              query = query.whereIn(col, Array.from(values));
+            }
+            if (this.options?.selectColumns) {
+              query = query.select(this.options.selectColumns);
+            } else {
+              query = query.select(Object.keys(queryObj));
+            }
+            const sqlString = query.toString();
+            this.dbObj.addQuery(sqlString);
+            this.logger.log("DB_QUERY_BATCH", {
+              table: this.table,
+              sql: sqlString,
+              goalId,
+              batchIndex,
+            });
+            const rows = await query;
+            if (cancelled) {
+              this.logger.log("FLUSH_BATCH_CANCELLED_AFTER_QUERY", {
+                goalId,
+                batchIndex 
+              });
+              return;
+            }
+            for (const row of rows) {
+              if (cancelled) {
+                this.logger.log("FLUSH_BATCH_CANCELLED_DURING_ROWS", {
+                  goalId,
+                  batchIndex 
+                });
+                return;
+              }
+              for (const subst of batch) {
+                if (cancelled) {
+                  this.logger.log("FLUSH_BATCH_CANCELLED_DURING_SUBST", {
+                    goalId,
+                    batchIndex 
+                  });
+                  return;
+                }
+                const unifiedSubst = await this.unifyRowWithQuery(row, queryObj, new Map(subst));
+                if (unifiedSubst && !cancelled) {
+                  this.logger.log("UNIFY_SUCCESS", {
+                    goalId,
+                    queryObj,
+                    row,
+                    unifiedSubst,
+                  });
+                  observer.next(new Map(unifiedSubst));
+                  // let other things do their work
+                  await new Promise(resolve => nextTick(resolve));
+                }
+              }
+            }
+            batch = [];
+            batchIndex++;
+          } catch (error) {
+            if (!cancelled) {
+              observer.error?.(error);
+            }
+          } finally {
+            flushingPromise = null;
+            this.logger.log("FLUSH_BATCH_COMPLETE", {
+              goalId,
+              batchIndex,
+              batchSize: batch.length,
             });
           }
+          this.logger.log("FLUSH_BATCH_COMPLETE", {
+            goalId,
+            batchIndex,
+            batchSize: batch.length,
+            realend: true,
+          });
+        })();
+        return flushingPromise;
+      };
+
+      let input_complete = false;
+      const subscription = input$.subscribe({
+        next: (subst: Subst) => {
+          if (cancelled) return;
+          batch.push(subst);
+          this.logger.log("GOAL_NEXT", {
+            goalId,
+            input_complete,
+            subst,
+            batchLength: batch.length,
+          });
+          if (batch.length >= BATCH_SIZE) {
+            flushBatch();
+          } else {
+            scheduleDebounce();
+          }
+        },
+        error: (err: any) => {
+          if (!cancelled) observer.error?.(err);
+        },
+        complete: () => {
+          this.logger.log("UPSTREAM_GOAL_COMPLETE", {
+            goalId,
+            batchIndex,
+            input_complete,
+            cancelled,
+            batchSize: batch.length,
+          });
+          input_complete = true;
+          flushBatch().then(() => {
+            this.logger.log("GOAL_COMPLETE", {
+              goalId,
+              batchIndex,
+              input_complete,
+              cancelled,
+              batchSize: batch.length,
+            });
+            observer.complete?.();
+          });
+        }
+      });
+      return () => {
+        this.logger.log("GOAL_CANCELLED", {
+          goalId,
+          batchIndex,
+          input_complete,
+          cancelled,
+          batchSize: batch.length,
         });
-        return () => {
-          cancelled = true;
-          subscription.unsubscribe?.();
-        };
-      } else {
-        // s is a single substitution (not an observable)
-        batch.push(s);
-        flushBatch().then(() => {
-          if (!cancelled) observer.complete?.();
-        });
-        return () => {
-          cancelled = true;
-        };
-      }
+        cancelled = true;
+        clearDebounce();
+        subscription.unsubscribe?.();
+      };
     });
   }
 

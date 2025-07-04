@@ -105,6 +105,37 @@ function createUpdatedSubstWithCacheForOtherGoals(dbObj: DBManager, s: Subst, my
   return newSubst;
 }
 
+// --- Goal Compatibility & Merging Utilities ---
+
+/**
+ * Find goals compatible for merging: same table and same columns.
+ */
+function findCompatibleGoals(myGoal: GoalRecord, commonGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
+  return commonGoals
+    .filter(g =>
+      g.goal.table === myGoal.table &&
+      Object.keys(g.goal.queryObj).every(col => col in myGoal.queryObj) &&
+      Object.keys(myGoal.queryObj).every(col => col in g.goal.queryObj)
+    )
+    .map(g => g.goal);
+}
+
+/**
+ * Collect all WHERE clause values from a set of goals for merging.
+ */
+async function collectAllWhereClauses(goals: GoalRecord[], s: Subst): Promise<Record<string, Set<any>>> {
+  const allWhereClauses: Record<string, Set<any>> = {};
+  for (const goal of goals) {
+    const walked = await queryUtils.walkAllKeys(goal.queryObj, s);
+    const whereCols = queryUtils.onlyGrounded(walked);
+    for (const [col, value] of Object.entries(whereCols)) {
+      if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
+      allWhereClauses[col].add(value);
+    }
+  }
+  return allWhereClauses;
+}
+
 export class RegularRelationWithMerger {
   private logger: Logger;
   private primaryKey?: string;
@@ -205,119 +236,59 @@ export class RegularRelationWithMerger {
     });
 
     // If no joinable goals, check if we can merge WHERE clauses with other goals in the same batch
-    if (commonGoals.length > 0) {
-      // First, check if any other goal has already cached results we can use
-      // for (const goalInfo of commonGoals) {
-      //   const otherGoal = goalInfo.goal;
-      //   if (otherGoal.table === myGoal.table) {
-      //     const otherCache = this.peekCache(otherGoal.goalId, s);
-      //     if (otherCache && otherCache.length > 0) {
-      //       this.logger.log("FOUND_CACHE_FROM_OTHER_GOAL", {
-      //         myGoalId: myGoal.goalId,
-      //         otherGoalId: otherGoal.goalId,
-      //         cacheRowCount: otherCache.length
-      //       });
-            
-      //       // Check if the cached rows satisfy our query requirements
-      //       const walked = await queryUtils.walkAllKeys(myGoal.queryObj, s);
-      //       const myWhereCols = queryUtils.onlyGrounded(walked);
-            
-      //       // Filter cached rows to match our WHERE conditions
-      //       const filteredRows = otherCache.filter(row => {
-      //         return Object.entries(myWhereCols).every(([col, value]) => row[col] === value);
-      //       });
-            
-      //       if (filteredRows.length > 0) {
-      //         this.logger.log("CACHE_HIT_FROM_OTHER_GOAL", {
-      //           myGoalId: myGoal.goalId,
-      //           otherGoalId: otherGoal.goalId,
-      //           filteredRowCount: filteredRows.length,
-      //           originalCacheCount: otherCache.length
-      //         });
-      //         return filteredRows;
-      //       }
-      //     }
-      //   }
-      // }
-      
-      const compatibleGoals = commonGoals.filter(g => 
-        g.goal.table === myGoal.table && // Same table
-        Object.keys(g.goal.queryObj).every(col => col in myGoal.queryObj) && // Same columns
-        Object.keys(myGoal.queryObj).every(col => col in g.goal.queryObj)
-      );
-      
-      if (compatibleGoals.length > 0) {
-        this.logger.log("COMPATIBLE_MERGE_GOALS", {
-          myGoalId: myGoal.goalId,
-          compatibleGoalIds: compatibleGoals.map(g => g.goal.goalId)
-        });
-        
-        // Collect all WHERE conditions from compatible goals
-        const allGoalsToMerge = [myGoal, ...compatibleGoals.map(g => g.goal)];
-        const allWhereClauses: Record<string, Set<any>> = {};
-        
-        for (const goal of allGoalsToMerge) {
-          const walked = await queryUtils.walkAllKeys(goal.queryObj, s);
-          const whereCols = queryUtils.onlyGrounded(walked);
-          for (const [col, value] of Object.entries(whereCols)) {
-            if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
-            allWhereClauses[col].add(value);
-          }
-        }
-        
-        // Build merged query
-        let query = this.dbObj.db(this.table);
-        for (const [col, values] of Object.entries(allWhereClauses)) {
-          if (values.size === 1) {
-            query = query.where(col, Array.from(values)[0]);
-          } else {
-            query = query.whereIn(col, Array.from(values));
-          }
-        }
-        
-        if (this.options?.selectColumns) {
-          query = query.select(this.options.selectColumns);
+    const compatibleGoals = findCompatibleGoals(myGoal, commonGoals);
+    if (compatibleGoals.length > 0) {
+      this.logger.log("COMPATIBLE_MERGE_GOALS", {
+        myGoalId: myGoal.goalId,
+        compatibleGoalIds: compatibleGoals.map(g => g.goalId)
+      });
+      // Collect all WHERE conditions from compatible goals
+      const allGoalsToMerge = [myGoal, ...compatibleGoals];
+      const allWhereClauses = await collectAllWhereClauses(allGoalsToMerge, s);
+      // Build merged query
+      let query = this.dbObj.db(this.table);
+      for (const [col, values] of Object.entries(allWhereClauses)) {
+        if (values.size === 1) {
+          query = query.where(col, Array.from(values)[0]);
         } else {
-          query = query.select('*');
+          query = query.whereIn(col, Array.from(values));
         }
-        
-        const sqlString = query.toString();
-        this.dbObj.addQuery(sqlString);
-        this.logger.log("DB_QUERY_MERGED", {
+      }
+      if (this.options?.selectColumns) {
+        query = query.select(this.options.selectColumns);
+      } else {
+        query = query.select('*');
+      }
+      const sqlString = query.toString();
+      this.dbObj.addQuery(sqlString);
+      this.logger.log("DB_QUERY_MERGED", {
+        table: this.table,
+        sql: sqlString,
+        goalId,
+        mergedGoalIds: allGoalsToMerge.map(g => g.goalId)
+      });
+      const rows = await query;
+      if (rows.length) {
+        this.logger.log("DB_ROWS_MERGED", {
           table: this.table,
           sql: sqlString,
           goalId,
-          mergedGoalIds: allGoalsToMerge.map(g => g.goalId)
+          rows,
         });
-        
-        const rows = await query;
-        
-        if (rows.length) {
-          this.logger.log("DB_ROWS_MERGED", {
-            table: this.table,
-            sql: sqlString,
-            goalId,
-            rows,
+      }
+      // Cache results for other goals that can use this data
+      const passed = getOrCreateRowCache(s);
+      for (const otherGoal of compatibleGoals) {
+        if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
+          passed.set(otherGoal.goalId, rows);
+          this.logger.log("CACHED_FOR_OTHER_GOAL", {
+            myGoalId: goalId,
+            otherGoalId: otherGoal.goalId,
+            rowCount: rows.length
           });
         }
-        
-        // Cache results for other goals that can use this data
-        const passed = getOrCreateRowCache(s);
-        for (const goalInfo of commonGoals) {
-          const otherGoal = goalInfo.goal;
-          if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
-            // Cache our results for the other goal to use
-            passed.set(otherGoal.goalId, rows);
-            this.logger.log("CACHED_FOR_OTHER_GOAL", {
-              myGoalId: goalId,
-              otherGoalId: otherGoal.goalId,
-              rowCount: rows.length
-            });
-          }
-        }
-        
-        return rows;
       }
+      return rows;
     }
 
     const rows = await this.executeQuery(goalId, queryObj, s);

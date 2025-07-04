@@ -9,6 +9,7 @@ import { isLogicList, logicListToArray, lvar, resetVarCounter } from '../core/ke
 import { eq, and, or } from '../core/combinators.ts';
 import { collecto } from '../relations/aggregates.ts';
 import { not } from '../relations/control.ts';
+import { query } from '../query.ts';
 import { makeFactsObj, makeFacts } from './facts-memory.ts';
 
 describe('MEM Backend Integration Tests', () => {
@@ -72,17 +73,18 @@ describe('MEM Backend Integration Tests', () => {
         }),
         or(eq(age, 25), eq(age, 30))
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push({
-          name: subst.get(name.id),
-          age: subst.get(age.id)
-        });
-      }
+
+      const results = await query()
+        .select($ => ({
+          name,
+          age 
+        }))
+        .where($ => goal)
+        .toArray();
+
       
       expect(results).toHaveLength(2);
+      // @ts-expect-error
       const sortedResults = results.sort((a, b) => a.age - b.age);
       expect(sortedResults).toEqual([
         {
@@ -111,17 +113,17 @@ describe('MEM Backend Integration Tests', () => {
           child: grandchild 
         })
       );
-      const s = new Map();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push({
-          grandparent: subst.get(grandparent.id),
-          grandchild: subst.get(grandchild.id)
-        });
-      }
+      const results = await query()
+        .select($ => ({
+          grandparent,
+          grandchild
+        }))
+        .where($ => goal)
+        .toArray();
       
       expect(results).toHaveLength(2);
+      // @ts-expect-error
       const sortedResults = results.sort((a, b) => a.grandchild.localeCompare(b.grandchild));
       expect(sortedResults).toEqual([
         {
@@ -145,15 +147,14 @@ describe('MEM Backend Integration Tests', () => {
         }),
         not(eq(name, 'alice'))
       );
-      const s = new Map();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push({
-          name: subst.get(name.id),
-          age: subst.get(age.id)
-        });
-      }
+      const results = await query()
+        .select($ => ({
+          name,
+          age
+        }))
+        .where($ => goal)
+        .toArray();
       
       expect(results).toHaveLength(3); // Everyone except alice
       const names = results.map(r => r.name).sort();
@@ -176,20 +177,18 @@ describe('MEM Backend Integration Tests', () => {
         ),
         names
       );
-      const s = new Map();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        const collected = subst.get(names.id);
-        if(!isLogicList(collected)) continue;
-        const arr = logicListToArray(collected);
-        if (Array.isArray(arr)) {
-          results.push(arr.sort());
-        }
-      }
+      const results = await query()
+        .select($ => ({
+          names 
+        }))
+        .where($ => goal)
+        .toArray();
       
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual(['alice', 'bob']);
+      const arr = results[0].names;
+      if (!Array.isArray(arr)) throw new Error('Expected array');
+      expect(arr.sort()).toEqual(['alice', 'bob']);
     });
   });
 });

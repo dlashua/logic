@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { lvar, resetVarCounter, walk, logicListToArray } from '../core/kernel.ts';
 import { eq, or, and } from '../core/combinators.ts';
+import { query } from '../query.ts';
 import { } from '../relations/lists.ts';
 import {
   collecto,
@@ -24,15 +25,13 @@ describe('Aggregation Relations', () => {
         or(eq(x, 1), eq(x, 2), eq(x, 3)),
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        results.push(logicListToArray(res));
-      }
-      
-      expect(results).toEqual([[1, 2, 3]]);
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => r.result)).toEqual([[1, 2, 3]]);
     });
 
     it('should work with empty results', async () => {
@@ -43,15 +42,13 @@ describe('Aggregation Relations', () => {
         and(eq(x, 1), eq(x, 2)), // impossible constraint
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        results.push(logicListToArray(res));
-      }
-      
-      expect(results).toEqual([[]]);
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => logicListToArray(r.result))).toEqual([[]]);
     });
   });
 
@@ -64,18 +61,16 @@ describe('Aggregation Relations', () => {
         or(eq(x, 1), eq(x, 2), eq(x, 1), eq(x, 3), eq(x, 2)),
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        const collected = logicListToArray(res);
-        // Sort for consistent comparison since collect_distincto doesn't guarantee order
-        collected.sort();
-        results.push(collected);
-      }
-      
-      expect(results).toEqual([[1, 2, 3]]);
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      const collected = results[0].result;
+      // @ts-expect-error
+      collected.sort();
+      expect([collected]).toEqual([[1, 2, 3]]);
     });
   });
 
@@ -88,14 +83,13 @@ describe('Aggregation Relations', () => {
         or(eq(x, 1), eq(x, 2), eq(x, 3)),
         count
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(count, subst));
-      }
-      
-      expect(results).toEqual([3]);
+      const results = await query()
+        .select($ => ({
+          count 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => r.count)).toEqual([3]);
     });
 
     it('should count zero for no solutions', async () => {
@@ -106,14 +100,13 @@ describe('Aggregation Relations', () => {
         and(eq(x, 1), eq(x, 2)), // impossible
         count
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(count, subst));
-      }
-      
-      expect(results).toEqual([0]);
+      const results = await query()
+        .select($ => ({
+          count 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => r.count)).toEqual([0]);
     });
   });
 
@@ -136,22 +129,19 @@ describe('Aggregation Relations', () => {
         outKey,
         outValues
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const k = await walk(outKey, subst);
-        const v = await walk(outValues, subst);
-        results.push({
-          key: k,
-          values: logicListToArray(v)
-        });
-      }
-      
-      // Sort results for consistent comparison
-      results.sort((a, b) => (a.key as string).localeCompare(b.key as string));
-      
-      expect(results).toEqual([
+      const results = await query()
+        .select($ => ({
+          outKey,
+          outValues 
+        }))
+        .where($ => goal)
+        .toArray();
+      const mapped = results.map(r => ({
+        key: r.outKey,
+        values: r.outValues,
+      }));
+      mapped.sort((a, b) => (a.key as string).localeCompare(b.key as string));
+      expect(mapped).toEqual([
         {
           key: 'a',
           values: [1, 2]
@@ -182,22 +172,19 @@ describe('Aggregation Relations', () => {
         outKey,
         outCount
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const k = await walk(outKey, subst);
-        const c = await walk(outCount, subst);
-        results.push({
-          key: k,
-          count: c
-        });
-      }
-      
-      // Sort results for consistent comparison
-      results.sort((a, b) => (a.key as string).localeCompare(b.key as string));
-      
-      expect(results).toEqual([
+      const results = await query()
+        .select($ => ({
+          outKey,
+          outCount 
+        }))
+        .where($ => goal)
+        .toArray();
+      const mapped = results.map(r => ({
+        key: r.outKey,
+        count: r.outCount
+      }));
+      mapped.sort((a, b) => (a.key as string).localeCompare(b.key as string));
+      expect(mapped).toEqual([
         {
           key: 'a',
           count: 2 

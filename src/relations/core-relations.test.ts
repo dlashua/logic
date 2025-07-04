@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { lvar, resetVarCounter, logicList, logicListToArray } from '../core/kernel.ts';
 import { eq, and, or } from '../core/combinators.ts';
+import { query } from '../query.ts';
 import { membero } from './lists.ts';
 import { collecto } from './aggregates.ts';
 import { not } from './control.ts';
@@ -14,37 +15,30 @@ describe('Core Relations', () => {
     it('should find element in array', async () => {
       const x = lvar('x');
       const goal = membero(x, [1, 2, 3]);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst.get(x.id));
-      }
-      
-      expect(results.sort()).toEqual([1, 2, 3]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => r.x).sort()).toEqual([1, 2, 3]);
     });
 
     it('should succeed when element is in array', async () => {
       const goal = membero(2, [1, 2, 3]);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(1);
     });
 
     it('should fail when element is not in array', async () => {
       const goal = membero(4, [1, 2, 3]);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(0);
     });
 
@@ -52,14 +46,13 @@ describe('Core Relations', () => {
       const x = lvar('x');
       const list = logicList(1, 2, 3);
       const goal = membero(x, list);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst.get(x.id));
-      }
-      
-      expect(results.sort()).toEqual([1, 2, 3]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => goal)
+        .toArray();
+      expect(results.map(r => r.x).sort()).toEqual([1, 2, 3]);
     });
 
     it('should generate array elements when array is variable', async () => {
@@ -68,15 +61,14 @@ describe('Core Relations', () => {
         eq(list, [1, 2, 3]),
         membero(2, list)
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          list 
+        }))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(1);
-      expect(results[0].get(list.id)).toEqual([1, 2, 3]);
+      expect(results[0].list).toEqual([1, 2, 3]);
     });
   });
 
@@ -84,32 +76,26 @@ describe('Core Relations', () => {
     it('should collect all solutions', async () => {
       const x = lvar('x');
       const result = lvar('result');
-      
       const goal = collecto(
         x,
         membero(x, [1, 2, 3]),
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const collected = subst.get(result.id);
-        if (Array.isArray(collected)) {
-          results.push(collected.sort());
-        } else {
-          results.push(logicListToArray(collected).sort());
-        }
-      }
-      
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      const arr = results[0].result;
+      const collected = Array.isArray(arr) ? arr.sort() : logicListToArray(arr).sort();
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual([1, 2, 3]);
+      expect(collected).toEqual([1, 2, 3]);
     });
 
     it('should collect filtered solutions', async () => {
       const x = lvar('x');
       const result = lvar('result');
-      
       const goal = collecto(
         x,
         and(
@@ -118,26 +104,21 @@ describe('Core Relations', () => {
         ),
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const collected = subst.get(result.id);
-        if (Array.isArray(collected)) {
-          results.push(collected.sort());
-        } else {
-          results.push(logicListToArray(collected).sort());
-        }
-      }
-      
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      const arr = results[0].result;
+      const collected = Array.isArray(arr) ? arr.sort() : logicListToArray(arr).sort();
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual([2, 4]);
+      expect(collected).toEqual([2, 4]);
     });
 
     it('should handle empty collections', async () => {
       const x = lvar('x');
       const result = lvar('result');
-      
       const goal = collecto(
         x,
         and(
@@ -146,46 +127,36 @@ describe('Core Relations', () => {
         ),
         result
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const collected = subst.get(result.id);
-        if (Array.isArray(collected)) {
-          results.push(collected);
-        } else {
-          results.push(logicListToArray(collected));
-        }
-      }
-      
+      const results = await query()
+        .select($ => ({
+          result 
+        }))
+        .where($ => goal)
+        .toArray();
+      const arr = results[0].result;
+      const collected = Array.isArray(arr) ? arr : logicListToArray(arr);
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual([]);
+      expect(collected).toEqual([]);
     });
   });
 
   describe('not', () => {
     it('should succeed when goal fails', async () => {
       const goal = not(eq(1, 2));
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual(new Map());
+      expect(results[0]).toEqual({});
     });
 
     it('should fail when goal succeeds', async () => {
       const goal = not(eq(1, 1));
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(0);
     });
 
@@ -195,15 +166,14 @@ describe('Core Relations', () => {
         eq(x, 42),
         not(eq(x, 43))
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(1);
-      expect(results[0].get(x.id)).toBe(42);
+      expect(results[0].x).toBe(42);
     });
 
     it('should not bind variables in negated goals', async () => {
@@ -213,16 +183,19 @@ describe('Core Relations', () => {
         eq(x, 42),
         not(eq(y, 'hello')) // y should not be bound by this
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x,
+          y 
+        }))
+        .where($ => goal)
+        .toArray();
       expect(results).toHaveLength(1);
-      expect(results[0].get(x.id)).toBe(42);
-      expect(results[0].has(y.id)).toBe(false);
+      expect(results[0].x).toBe(42);
+      expect(results[0].y).toStrictEqual({
+        tag: "var",
+        id: "y_1" 
+      });
     });
   });
 
@@ -230,7 +203,6 @@ describe('Core Relations', () => {
     it('should handle membero with collecto and not', async () => {
       const x = lvar('x');
       const evens = lvar('evens');
-      
       const goal = collecto(
         x,
         and(
@@ -241,20 +213,16 @@ describe('Core Relations', () => {
         ),
         evens
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const collected = subst.get(evens.id);
-        if (Array.isArray(collected)) {
-          results.push(collected.sort());
-        } else {
-          results.push(logicListToArray(collected).sort());
-        }
-      }
-      
+      const results = await query()
+        .select($ => ({
+          evens 
+        }))
+        .where($ => goal)
+        .toArray();
+      const arr = results[0].evens;
+      const collected = Array.isArray(arr) ? arr.sort() : logicListToArray(arr).sort();
       expect(results).toHaveLength(1);
-      expect(results[0]).toEqual([2, 4, 6]);
+      expect(collected).toEqual([2, 4, 6]);
     });
   });
 });

@@ -6,7 +6,9 @@ import {
   logicListToArray,
   logicList
 } from '../core/kernel.ts'
-import { eq, and } from '../core/combinators.ts';
+import { eq, and, run } from '../core/combinators.ts';
+import { query } from '../query.ts';
+import { SimpleObservable } from '../core/observable.ts';
 import {
   lengtho,
   permuteo,
@@ -22,219 +24,203 @@ describe('List Relations', () => {
 
   describe('lengtho', () => {
     it('should unify array length with number', async () => {
-      const len = lvar('len');
-      const goal = lengtho([1, 2, 3], len);
-      const s = new Map();
+      const results = await query()
+        .select($ => ({ len: $.len }))
+        .where($ => lengtho([1, 2, 3], $.len))
+        .toArray();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(len, subst));
-      }
-      
-      expect(results).toEqual([3]);
+      expect(results).toEqual([{ len: 3 }]);
     });
 
     it('should work with logic lists', async () => {
+      const results = await query()
+        .select($ => ({ len: $.len }))
+        .where($ => lengtho(logicList(1, 2, 3, 4), $.len))
+        .toArray();
+      
+      expect(results).toEqual([{ len: 4 }]);
+    });
+
+    it('should work with logic lists (direct substitution test)', async () => {
       const len = lvar('len');
       const list = logicList(1, 2, 3, 4);
       const goal = lengtho(list, len);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(len, subst));
-      }
-      
-      expect(results).toEqual([4]);
+      expect(result.results).toHaveLength(1);
+      expect(await walk(len, result.results[0])).toBe(4);
     });
 
     it('should work with empty arrays', async () => {
-      const len = lvar('len');
-      const goal = lengtho([], len);
-      const s = new Map();
+      const results = await query()
+        .select($ => ({ len: $.len }))
+        .where($ => lengtho([], $.len))
+        .toArray();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(len, subst));
-      }
-      
-      expect(results).toEqual([0]);
+      expect(results).toEqual([{ len: 0 }]);
     });
 
     it('should unify known length with array', async () => {
-      const arr = lvar('arr');
-      const goal = and(
-        eq(arr, [1, 2, 3]),
-        lengtho(arr, 3)
-      );
-      const s = new Map();
+      const results = await query()
+        .select($ => ({ arr: $.arr }))
+        .where($ => and(
+          eq($.arr, [1, 2, 3]),
+          lengtho($.arr, 3)
+        ))
+        .toArray();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(arr, subst));
-      }
-      
-      expect(results).toEqual([[1, 2, 3]]);
+      expect(results).toEqual([{ arr: [1, 2, 3] }]);
     });
 
     it('should fail for wrong length', async () => {
       const goal = lengtho([1, 2, 3], 5);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results).toEqual([]);
+      expect(result.results).toEqual([]);
+      expect(result.completed).toBe(true);
     });
   });
 
   describe('removeFirsto', () => {
     it('should remove first occurrence of element', async () => {
       const result = lvar('result');
+      const goal = removeFirsto(logicList(1, 2, 3, 2), 2, result);
+      const runResult = await run(goal);
+      
+      expect(runResult.results).toHaveLength(1);
+      const res = await walk(result, runResult.results[0]);
+      expect(logicListToArray(res)).toEqual([1, 3, 2]);
+    });
+
+    it('should remove first occurrence of element (direct substitution test)', async () => {
+      const result = lvar('result');
       const list = logicList(1, 2, 3, 2);
       const goal = removeFirsto(list, 2, result);
-      const s = new Map();
+      const runResult = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        results.push(logicListToArray(res));
-      }
-      
-      expect(results).toEqual([[1, 3, 2]]);
+      expect(runResult.results).toHaveLength(1);
+      const res = await walk(result, runResult.results[0]);
+      expect(logicListToArray(res)).toEqual([1, 3, 2]);
     });
 
     it('should handle element not in list', async () => {
-      const result = lvar('result');
-      const list = logicList(1, 2, 3);
-      const goal = removeFirsto(list, 4, result);
-      const s = new Map();
+      const goal = removeFirsto(logicList(1, 2, 3), 4, lvar('result'));
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results).toEqual([]);
+      expect(result.results).toEqual([]);
+      expect(result.completed).toBe(true);
     });
   });
 
   describe('mapo', () => {
     it('should map a relation over lists', async () => {
-      const result = lvar('result');
-      const list1 = logicList(1, 2, 3);
-      
       // Define a simple relation that adds 1
       const addOne = (x: any, y: any) => {
-        return async function* (s: any) {
-          const xVal = await walk(x, s);
-          if (typeof xVal === 'number') {
-            yield* eq(y, xVal + 1)(s);
-          }
-        };
+        return (s: any) => new SimpleObservable((observer) => {
+          const processAddOne = async () => {
+            try {
+              const xVal = await walk(x, s);
+              if (typeof xVal === 'number') {
+                eq(y, xVal + 1)(s).subscribe({
+                  next: observer.next,
+                  error: observer.error,
+                  complete: observer.complete
+                });
+              } else {
+                observer.complete?.();
+              }
+            } catch (error) {
+              observer.error?.(error);
+            }
+          };
+          processAddOne();
+        });
       };
       
-      const goal = mapo(addOne, list1, result);
-      const s = new Map();
+      const result = lvar('result');
+      const goal = mapo(addOne, logicList(1, 2, 3), result);
+      const runResult = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        results.push(logicListToArray(res));
-      }
-      
-      expect(results).toEqual([[2, 3, 4]]);
+      expect(runResult.results).toHaveLength(1);
+      const res = await walk(result, runResult.results[0]);
+      expect(logicListToArray(res)).toEqual([2, 3, 4]);
     });
 
     it('should work with empty lists', async () => {
-      const result = lvar('result');
-      const emptyList = logicList();
-      
+      // Define a simple relation that adds 1
       const addOne = (x: any, y: any) => {
-        return async function* (s: any) {
-          const xVal = await walk(x, s);
-          if (typeof xVal === 'number') {
-            yield* eq(y, xVal + 1)(s);
-          }
-        };
+        return (s: any) => new SimpleObservable((observer) => {
+          const processAddOne = async () => {
+            try {
+              const xVal = await walk(x, s);
+              if (typeof xVal === 'number') {
+                eq(y, xVal + 1)(s).subscribe({
+                  next: observer.next,
+                  error: observer.error,
+                  complete: observer.complete
+                });
+              } else {
+                observer.complete?.();
+              }
+            } catch (error) {
+              observer.error?.(error);
+            }
+          };
+          processAddOne();
+        });
       };
       
-      const goal = mapo(addOne, emptyList, result);
-      const s = new Map();
+      const result = lvar('result');
+      const goal = mapo(addOne, logicList(), result);
+      const runResult = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        const res = await walk(result, subst);
-        results.push(logicListToArray(res));
-      }
-      
-      expect(results).toEqual([[]]);
+      expect(runResult.results).toHaveLength(1);
+      const res = await walk(result, runResult.results[0]);
+      expect(logicListToArray(res)).toEqual([]);
     });
   });
 
   describe('alldistincto', () => {
     it('should succeed for arrays with distinct elements', async () => {
       const goal = alldistincto([1, 2, 3, 4]);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results.length).toBe(1);
+      expect(result.results.length).toBe(1);
+      expect(result.completed).toBe(true);
     });
 
     it('should fail for arrays with duplicate elements', async () => {
       const goal = alldistincto([1, 2, 2, 4]);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results.length).toBe(0);
+      expect(result.results.length).toBe(0);
+      expect(result.completed).toBe(true);
     });
 
     it('should work with logic lists', async () => {
       const list = logicList(1, 2, 3);
       const goal = alldistincto(list);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results.length).toBe(1);
+      expect(result.results.length).toBe(1);
+      expect(result.completed).toBe(true);
     });
 
     it('should fail for logic lists with duplicates', async () => {
       const list = logicList(1, 2, 2);
       const goal = alldistincto(list);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results.length).toBe(0);
+      expect(result.results.length).toBe(0);
+      expect(result.completed).toBe(true);
     });
 
     it('should succeed for empty arrays', async () => {
       const goal = alldistincto([]);
-      const s = new Map();
+      const result = await run(goal);
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
-      expect(results.length).toBe(1);
+      expect(result.results.length).toBe(1);
+      expect(result.completed).toBe(true);
     });
   });
 });

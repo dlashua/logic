@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { lvar, resetVarCounter, walk } from '../core/kernel.ts';
-import { eq, or, and } from '../core/combinators.ts';
+import { eq, or, and, run } from '../core/combinators.ts';
 import { aggregateVar, aggregateVarMulti } from './procedural-helpers.ts';
 
 describe('Procedural Helpers', () => {
@@ -15,13 +15,10 @@ describe('Procedural Helpers', () => {
         x,
         or(eq(x, 1), eq(x, 2), eq(x, 3))
       );
-      const s = new Map();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(x, subst));
-      }
-      
+      const results = (await run(goal))
+        .results.map(x => x.get("x_0"));
+
       expect(results).toEqual([[1, 2, 3]]);
     });
 
@@ -31,12 +28,9 @@ describe('Procedural Helpers', () => {
         x,
         and(eq(x, 1), eq(x, 2)) // impossible
       );
-      const s = new Map();
       
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(x, subst));
-      }
+      const results = (await run(goal))
+        .results.map(x => x.get("x_0"));
       
       expect(results).toEqual([[]]);
     });
@@ -55,17 +49,12 @@ describe('Procedural Helpers', () => {
           and(eq(groupVar, 'B'), eq(valueVar, 3))
         )
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const group = await walk(groupVar, subst);
-        const values = await walk(valueVar, subst);
-        results.push({
-          group,
-          values
-        });
-      }
+            
+      const results = (await run(goal))
+        .results.map(x => ({
+          group: x.get("group_0"),
+          values: x.get("value_1"),
+        }));
       
       // Sort for consistent comparison
       results.sort((a, b) => (a.group as string).localeCompare(b.group as string));
@@ -90,13 +79,11 @@ describe('Procedural Helpers', () => {
         [valueVar],
         and(eq(groupVar, 'A'), eq(groupVar, 'B')) // impossible
       );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const values = await walk(valueVar, subst);
-        results.push(values);
-      }
+
+      const results = (await run(goal))
+        .results.map(x => 
+          x.get("value_1"),
+        );
       
       expect(results).toEqual([[]]);
     });

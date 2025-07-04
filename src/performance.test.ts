@@ -65,14 +65,12 @@ describe('Performance Tests', () => {
     // Test goal execution
     const goalResult = await benchmark('Goal execution (eq)', async () => {
       const x = lvar('x');
-      const goal = eq(x, 42);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      return results;
+      return await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => eq(x, 42))
+        .toArray();
     }, 2000);
     console.log('\n' + formatBenchmarkResult(goalResult));
 
@@ -81,18 +79,18 @@ describe('Performance Tests', () => {
       const x = lvar('x');
       const y = lvar('y');
       const z = lvar('z');
-      const goal = and(
-        eq(x, 1),
-        eq(y, 2),
-        eq(z, 3)
-      );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      return results;
+      return await query()
+        .select($ => ({
+          x,
+          y,
+          z 
+        }))
+        .where($ => and(
+          eq(x, 1),
+          eq(y, 2),
+          eq(z, 3)
+        ))
+        .toArray();
     }, 1000);
     console.log('\n' + formatBenchmarkResult(complexGoalResult));
 
@@ -100,14 +98,12 @@ describe('Performance Tests', () => {
     const listResult = await benchmark('Logic list operations', async () => {
       const x = lvar('x');
       const list = logicList(1, 2, 3, 4, 5);
-      const goal = membero(x, list);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      return results;
+      return await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => membero(x, list))
+        .toArray();
     }, 1000);
     console.log('\n' + formatBenchmarkResult(listResult));
 

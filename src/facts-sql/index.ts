@@ -45,7 +45,7 @@ export async function createDBManager (
     getGoals: () => goals,
     clearGoals: () => goals.splice(0, goals.length),
 
-    addProcessedGoal: (q) => processedGoals.push(q),
+    addProcessedGoal: (q: any) => processedGoals.push(q),
     findProcessedGoalsByOwner: (id: number) => processedGoals.filter(x => x.goalId === id),
     findProcessedGoalsByMember: (id: number) => processedGoals.filter(x => x.goalIds.includes(id)), 
 

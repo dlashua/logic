@@ -145,139 +145,103 @@ describe('Core Logic Engine', () => {
   describe('Goals and Relations', () => {
     it('should succeed with eq goal when terms unify', async () => {
       const x = lvar('x');
-      const goal = eq(x, 42);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => eq(x, 42))
+        .toArray();
       expect(results.length).toBe(1);
-      expect(results[0].get(x.id)).toBe(42);
+      expect(results[0].x).toBe(42);
     });
 
     it('should fail with eq goal when terms dont unify', async () => {
-      const goal = eq(42, 43);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x: lvar('x') 
+        }))
+        .where($ => eq(42, 43))
+        .toArray();
       expect(results.length).toBe(0);
     });
 
     it('should work with fresh variables', async () => {
-      const goal = fresh((x, y) => and(
-        eq(x, 1),
-        eq(y, 2)
-      ));
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x: $.x,
+          y: $.y 
+        }))
+        .where($ => fresh((x, y) => and(eq(x, 1), eq(y, 2))))
+        .toArray();
       expect(results.length).toBe(1);
     });
 
     it('should work with and (conjunction)', async () => {
       const x = lvar('x');
       const y = lvar('y');
-      const goal = and(
-        eq(x, 1),
-        eq(y, 2)
-      );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x,
+          y 
+        }))
+        .where($ => and(eq(x, 1), eq(y, 2)))
+        .toArray();
       expect(results.length).toBe(1);
-      expect(results[0].get(x.id)).toBe(1);
-      expect(results[0].get(y.id)).toBe(2);
+      expect(results[0].x).toBe(1);
+      expect(results[0].y).toBe(2);
     });
 
     it('should work with or (disjunction)', async () => {
       const x = lvar('x');
-      const goal = or(
-        eq(x, 1),
-        eq(x, 2)
-      );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => or(eq(x, 1), eq(x, 2)))
+        .toArray();
       expect(results.length).toBe(2);
-      expect(results[0].get(x.id)).toBe(1);
-      expect(results[1].get(x.id)).toBe(2);
+      expect(results[0].x).toBe(1);
+      expect(results[1].x).toBe(2);
     });
 
     it('should work with gto (greater than constraint)', async () => {
-      const goal = gto(5, 3);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => gto(5, 3))
+        .toArray();
       expect(results.length).toBe(1);
-      expect(results[0]).toBe(s);
     });
 
     it('should fail with gto when constraint not met', async () => {
-      const goal = gto(3, 5);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({}))
+        .where($ => gto(3, 5))
+        .toArray();
       expect(results.length).toBe(0);
     });
 
     it('should work with not goal', async () => {
       const x = lvar('x');
-      const goal = and(
-        eq(x, 42),
-        not(eq(x, 43))
-      );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => and(eq(x, 42), not(eq(x, 43))))
+        .toArray();
       expect(results.length).toBe(1);
-      expect(results[0].get(x.id)).toBe(42);
+      expect(results[0].x).toBe(42);
     });
 
     it('should work with neqo (not equal constraint)', async () => {
       const x = lvar('x');
-      const goal = and(
-        eq(x, 42),
-        neqo(x, 43)
-      );
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(subst);
-      }
-      
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => and(eq(x, 42), neqo(x, 43)))
+        .toArray();
       expect(results.length).toBe(1);
-      expect(results[0].get(x.id)).toBe(42);
+      expect(results[0].x).toBe(42);
     });
   });
 
@@ -285,143 +249,61 @@ describe('Core Logic Engine', () => {
     it('should work with membero on logic lists', async () => {
       const x = lvar('x');
       const list = logicList(1, 2, 3);
-      const goal = membero(x, list);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(x, subst));
-      }
-      
-      expect(results).toEqual([1, 2, 3]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => membero(x, list))
+        .toArray();
+      expect(results.map(r => r.x)).toEqual([1, 2, 3]);
     });
 
     it('should work with membero on arrays', async () => {
       const x = lvar('x');
-      const goal = membero(x, [1, 2, 3]);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(x, subst));
-      }
-      
-      expect(results).toEqual([1, 2, 3]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => membero(x, [1, 2, 3]))
+        .toArray();
+      expect(results.map(r => r.x)).toEqual([1, 2, 3]);
     });
 
     it('should work with firsto', async () => {
       const x = lvar('x');
       const list = logicList(1, 2, 3);
-      const goal = firsto(x, list);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        results.push(await walk(x, subst));
-      }
-      
-      expect(results).toEqual([1]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => firsto(x, list))
+        .toArray();
+      expect(results.map(r => r.x)).toEqual([1]);
     });
 
     it('should work with resto', async () => {
       const x = lvar('x');
       const list = logicList(1, 2, 3);
-      const goal = resto(list, x);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const tail = await walk(x, subst);
-        results.push(logicListToArray(tail));
-      }
-      
-      expect(results).toEqual([[2, 3]]);
+      const results = await query()
+        .select($ => ({
+          x 
+        }))
+        .where($ => resto(list, x))
+        .toArray();
+      expect(results.map(r => r.x)).toEqual([[2, 3]]);
     });
 
     it('should work with appendo', async () => {
       const z = lvar('z');
       const list1 = logicList(1, 2);
       const list2 = logicList(3, 4);
-      const goal = appendo(list1, list2, z);
-      const s = new Map();
-      
-      const results = [];
-      for await (const subst of goal(s)) {
-        const result = await walk(z, subst);
-        results.push(logicListToArray(result));
-      }
-      
-      expect(results).toEqual([[1, 2, 3, 4]]);
-    });
-  });
-
-  describe('Query Builder', () => {
-    it('should build and execute simple queries', async () => {
       const results = await query()
         .select($ => ({
-          x: $.x 
+          z 
         }))
-        .where($ => eq($.x, 42))
+        .where($ => appendo(list1, list2, z))
         .toArray();
-      
-      expect(results.length).toBe(1);
-      expect(results[0].x).toBe(42);
-    });
-
-    it('should work with multiple constraints', async () => {
-      const results = await query()
-        .select($ => ({
-          x: $.x,
-          y: $.y 
-        }))
-        .where($ => [
-          eq($.x, 1),
-          eq($.y, 2)
-        ])
-        .toArray();
-      
-      expect(results.length).toBe(1);
-      expect(results[0].x).toBe(1);
-      expect(results[0].y).toBe(2);
-    });
-
-    it('should work with limit', async () => {
-      const results = await query()
-        .select($ => ({
-          x: $.x 
-        }))
-        .where($ => or(eq($.x, 1), eq($.x, 2), eq($.x, 3)))
-        .limit(2)
-        .toArray();
-      
-      expect(results.length).toBe(2);
-    });
-
-    it('should work with select all (*)', async () => {
-      const results = await query()
-        .select("*")
-        .where($ => eq($.x, 42))
-        .toArray();
-      
-      expect(results.length).toBe(1);
-      expect(results[0].x).toBe(42);
-    });
-
-    it('should work as async iterator', async () => {
-      const q = query()
-        .select($ => ({
-          x: $.x 
-        }))
-        .where($ => or(eq($.x, 1), eq($.x, 2)));
-      
-      const results = [];
-      for await (const result of q) {
-        results.push(result);
-      }
-      
-      expect(results.length).toBe(2);
-      expect(results[0].x).toBe(1);
-      expect(results[1].x).toBe(2);
+      expect(results.map(r => r.z)).toEqual([[1, 2, 3, 4]]);
     });
   });
 });

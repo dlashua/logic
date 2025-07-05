@@ -465,27 +465,113 @@ export class RegularRelationWithMerger {
               batchIndex,
               batchSize: batch.length,
             });
+
+            // Unified approach: 
+            // 1. If batch size > 1, try substitution batching first (more efficient)
+            // 2. If that doesn't work or batch size = 1, try goal-level caching
+            
+            let goalMergeResults: Map<number, any[]> = new Map();
+            
+            // Strategy 1: Check for cache hits first (always try goal-level caching)
+            let cacheHits = 0;
+            let cacheMisses: typeof batch = [];
+            
             for (const subst of batch) {
-              if (cancelled) {
-                this.logger.log("FLUSH_BATCH_CANCELLED_DURING_SUBST", {
+              if (cancelled) return;
+              
+              const cache = takeCache(goalId, subst);
+              if (cache) {
+                goalMergeResults.set(subst as any, cache);
+                cacheHits++;
+                this.logger.log("CACHE_HIT", {
                   goalId,
-                  batchIndex
+                  rowCount: cache.length,
+                  table: this.dbObj.getGoalById(goalId)?.table,
+                  rows: cache,
                 });
-                return;
+              } else {
+                cacheMisses.push(subst);
               }
-              this.logger.log("ABOUT_TO_CALL_CACHE_OR_QUERY", {
-                goalId,
-                batchIndex
-              });
-              const rows = await this.cacheOrQuery(goalId, queryObj, subst) || [];
-              for (const row of rows) {
-                if (cancelled) {
-                  this.logger.log("FLUSH_BATCH_CANCELLED_DURING_ROWS", {
-                    goalId,
-                    batchIndex
-                  });
-                  return;
+            }
+            
+            // Strategy 2: For cache misses, use substitution batching if multiple, else individual query
+            if (cacheMisses.length > 0) {
+              if (cacheMisses.length > 1) {
+                this.logger.log("USING_SUBSTITUTION_BATCHING", {
+                  goalId,
+                  batchSize: cacheMisses.length,
+                  cacheHits
+                });
+                
+                // Collect all WHERE clause values from cache misses
+                const allWhereClauses: Record<string, Set<any>> = {};
+                for (const subst of cacheMisses) {
+                  const walked = await queryUtils.walkAllKeys(queryObj, subst);
+                  const whereCols = queryUtils.onlyGrounded(walked);
+                  for (const [col, value] of Object.entries(whereCols)) {
+                    if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
+                    allWhereClauses[col].add(value);
+                  }
                 }
+                
+                // Build and run a single merged query
+                const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, this.options?.selectColumns || '*');
+                const sqlString = query.toString();
+                this.dbObj.addQuery(sqlString);
+                this.logger.log("DB_QUERY_BATCH", {
+                  table: this.table,
+                  sql: sqlString,
+                  goalId,
+                  batchSize: cacheMisses.length
+                });
+                const rows = await query;
+                if (rows.length) {
+                  this.logger.log("DB_ROWS", {
+                    table: this.table,
+                    sql: sqlString,
+                    goalId,
+                    rows,
+                  });
+                }
+                
+                // Store results for cache misses
+                for (const subst of cacheMisses) {
+                  goalMergeResults.set(subst as any, rows);
+                }
+              } else {
+                // Single cache miss - use goal-level caching with merging
+                this.logger.log("USING_GOAL_CACHING", {
+                  goalId,
+                  batchSize: cacheMisses.length,
+                  cacheHits
+                });
+                
+                for (const subst of cacheMisses) {
+                  if (cancelled) return;
+                  
+                  const rows = await this.cacheOrQuery(goalId, queryObj, subst) || [];
+                  goalMergeResults.set(subst as any, rows);
+                }
+              }
+            }
+            
+            if (cacheHits > 0) {
+              this.logger.log("CACHE_PERFORMANCE", {
+                goalId,
+                cacheHits,
+                cacheMisses: cacheMisses.length,
+                totalSubstitutions: batch.length
+              });
+            }
+            
+            // Process results for all substitutions
+            for (const subst of batch) {
+              if (cancelled) return;
+              
+              const rows = goalMergeResults.get(subst as any) || [];
+              for (const row of rows) {
+                if (cancelled) return;
+                
                 const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
                 if (unifiedSubst && !cancelled) {
                   const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(

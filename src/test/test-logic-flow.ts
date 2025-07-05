@@ -12,10 +12,14 @@ const {
 
 const log = console.log;
 
-await query()
+const results = await query()
   .where(($) => [
 
-    // parent_kid($.top, $.kid1),
+    membero($.top, [
+      "robert", "glee"
+    ]),
+
+    parent_kid($.top, $.kid1),
     // parent_kid($.kid1, $.kid2),
     // parent_kid($.kid2, $.kid3),
     // parent_kid($.kid3, $.kid4),
@@ -25,12 +29,15 @@ await query()
     //   info_color($.oneperson, "blue"),
     // )
 
-    info_number($.person, 4),
-    // not(info_color($.person, "blue")),
-    parent_kid($.parent, $.person),
-    parent_kid($.gp, $.parent),
+    // info_number($.person, 4),
+    // // not(info_color($.person, "blue")),
+    // parent_kid($.parent, $.person),
+    // parent_kid($.gp, $.parent),
 
-  ]).toArray().then(x => x.forEach(x => log(x)));
+  ]).toArray();
+
 
 console.log("queries", relDB.getQueries());
+log("results", results);
+
 process.exit(0);

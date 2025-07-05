@@ -5,7 +5,7 @@ const DEFAULT_CONFIG = {
   allowedIds: new Set<string>([
     // "FLUSH_BATCH",
     "FLUSH_BATCH_COMPLETE",
-    // "GOAL_NEXT",
+    "GOAL_NEXT",
     "UPSTREAM_GOAL_COMPLETE",
     "GOAL_COMPLETE",
     "GOAL_CANCELLED",
@@ -14,14 +14,24 @@ const DEFAULT_CONFIG = {
     "FLUSH_BATCH_CANCELLED_DURING_SUBST",
     "DB_QUERY_BATCH",
     "CACHE_HIT",
-    "CACHE_MISS",
+    // "CACHE_MISS",
     "UNIFY_SUCCESS",
     "GOAL_BATCH_KEY_UPDATED",
-    "ABOUT_TO_CALL_CACHE_OR_QUERY",
+    // "ABOUT_TO_CALL_CACHE_OR_QUERY",
     "CACHE_OR_QUERY_START",
-    "COMPATIBLE_GOALS",
+    // "COMPATIBLE_GOALS",
     "ABOUT_TO_PROCESS_GOAL",
-    "GOAL_GROUP_INFO",
+    "GOAL_GROUP_INFO", 
+    "DB_ROWS",
+    "FLUSH_BATCH",
+    "COMPATIBLE_MERGE_GOALS",
+    "DB_QUERY_MERGED",
+    "DB_ROWS_MERGED",
+    "ABOUT_TO_CALL_CACHE_OR_QUERY",
+    "USING_GOAL_MERGING",
+    "USING_GOAL_CACHING",
+    "USING_SUBSTITUTION_BATCHING",
+    "CACHE_PERFORMANCE",
 
   ]), // empty means allow all
   deniedIds: new Set<string>([
@@ -29,7 +39,6 @@ const DEFAULT_CONFIG = {
 
     "THIS_GOAL_ROWS",
     // "ALL_GOAL_ROWS",
-    // "DB_ROWS",
     "COMMON_GOALS",
     "DB_QUERY",
 

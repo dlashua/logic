@@ -19,7 +19,7 @@ const DEFAULT_CONFIG = {
     "GOAL_BATCH_KEY_UPDATED",
     // "ABOUT_TO_CALL_CACHE_OR_QUERY",
     "CACHE_OR_QUERY_START",
-    // "COMPATIBLE_GOALS",
+    "COMPATIBLE_GOALS",
     "ABOUT_TO_PROCESS_GOAL",
     "GOAL_GROUP_INFO", 
     "DB_ROWS",
@@ -42,6 +42,11 @@ const DEFAULT_CONFIG = {
     "DB_QUERY_UNIFIED",
     "POPULATING_CACHE_FOR_COMPATIBLE_GOALS",
     "MERGING_COMPATIBLE_GOALS",
+    "COMPATIBLE_GOALS",
+    "CACHED_FOR_OTHER_GOAL",
+    "CROSS_GROUP_CACHE_CHECK",
+    "OUTER_GROUP_CACHE_POPULATION",
+    "GOAL_STARTED",
 
   ]), // empty means allow all
   deniedIds: new Set<string>([
@@ -52,7 +57,6 @@ const DEFAULT_CONFIG = {
     "COMMON_GOALS",
     "DB_QUERY",
 
-    "GOAL_STARTED",
     "GOAL_CREATED",
     "SAW_CACHE",
     // "SHARED_GOALS", // Disabled to reduce noise

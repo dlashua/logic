@@ -19,19 +19,26 @@ const results = await query()
     // info_color($.oneperson, "blue"),
 
 
-    membero($.top, [
-      "robert", "roy_long"
-    ]),
+    // membero($.top, [
+    //   "robert", "roy_long"
+    // ]),
 
-    parent_kid($.top, $.kid1),
-    parent_kid($.kid1, $.kid2),
-    parent_kid($.kid2, $.kid3),
-    // parent_kid($.kid3, $.kid4),
     and(
-      membero($.oneperson, [$.top, $.kid1, $.kid2, $.kid3]),
-      info_number($.oneperson, 4),
-      info_color($.oneperson, "blue"),
+      parent_kid($.top, $.kid1),
+      parent_kid($.kid1, $.kid2),
+      parent_kid($.kid2, $.kid3),
+    ),
+    or(
+      info_number($.kid3, 4),
+      info_number($.kid2, 4),
     )
+    // not(info_number($.kid3, 4)),
+    // parent_kid($.kid3, $.kid4),
+    // and(
+    //   membero($.oneperson, [$.top, $.kid1, $.kid2, $.kid3]),
+    //   info_number($.oneperson, 4),
+    //   info_color($.oneperson, "blue"),
+    // )
 
     // info_number($.person, 4),
     // // not(info_color($.person, "blue")),

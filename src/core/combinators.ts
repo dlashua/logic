@@ -18,7 +18,8 @@ import { SimpleObservable } from "./observable.ts";
 // Well-known symbols for SQL query coordination
 export const SQL_GROUP_ID = Symbol('sql-group-id');
 export const SQL_GROUP_PATH = Symbol('sql-group-path');
-export const SQL_GROUP_GOALS = Symbol('sql-group-goals');
+export const SQL_INNER_GROUP_GOALS = Symbol('sql-inner-group-goals'); // Goals in immediate group
+export const SQL_OUTER_GROUP_GOALS = Symbol('sql-outer-group-goals'); // Goals across all related groups
 
 // Counter for generating unique group IDs
 let groupIdCounter = 0;
@@ -79,87 +80,55 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
  * Logical disjunction (OR).
  */
 export function disj(g1: Goal, g2: Goal): Goal {
-  return (input$) => {
-    const disjId = ++groupIdCounter;
-    
-    const branch1Input$ = input$.map(s => {
-      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
-      const newPath = [...parentPath, {
-        type: Symbol('disj'),
-        id: disjId,
-        branch: 0 
-      }];
-      
-      const newSubst = new Map(s);
-      newSubst.set(SQL_GROUP_ID, disjId);
-      newSubst.set(SQL_GROUP_PATH, newPath);
-      newSubst.set(SQL_GROUP_GOALS, []); // Each branch gets its own goals list
-      return newSubst;
-    });
-    
-    const branch2Input$ = input$.map(s => {
-      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
-      const newPath = [...parentPath, {
-        type: Symbol('disj'),
-        id: disjId,
-        branch: 1 
-      }];
-      
-      const newSubst = new Map(s);
-      newSubst.set(SQL_GROUP_ID, disjId);
-      newSubst.set(SQL_GROUP_PATH, newPath);
-      newSubst.set(SQL_GROUP_GOALS, []); // Each branch gets its own goals list
-      return newSubst;
-    });
-    
+  return enrichGroupInput("disj", ++groupIdCounter, [g1, g2], (enrichedInput$) => {
+    const branch1Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 0)(enrichedInput$);
+    const branch2Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 1)(enrichedInput$);
     return g1(branch1Input$).merge(g2(branch2Input$));
-  };
+  });
 }
 
 /**
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return (input$) => {
-    const conjId = ++groupIdCounter;
-    
-    const enrichedInput$ = input$.map(s => {
-      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
-      const newPath = [...parentPath, {
-        type: Symbol('conj'),
-        id: conjId 
-      }];
-      
-      const newSubst = new Map(s);
-      newSubst.set(SQL_GROUP_ID, conjId);
-      newSubst.set(SQL_GROUP_PATH, newPath);
-      newSubst.set(SQL_GROUP_GOALS, [g1, g2]); // Include both goals in the group
-      return newSubst;
-    });
-    
-    // Stream conjunction: g2 processes results from g1
-    return g2(g1(enrichedInput$));
-  };
+  return enrichGroupInput("conj", ++groupIdCounter, [g1, g2], (enrichedInput$) => g1(g2(enrichedInput$)));
 }
 
 /**
  * Helper for combining multiple goals with logical AND.
+ * Creates a single group containing all goals for optimal SQL merging.
  */
 export const and = (...goals: Goal[]): Goal => {
   if (goals.length === 0) {
     return (input$) => input$;
   }
-  return goals.reduce(conj);
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("and", ++groupIdCounter, goals, (enrichedInput$) =>
+    goals.reduce((acc, goal) => goal(acc), enrichedInput$)
+  );
 };
 
 /**
  * Helper for combining multiple goals with logical OR.
+ * Creates a single group containing all goals for optimal SQL merging.
  */
 export const or = (...goals: Goal[]): Goal => {
   if (goals.length === 0) {
     return () => SimpleObservable.empty<Subst>();
   }
-  return goals.reduce(disj);
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("or", ++groupIdCounter, goals, (enrichedInput$) => {
+    const orId = groupIdCounter;
+    const branches = goals.map((goal, index) => {
+      const branchInput$ = enrichGroupInput("or", orId, goals, x => x, index)(enrichedInput$);
+      return goal(branchInput$);
+    });
+    return branches.reduce((acc, branch) => acc.merge(branch));
+  });
 };
 
 /**
@@ -365,4 +334,48 @@ export function run<T>(
       }
     });
   });
+}
+
+/**
+ * Helper to enrich input$ with group metadata for combinators, and apply a function to the enriched input$.
+ * @param type - The group type ('and', 'or', 'conj', 'disj')
+ * @param groupId - The unique group id
+ * @param goals - The goals in this group (array)
+ * @param fn - Function to apply to the enriched input$
+ * @param branch - (optional) branch index for or/disj
+ * @returns A function that takes input$ and returns the result of fn(enrichedInput$)
+ */
+function enrichGroupInput(
+  type: string,
+  groupId: number,
+  goals: Goal[],
+  fn: (enrichedInput$: SimpleObservable<Subst>) => any,
+  branch?: number
+) {
+  const newInput$ = (input$: SimpleObservable<Subst>) => {
+    const enrichedInput$ = input$.map(s => {
+      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+      const newPath = [...parentPath, {
+        type: Symbol(type),
+        id: groupId,
+        ...(branch !== undefined ? {
+          branch
+        } : {})
+      }];
+      const parentOuterGoals = (s.get(SQL_OUTER_GROUP_GOALS) as Goal[]) || [];
+      const goalsInnerGoals = goals.flatMap(goal => goal.innerGoals ? [goal, ...goal.innerGoals] : [goal]);
+      const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
+      // const combinedOuterGoals = [...parentOuterGoals, ...goalsInnerGoals];
+      const newSubst = new Map(s);
+      newSubst.set(SQL_GROUP_ID, groupId);
+      newSubst.set(SQL_GROUP_PATH, newPath);
+      newSubst.set(SQL_INNER_GROUP_GOALS, goals);
+      newSubst.set(SQL_OUTER_GROUP_GOALS, combinedOuterGoals);
+      return newSubst;
+    });
+    return fn(enrichedInput$);
+  };
+  newInput$.innerGoals = goals;
+  newInput$.displayName = `${type}_${groupId}`; // For better debugging
+  return newInput$;
 }

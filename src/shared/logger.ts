@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = {
     "EXECUTING_UNIFIED_QUERY", 
     "DB_QUERY_UNIFIED",
     "POPULATING_CACHE_FOR_COMPATIBLE_GOALS",
+    "MERGING_COMPATIBLE_GOALS",
 
   ]), // empty means allow all
   deniedIds: new Set<string>([

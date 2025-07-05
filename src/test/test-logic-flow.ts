@@ -15,16 +15,20 @@ const log = console.log;
 const results = await query()
   .where(($) => [
 
-    membero($.top, [
-      "robert", "glee"
-    ]),
+    info_number($.oneperson, 4),
+    info_color($.oneperson, "blue"),
 
-    parent_kid($.top, $.kid1),
+
+    // membero($.top, [
+    //   "robert", "roy_long"
+    // ]),
+
+    // parent_kid($.top, $.kid1),
     // parent_kid($.kid1, $.kid2),
     // parent_kid($.kid2, $.kid3),
-    // parent_kid($.kid3, $.kid4),
+    // // parent_kid($.kid3, $.kid4),
     // and(
-    //   membero($.oneperson, [$.top, $.kid1, $.kid2, $.kid3, $.kid4]),
+    //   membero($.oneperson, [$.top, $.kid1, $.kid2, $.kid3]),
     //   info_number($.oneperson, 4),
     //   info_color($.oneperson, "blue"),
     // )

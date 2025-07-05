@@ -15,8 +15,8 @@ export const relDB = await makeRelDB({
 export const city = await relDB.rel(
   "city", 
   {
-    primaryKey: "id",
-    selectColumns: ["id", "city", "state", "country_code"],
+    // primaryKey: "id",
+    // selectColumns: ["id", "city", "state", "country_code"],
   }
 );
 

@@ -17,16 +17,16 @@ export const relDB = await makeRelDB({
 const PK = await relDB.rel(
   "family",
   {
-    primaryKey: "parent",
-    selectColumns: ["parent", "kid"],
+    // primaryKey: "parent",
+    // selectColumns: ["parent", "kid"],
   } 
 );
 const R = await relDB.relSym(
   "relationship", 
   ["a", "b"], 
   {
-    primaryKey: "a",
-    selectColumns: ["a", "b"],
+    // primaryKey: "a",
+    // selectColumns: ["a", "b"],
   } 
 );
 const I = await relDB.rel(

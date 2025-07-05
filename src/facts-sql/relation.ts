@@ -249,21 +249,6 @@ function buildSelectQuery(dbObj: DBManager, table: string, whereClauses: Record<
   return query;
 }
 
-/**
- * Build a simple select query for a table with grounded columns only.
- */
-function buildSimpleQuery(dbObj: DBManager, table: string, queryObj: Record<string, Term>, whereCols: Record<string, any>, selectColumns?: string[] | '*') {
-  let query = dbObj.db(table);
-  for (const [column, value] of Object.entries(whereCols)) {
-    query = query.where(column, value);
-  }
-  if (selectColumns && selectColumns !== '*') {
-    query = query.select(selectColumns);
-  } else {
-    query = query.select(Object.keys(queryObj));
-  }
-  return query;
-}
 
 export class RegularRelationWithMerger {
   private logger: Logger;
@@ -326,96 +311,23 @@ export class RegularRelationWithMerger {
     return otherGoals.map(x => this.haveAtLeastOneMatchingVar(myGoal, x)).filter(x => x !== null);
   }
 
-  async cacheOrQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {    
-    const cache = takeCache(goalId, s);
-    if(cache) {
-      this.logger.log("CACHE_HIT", {
-        goalId,
-        rowCount: cache.length,
-        table: this.dbObj.getGoalById(goalId)?.table,
-        rows: cache,
-      });
-      return cache;
-    }
-
-    this.logger.log("CACHE_MISS", {
-      goalId,
-      table: this.dbObj.getGoalById(goalId)?.table
-    });
-
+  private async populateCacheForCompatibleGoals(goalId: number, s: Subst, rows: any[]): Promise<void> {
     const myGoal = this.dbObj.getGoalById(goalId);
-    if(!myGoal) return [];
+    if (!myGoal) return;
 
     const commonGoals = await this.processGoal(myGoal, s);
-
-    this.logger.log("COMMON_GOALS", {
-      myGoalId: myGoal.goalId,
-      myGoalTable: myGoal.table,
-      myGoalGroupId: myGoal.batchKey,
-      allGoals: this.dbObj.getGoals().map(g => ({
-        goalId: g.goalId,
-        table: g.table,
-        groupId: g.batchKey 
-      })),
-      commonGoals: commonGoals.map(g => ({
-        goalId: g.goal.goalId,
-        table: g.goal.table,
-        groupId: g.goal.batchKey 
-      })),
-    });
-
-    // If no joinable goals, check if we can merge WHERE clauses with other goals in the same batch
-    const compatibleGoals = findCompatibleGoals(myGoal, commonGoals);
-    if (compatibleGoals.length > 0) {
-      this.logger.log("COMPATIBLE_MERGE_GOALS", {
-        myGoalId: myGoal.goalId,
-        compatibleGoalIds: compatibleGoals.map(g => g.goalId)
-      });
-      // Collect all WHERE conditions from compatible goals
-      const allGoalsToMerge = [myGoal, ...compatibleGoals];
-      const allWhereClauses = await collectAllWhereClauses(allGoalsToMerge, s);
-      // Build merged query
-      const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, this.options?.selectColumns || '*');
-      const sqlString = query.toString();
-      this.dbObj.addQuery(sqlString);
-      this.logger.log("DB_QUERY_MERGED", {
-        table: this.table,
-        sql: sqlString,
-        goalId,
-        mergedGoalIds: allGoalsToMerge.map(g => g.goalId)
-      });
-      const rows = await query;
-      if (rows.length) {
-        this.logger.log("DB_ROWS_MERGED", {
-          table: this.table,
-          sql: sqlString,
-          goalId,
-          rows,
-        });
-      }
-      // Cache results for other goals that can use this data
-      const passed = getOrCreateRowCache(s);
-      for (const otherGoal of compatibleGoals) {
-        if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
-          passed.set(otherGoal.goalId, rows);
-          this.logger.log("CACHED_FOR_OTHER_GOAL", {
-            myGoalId: goalId,
-            otherGoalId: otherGoal.goalId,
-            rowCount: rows.length
-          });
-        }
-      }
-      return rows;
-    }
-
-    const rows = await this.executeQuery(goalId, queryObj, s);
     
-    // Cache results for other compatible goals in the same batch
+    this.logger.log("POPULATING_CACHE_FOR_COMPATIBLE_GOALS", {
+      myGoalId: myGoal.goalId,
+      compatibleGoalCount: commonGoals.length,
+      rowCount: rows.length
+    });
+    
+    // Cache results for other compatible goals
     const passed = getOrCreateRowCache(s);
     for (const goalInfo of commonGoals) {
       const otherGoal = goalInfo.goal;
       if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
-        // Cache our results for the other goal to use
         passed.set(otherGoal.goalId, rows);
         this.logger.log("CACHED_FOR_OTHER_GOAL", {
           myGoalId: goalId,
@@ -424,8 +336,6 @@ export class RegularRelationWithMerger {
         });
       }
     }
-    
-    return rows;
   }
 
   createGoal(queryObj: Record<string, Term>): Goal {
@@ -466,135 +376,39 @@ export class RegularRelationWithMerger {
               batchSize: batch.length,
             });
 
-            // Unified approach: 
-            // 1. If batch size > 1, try substitution batching first (more efficient)
-            // 2. If that doesn't work or batch size = 1, try goal-level caching
+            // All substitutions in this batch are cache misses
+            // (cache hits are processed immediately above)
             
-            const goalMergeResults = new Map<number, any[]>();
+            this.logger.log("PROCESSING_CACHE_MISSES", {
+              goalId,
+              cacheMissCount: batch.length
+            });
             
-            // Strategy 1: Check for cache hits first (always try goal-level caching)
-            let cacheHits = 0;
-            const cacheMisses: typeof batch = [];
+            const rows = await this.executeQueryForSubstitutions(goalId, queryObj, batch);
             
+            // Process SQL results for all cache misses
             for (const subst of batch) {
               if (cancelled) return;
               
-              const cache = takeCache(goalId, subst);
-              if (cache) {
-                goalMergeResults.set(subst as any, cache);
-                cacheHits++;
-                this.logger.log("CACHE_HIT", {
-                  goalId,
-                  rowCount: cache.length,
-                  table: this.dbObj.getGoalById(goalId)?.table,
-                  rows: cache,
-                });
-              } else {
-                cacheMisses.push(subst);
-              }
-            }
-            
-            // Strategy 2: For cache misses, use substitution batching if multiple, else individual query
-            if (cacheMisses.length > 0) {
-              if (cacheMisses.length > 1) {
-                this.logger.log("USING_SUBSTITUTION_BATCHING", {
-                  goalId,
-                  batchSize: cacheMisses.length,
-                  cacheHits
-                });
-                
-                // Collect all WHERE clause values from cache misses
-                const allWhereClauses: Record<string, Set<any>> = {};
-                for (const subst of cacheMisses) {
-                  const walked = await queryUtils.walkAllKeys(queryObj, subst);
-                  const whereCols = queryUtils.onlyGrounded(walked);
-                  for (const [col, value] of Object.entries(whereCols)) {
-                    if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
-                    allWhereClauses[col].add(value);
-                  }
-                }
-                
-                // Build and run a single merged query
-                const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, this.options?.selectColumns || '*');
-                const sqlString = query.toString();
-                this.dbObj.addQuery(sqlString);
-                this.logger.log("DB_QUERY_BATCH", {
-                  table: this.table,
-                  sql: sqlString,
-                  goalId,
-                  batchSize: cacheMisses.length
-                });
-                const rows = await query;
-                if (rows.length) {
-                  this.logger.log("DB_ROWS", {
-                    table: this.table,
-                    sql: sqlString,
-                    goalId,
-                    rows,
-                  });
-                }
-                
-                // Store results for cache misses
-                for (const subst of cacheMisses) {
-                  goalMergeResults.set(subst as any, rows);
-                }
-              } else {
-                // Single cache miss - use goal-level caching with merging
-                this.logger.log("USING_GOAL_CACHING", {
-                  goalId,
-                  batchSize: cacheMisses.length,
-                  cacheHits
-                });
-                
-                for (const subst of cacheMisses) {
-                  if (cancelled) return;
-                  
-                  const rows = await this.cacheOrQuery(goalId, queryObj, subst) || [];
-                  goalMergeResults.set(subst as any, rows);
-                }
-              }
-            }
-            
-            if (cacheHits > 0) {
-              this.logger.log("CACHE_PERFORMANCE", {
-                goalId,
-                cacheHits,
-                cacheMisses: cacheMisses.length,
-                totalSubstitutions: batch.length
-              });
-            }
-            
-            // Process results for all substitutions
-            for (const subst of batch) {
-              if (cancelled) return;
-              
-              const rows = goalMergeResults.get(subst as any) || [];
               for (const row of rows) {
                 if (cancelled) return;
                 
                 const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
                 if (unifiedSubst && !cancelled) {
+                  // Cache results for other compatible goals
                   const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
-                    this.dbObj,
-                    unifiedSubst,
-                    goalId,
-                    row,
+                    this.dbObj, 
+                    unifiedSubst, 
+                    goalId, 
+                    row, 
                     this.logger
                   );
-                  const log_s = new Map(updatedSubst);
-                  const log_c = log_s.get(ROW_CACHE) as Map<number, Record<string, any>>;
-                  const cacheRowCounts: Record<number, number> = {};
-                  if (log_c && typeof log_c.forEach === "function") {
-                    log_c.forEach((rows, key) => {
-                      cacheRowCounts[key] = Array.isArray(rows) ? rows.length : 0;
-                    });
-                  }
+                    
                   this.logger.log("UNIFY_SUCCESS", {
                     goalId,
                     queryObj,
                     row,
-                    log_s,
-                    cacheRowCounts
+                    wasFromCache: false
                   });
                   observer.next(new Map(updatedSubst));
                   await new Promise(resolve => nextTick(resolve));
@@ -610,7 +424,7 @@ export class RegularRelationWithMerger {
           }
         });
         const subscription = input$.subscribe({
-          next: (subst: Subst) => {
+          next: async (subst: Subst) => {
             if (cancelled) return;
             if (!batchKeyUpdated) {
               const groupId = subst.get(SQL_GROUP_ID) as number | undefined;
@@ -626,12 +440,41 @@ export class RegularRelationWithMerger {
                 });
               }
             }
-            batchProcessor.addItem(subst);
-            this.logger.log("GOAL_NEXT", {
-              goalId,
-              input_complete,
-              subst,
-            });
+            
+            // Check cache first - if hit, process immediately without batching
+            const cache = takeCache(goalId, subst);
+            if (cache) {
+              this.logger.log("CACHE_HIT_IMMEDIATE", {
+                goalId,
+                rowCount: cache.length,
+                table: this.table
+              });
+              
+              // Process cached results immediately
+              for (const row of cache) {
+                if (cancelled) return;
+                
+                const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
+                if (unifiedSubst && !cancelled) {
+                  this.logger.log("UNIFY_SUCCESS", {
+                    goalId,
+                    queryObj,
+                    row,
+                    wasFromCache: true
+                  });
+                  observer.next(new Map(unifiedSubst));
+                  await new Promise(resolve => nextTick(resolve));
+                }
+              }
+            } else {
+              // Cache miss - add to batch for SQL processing
+              batchProcessor.addItem(subst);
+              this.logger.log("CACHE_MISS_TO_BATCH", {
+                goalId,
+                input_complete,
+                subst,
+              });
+            }
           },
           error: (err: any) => {
             if (!cancelled) observer.error?.(err);
@@ -674,17 +517,37 @@ export class RegularRelationWithMerger {
     return mySubstHandler;
   }
 
-  private async executeQuery(goalId: number, queryObj: Record<string, Term>, s: Subst): Promise<any[]> {
-    const walkedQuery = await queryUtils.walkAllKeys(queryObj, s);
-    const whereCols = queryUtils.onlyGrounded(walkedQuery);
-    const query = buildSimpleQuery(this.dbObj, this.table, queryObj, whereCols, this.options?.selectColumns || '*');
+  private async executeQueryForSubstitutions(goalId: number, queryObj: Record<string, Term>, substitutions: Subst[]): Promise<any[]> {
+    if (substitutions.length === 0) return [];
+    
+    this.logger.log("EXECUTING_UNIFIED_QUERY", {
+      goalId,
+      substitutionCount: substitutions.length,
+      table: this.table
+    });
+    
+    // Unified approach: collect WHERE clauses from all substitutions
+    const allWhereClauses: Record<string, Set<any>> = {};
+    for (const subst of substitutions) {
+      const walked = await queryUtils.walkAllKeys(queryObj, subst);
+      const whereCols = queryUtils.onlyGrounded(walked);
+      for (const [col, value] of Object.entries(whereCols)) {
+        if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
+        allWhereClauses[col].add(value);
+      }
+    }
+    
+    // Build and execute single query (works for both single and multiple substitutions)
+    const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, this.options?.selectColumns || '*');
     const sqlString = query.toString();
     this.dbObj.addQuery(sqlString);
-    this.logger.log("DB_QUERY", {
+    this.logger.log("DB_QUERY_UNIFIED", {
       table: this.table,
       sql: sqlString,
       goalId,
+      substitutionCount: substitutions.length
     });
+    
     const rows = await query;
     if (rows.length) {
       this.logger.log("DB_ROWS", {
@@ -693,16 +556,17 @@ export class RegularRelationWithMerger {
         goalId,
         rows,
       });
-    } else {
-      this.logger.log("NO_DB_ROWS", {
-        table: this.table,
-        sql: sqlString,
-        goalId,
-        rows,
-      });
     }
+    
+    // Populate cache for compatible goals (works for both single and batched queries)
+    // Use the first substitution as representative for goal analysis
+    if (substitutions.length > 0) {
+      await this.populateCacheForCompatibleGoals(goalId, substitutions[0], rows);
+    }
+    
     return rows;
   }
+
 
   // Make unifyRowWithQuery public so it can be used by batch processor
   public unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Subst | null {

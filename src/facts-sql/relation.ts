@@ -211,12 +211,15 @@ function findCompatibleGoals(myGoal: GoalRecord, commonGoals: { goal: GoalRecord
 
 /**
  * Collect all WHERE clause values from a set of goals for merging.
+ * Only collect grounded values that are constants in the original goal definitions,
+ * not variables that happen to be bound in the current substitution.
  */
 async function collectAllWhereClauses(goals: GoalRecord[], s: Subst): Promise<Record<string, Set<any>>> {
   const allWhereClauses: Record<string, Set<any>> = {};
   for (const goal of goals) {
-    const walked = await queryUtils.walkAllKeys(goal.queryObj, s);
-    const whereCols = queryUtils.onlyGrounded(walked);
+    // Only collect WHERE clauses from values that are already grounded constants
+    // in the original goal definition, not from bound variables
+    const whereCols = queryUtils.onlyGrounded(goal.queryObj);
     for (const [col, value] of Object.entries(whereCols)) {
       if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
       allWhereClauses[col].add(value);
@@ -527,7 +530,9 @@ export class RegularRelationWithMerger {
         }
         
         // Merge both sets of WHERE clauses
-        const mergedWhereClauses: Record<string, Set<any>> = { ...goalWhereClauses };
+        const mergedWhereClauses: Record<string, Set<any>> = {
+          ...goalWhereClauses 
+        };
         for (const [col, values] of Object.entries(substWhereClauses)) {
           if (mergedWhereClauses[col]) {
             // Combine values from both sources

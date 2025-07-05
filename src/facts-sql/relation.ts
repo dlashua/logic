@@ -470,11 +470,11 @@ export class RegularRelationWithMerger {
             // 1. If batch size > 1, try substitution batching first (more efficient)
             // 2. If that doesn't work or batch size = 1, try goal-level caching
             
-            let goalMergeResults: Map<number, any[]> = new Map();
+            const goalMergeResults = new Map<number, any[]>();
             
             // Strategy 1: Check for cache hits first (always try goal-level caching)
             let cacheHits = 0;
-            let cacheMisses: typeof batch = [];
+            const cacheMisses: typeof batch = [];
             
             for (const subst of batch) {
               if (cancelled) return;

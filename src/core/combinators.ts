@@ -83,27 +83,33 @@ export function disj(g1: Goal, g2: Goal): Goal {
     const disjId = ++groupIdCounter;
     
     const branch1Input$ = input$.map(s => {
-      const parentPath = s.get(SQL_GROUP_PATH) || [];
-      const newPath = [...parentPath, { type: Symbol('disj'), id: disjId, branch: 0 }];
+      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+      const newPath = [...parentPath, {
+        type: Symbol('disj'),
+        id: disjId,
+        branch: 0 
+      }];
       
-      return new Map([
-        ...s,
-        [SQL_GROUP_ID, disjId],
-        [SQL_GROUP_PATH, newPath],
-        [SQL_GROUP_GOALS, []] // Each branch gets its own goals list
-      ]);
+      const newSubst = new Map(s);
+      newSubst.set(SQL_GROUP_ID, disjId);
+      newSubst.set(SQL_GROUP_PATH, newPath);
+      newSubst.set(SQL_GROUP_GOALS, []); // Each branch gets its own goals list
+      return newSubst;
     });
     
     const branch2Input$ = input$.map(s => {
-      const parentPath = s.get(SQL_GROUP_PATH) || [];
-      const newPath = [...parentPath, { type: Symbol('disj'), id: disjId, branch: 1 }];
+      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+      const newPath = [...parentPath, {
+        type: Symbol('disj'),
+        id: disjId,
+        branch: 1 
+      }];
       
-      return new Map([
-        ...s,
-        [SQL_GROUP_ID, disjId],
-        [SQL_GROUP_PATH, newPath],
-        [SQL_GROUP_GOALS, []] // Each branch gets its own goals list
-      ]);
+      const newSubst = new Map(s);
+      newSubst.set(SQL_GROUP_ID, disjId);
+      newSubst.set(SQL_GROUP_PATH, newPath);
+      newSubst.set(SQL_GROUP_GOALS, []); // Each branch gets its own goals list
+      return newSubst;
     });
     
     return g1(branch1Input$).merge(g2(branch2Input$));
@@ -118,15 +124,17 @@ export function conj(g1: Goal, g2: Goal): Goal {
     const conjId = ++groupIdCounter;
     
     const enrichedInput$ = input$.map(s => {
-      const parentPath = s.get(SQL_GROUP_PATH) || [];
-      const newPath = [...parentPath, { type: Symbol('conj'), id: conjId }];
+      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+      const newPath = [...parentPath, {
+        type: Symbol('conj'),
+        id: conjId 
+      }];
       
-      return new Map([
-        ...s,
-        [SQL_GROUP_ID, conjId],
-        [SQL_GROUP_PATH, newPath],
-        [SQL_GROUP_GOALS, [g1, g2]] // Include both goals in the group
-      ]);
+      const newSubst = new Map(s);
+      newSubst.set(SQL_GROUP_ID, conjId);
+      newSubst.set(SQL_GROUP_PATH, newPath);
+      newSubst.set(SQL_GROUP_GOALS, [g1, g2]); // Include both goals in the group
+      return newSubst;
     });
     
     // Stream conjunction: g2 processes results from g1

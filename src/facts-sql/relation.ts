@@ -704,7 +704,7 @@ export class RegularRelationWithMerger {
         // Execute merged query
         const query = buildSelectQuery(this.dbObj, this.table, mergedWhereClauses, allColumns);
         const sqlString = query.toString();
-        this.dbObj.addQuery(sqlString);
+        this.dbObj.addQuery(`${goalId} - ${allGoalsToMerge.map(g => g.goalId)} - ${sqlString}`);
         this.logger.log("DB_QUERY_MERGED", {
           table: this.table,
           sql: sqlString,
@@ -797,7 +797,7 @@ export class RegularRelationWithMerger {
     
     const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, allColumns);
     const sqlString = query.toString();
-    this.dbObj.addQuery(sqlString);
+    this.dbObj.addQuery(`${goalId} - ${sqlString}`);
     this.logger.log("DB_QUERY_BATCH", {
       table: this.table,
       sql: sqlString,

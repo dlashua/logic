@@ -31,7 +31,7 @@ const results = await query()
     or(
       info_number($.kid3, 4),
       info_number($.kid2, 4),
-    )
+    ),
     // not(info_number($.kid3, 4)),
     // parent_kid($.kid3, $.kid4),
     // and(

@@ -81,9 +81,10 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
  */
 export function disj(g1: Goal, g2: Goal): Goal {
   return enrichGroupInput("disj", ++groupIdCounter, [g1, g2], (enrichedInput$) => {
-    const branch1Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 0)(enrichedInput$);
-    const branch2Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 1)(enrichedInput$);
-    return g1(branch1Input$).merge(g2(branch2Input$));
+    // const branch1Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 0)(enrichedInput$);
+    // const branch2Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 1)(enrichedInput$);
+    // return g1(branch1Input$).merge(g2(branch2Input$));
+    return g1(enrichedInput$).merge(g2(enrichedInput$));
   });
 }
 
@@ -91,7 +92,7 @@ export function disj(g1: Goal, g2: Goal): Goal {
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return enrichGroupInput("conj", ++groupIdCounter, [g1, g2], (enrichedInput$) => g1(g2(enrichedInput$)));
+  return enrichGroupInput("conj", ++groupIdCounter, [g1, g2], (enrichedInput$) => g2(g1(enrichedInput$)));
 }
 
 /**
@@ -123,10 +124,12 @@ export const or = (...goals: Goal[]): Goal => {
   }
   return enrichGroupInput("or", ++groupIdCounter, goals, (enrichedInput$) => {
     const orId = groupIdCounter;
-    const branches = goals.map((goal, index) => {
-      const branchInput$ = enrichGroupInput("or", orId, goals, x => x, index)(enrichedInput$);
-      return goal(branchInput$);
-    });
+    // const branches = goals.map((goal, index) => {
+    //   const branchInput$ = enrichGroupInput("or", orId, goals, x => x, index)(enrichedInput$);
+    //   return goal(branchInput$);
+    // });
+    const branches = goals.map((goal) => goal(enrichedInput$)
+    );
     return branches.reduce((acc, branch) => acc.merge(branch));
   });
 };

@@ -16,10 +16,10 @@ import {
 import { SimpleObservable } from "./observable.ts";
 
 // Well-known symbols for SQL query coordination
-export const SQL_GROUP_ID = Symbol('sql-group-id');
-export const SQL_GROUP_PATH = Symbol('sql-group-path');
-export const SQL_INNER_GROUP_GOALS = Symbol('sql-inner-group-goals'); // Goals in immediate group
-export const SQL_OUTER_GROUP_GOALS = Symbol('sql-outer-group-goals'); // Goals across all related groups
+export const GOAL_GROUP_ID = Symbol('goal-group-id');
+export const GOAL_GROUP_PATH = Symbol('goal-group-path');
+export const GOAL_GROUP_INNER_GOALS = Symbol('goal-group-inner-goals'); // Goals in immediate group
+export const GOAL_GROUP_OUTER_GOALS = Symbol('goal-group-outer-goals'); // Goals across all related groups
 
 // Counter for generating unique group IDs
 let groupIdCounter = 0;
@@ -391,7 +391,7 @@ function createEnrichedSubst(
   innerGoals: Goal[],
   branch?: number
 ): Subst {
-  const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+  const parentPath = (s.get(GOAL_GROUP_PATH) as any[]) || [];
   const newPath = [...parentPath, {
     type: Symbol(type),
     id: groupId,
@@ -399,15 +399,15 @@ function createEnrichedSubst(
       branch 
     } : {})
   }];
-  const parentOuterGoals = (s.get(SQL_OUTER_GROUP_GOALS) as Goal[]) || [];
+  const parentOuterGoals = (s.get(GOAL_GROUP_OUTER_GOALS) as Goal[]) || [];
   const goalsInnerGoals = goals.flatMap(goal => (goal as any).innerGoals ? [goal, ...(goal as any).innerGoals] : [goal]);
   const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
   
   const newSubst = new Map(s);
-  newSubst.set(SQL_GROUP_ID, groupId);
-  newSubst.set(SQL_GROUP_PATH, newPath);
-  newSubst.set(SQL_INNER_GROUP_GOALS, innerGoals);
-  newSubst.set(SQL_OUTER_GROUP_GOALS, combinedOuterGoals);
+  newSubst.set(GOAL_GROUP_ID, groupId);
+  newSubst.set(GOAL_GROUP_PATH, newPath);
+  newSubst.set(GOAL_GROUP_INNER_GOALS, innerGoals);
+  newSubst.set(GOAL_GROUP_OUTER_GOALS, combinedOuterGoals);
   return newSubst;
 }
 

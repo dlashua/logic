@@ -5,7 +5,7 @@ import { unify, isVar, walk } from "../core/kernel.ts";
 import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import { queryUtils } from "../shared/utils.ts";
 import { SimpleObservable } from "../core/observable.ts";
-import { SQL_GROUP_ID, SQL_GROUP_PATH, SQL_INNER_GROUP_GOALS, SQL_OUTER_GROUP_GOALS } from "../core/combinators.ts"
+import { GOAL_GROUP_ID, GOAL_GROUP_PATH, GOAL_GROUP_INNER_GOALS, GOAL_GROUP_OUTER_GOALS } from "../core/combinators.ts"
 import { RelationOptions } from "./types.ts";
 import type { DBManager, GoalRecord } from "./index.ts";
 
@@ -608,39 +608,6 @@ export class RegularRelationWithMerger {
   }
 
   /**
-   * Populate cache for goals that can benefit from our query results.
-   */
-  private populateCacheForCompatibleGoals(
-    goalId: number, 
-    substitutions: Subst[], 
-    rows: Record<string, any>[], 
-    cacheCompatibleGoals: GoalRecord[]
-  ): void {
-    if (cacheCompatibleGoals.length === 0) return;
-
-    for (const subst of substitutions) {
-      const passed = getOrCreateRowCache(subst);
-      
-      for (const otherGoal of cacheCompatibleGoals) {
-        if (otherGoal.goalId !== goalId) {
-          passed.set(otherGoal.goalId, rows);
-          this.logger.log("CACHED_FOR_OTHER_GOAL", {
-            myGoalId: goalId,
-            otherGoalId: otherGoal.goalId,
-            rowCount: rows.length,
-            reason: "cache-beneficiary",
-            otherGoalQueryObj: otherGoal.queryObj,
-            availableColumns: rows.length > 0 ? Object.keys(rows[0]) : []
-          });
-        }
-      }
-      
-      // Also populate cache for my goal in case other goals need it
-      passed.set(goalId, rows);
-    }
-  }
-
-  /**
    * Process cached rows by unifying them with the query and emitting results.
    */
   private async processCachedRows(
@@ -682,30 +649,62 @@ export class RegularRelationWithMerger {
     queryObj: Record<string, Term>, 
     rows: Record<string, any>[], 
     substitutions: Subst[], 
-    observer: any
+    observer: any,
+    cacheCompatibleGoals: GoalRecord[]
   ): Promise<void> {
     for (const subst of substitutions) {
       for (const row of rows) {
         const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
         if (unifiedSubst) {
-          // Cache results for other compatible goals
-          const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
-            this.dbObj, 
-            unifiedSubst, 
-            goalId, 
-            row, 
-            this.logger
-          );
-            
+          const passed = getOrCreateRowCache(unifiedSubst);
+          // For each cache-compatible goal, cache ALL rows that match the future goal's queryObj under the current substitution
+          for (const otherGoal of cacheCompatibleGoals) {
+            if (otherGoal.goalId === goalId) continue; // Don't cache for our own goal
+            // Determine which columns are actually constraining (bound or literal)
+            let hasConstraint = false;
+            const matchingRows = rows.filter(candidateRow => {
+              for (const [col, term] of Object.entries(otherGoal.queryObj)) {
+                if (isVar(term)) {
+                  const bound = unifiedSubst.get(term.id);
+                  if (bound !== undefined) {
+                    hasConstraint = true;
+                    if (candidateRow[col] !== bound) {
+                      return false;
+                    }
+                  }
+                } else {
+                  hasConstraint = true;
+                  if (candidateRow[col] !== term) {
+                    return false;
+                  }
+                }
+              }
+              return true;
+            });
+            // Only set the cache if there was a constraint and not all rows matched
+            if (hasConstraint && matchingRows.length !== rows.length) {
+              passed.set(otherGoal.goalId, matchingRows);
+              this.logger.log("CACHED_FOR_OTHER_GOAL", {
+                myGoalId: goalId,
+                otherGoalId: otherGoal.goalId,
+                rowCount: matchingRows.length,
+                reason: "cache-beneficiary",
+                otherGoalQueryObj: otherGoal.queryObj,
+                availableColumns: matchingRows.length > 0 ? Object.keys(matchingRows[0]) : []
+              });
+            }
+          }
+          // Also populate cache for my goal in case other goals need it
+          passed.set(goalId, [row]);
+
           this.logger.log("UNIFY_SUCCESS", {
             goalId,
             queryObj,
             row,
             wasFromCache: false,
-            updatedSubst,
+            updatedSubst: unifiedSubst,
           });
-          
-          observer.next(new Map(updatedSubst));
+          observer.next(new Map(unifiedSubst));
           await new Promise(resolve => nextTick(resolve));
         }
       }
@@ -728,8 +727,8 @@ export class RegularRelationWithMerger {
 
   async findRelatedGoals(myGoal: GoalRecord, s: Subst) {
     // Get both inner and outer group goals from the substitution
-    const innerGroupGoals = s.get(SQL_INNER_GROUP_GOALS) as Goal[] || [];
-    const outerGroupGoals = s.get(SQL_OUTER_GROUP_GOALS) as Goal[] || [];
+    const innerGroupGoals = s.get(GOAL_GROUP_INNER_GOALS) as Goal[] || [];
+    const outerGroupGoals = s.get(GOAL_GROUP_OUTER_GOALS) as Goal[] || [];
     
     // For query merging, use inner group goals (same logical group)
     // For caching, use outer group goals (cross-branch sharing)
@@ -819,7 +818,15 @@ export class RegularRelationWithMerger {
             
             // Use extracted function to process fresh query results
             const rows = await this.executeQueryForSubstitutions(goalId, queryObj, batch);
-            await this.processFreshRows(goalId, queryObj, rows, batch, observer);
+            // Find cache-compatible goals for this batch
+            const representativeSubst = batch[0];
+            const myGoal = this.dbObj.getGoalById(goalId);
+            let cacheCompatibleGoals: GoalRecord[] = [];
+            if (myGoal && representativeSubst) {
+              const relatedGoals = await this.findRelatedGoals(myGoal, representativeSubst);
+              cacheCompatibleGoals = this.findCacheCompatibleGoals(myGoal, relatedGoals, representativeSubst);
+            }
+            await this.processFreshRows(goalId, queryObj, rows, batch, observer, cacheCompatibleGoals);
             
             batchIndex++;
             this.logger.log("FLUSH_BATCH_COMPLETE", {
@@ -838,7 +845,7 @@ export class RegularRelationWithMerger {
             });
             if (cancelled) return;
             if (!batchKeyUpdated) {
-              const groupId = subst.get(SQL_GROUP_ID) as number | undefined;
+              const groupId = subst.get(GOAL_GROUP_ID) as number | undefined;
               batchKeyUpdated = true;
               if (groupId !== undefined) {
                 registerGoalInGroup(goalsByGroupId, groupId, goalId);
@@ -942,9 +949,6 @@ export class RegularRelationWithMerger {
     
     // Step 4: Build and execute query (merged or single)
     const rows = await this.buildAndExecuteQuery(goalId, queryObj, substitutions, mergeCompatibleGoals, cacheCompatibleGoals);
-    
-    // Step 5: Populate cache for compatible goals
-    this.populateCacheForCompatibleGoals(goalId, substitutions, rows, cacheCompatibleGoals);
     
     return rows;
   }

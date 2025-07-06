@@ -80,19 +80,14 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
  * Logical disjunction (OR).
  */
 export function disj(g1: Goal, g2: Goal): Goal {
-  return enrichGroupInput("disj", ++groupIdCounter, [g1, g2], (enrichedInput$) => {
-    // const branch1Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 0)(enrichedInput$);
-    // const branch2Input$ = enrichGroupInput("disj", groupIdCounter, [g1, g2], x => x, 1)(enrichedInput$);
-    // return g1(branch1Input$).merge(g2(branch2Input$));
-    return g1(enrichedInput$).merge(g2(enrichedInput$));
-  });
+  return or(g1, g2);
 }
 
 /**
  * Logical conjunction (AND).
  */
 export function conj(g1: Goal, g2: Goal): Goal {
-  return enrichGroupInput("conj", ++groupIdCounter, [g1, g2], (enrichedInput$) => g2(g1(enrichedInput$)));
+  return and(g1, g2);
 }
 
 /**
@@ -122,16 +117,62 @@ export const or = (...goals: Goal[]): Goal => {
   if (goals.length === 1) {
     return goals[0];
   }
-  return enrichGroupInput("or", ++groupIdCounter, goals, (enrichedInput$) => {
-    const orId = groupIdCounter;
-    // const branches = goals.map((goal, index) => {
-    //   const branchInput$ = enrichGroupInput("or", orId, goals, x => x, index)(enrichedInput$);
-    //   return goal(branchInput$);
-    // });
-    const branches = goals.map((goal) => goal(enrichedInput$)
-    );
-    return branches.reduce((acc, branch) => acc.merge(branch));
-  });
+  
+  return (input$: SimpleObservable<Subst>) => {
+    const groupId = ++groupIdCounter;
+    
+    // Collect all input substitutions first
+    const collectedInputs: Subst[] = [];
+    let inputCompleted = false;
+    
+    return new SimpleObservable<Subst>(observer => {
+      const subscriptions: (() => void)[] = [];
+      
+      // First, collect all input substitutions
+      const inputSub = input$.subscribe({
+        next: (s) => {
+          collectedInputs.push(s);
+        },
+        error: observer.error,
+        complete: () => {
+          inputCompleted = true;
+          
+          // Now execute each goal with a stream of enriched substitutions
+          let completedGoals = 0;
+          
+          goals.forEach((goal, index) => {
+            const enrichedInputs = collectedInputs.map(s => 
+              createEnrichedSubst(s, "or", groupId, goals, [goal], index)
+            );
+            
+            const enrichedStream = new SimpleObservable<Subst>(goalObserver => {
+              enrichedInputs.forEach(enrichedSubst => goalObserver.next(enrichedSubst));
+              goalObserver.complete?.();
+            });
+            
+            const goalSub = goal(enrichedStream).subscribe({
+              next: observer.next,
+              error: observer.error,
+              complete: () => {
+                completedGoals++;
+                if (completedGoals === goals.length) {
+                  observer.complete?.();
+                }
+              }
+            });
+            
+            subscriptions.push(() => goalSub.unsubscribe?.());
+          });
+        }
+      });
+      
+      subscriptions.push(() => inputSub.unsubscribe?.());
+      
+      return () => {
+        subscriptions.forEach(unsub => unsub());
+      };
+    });
+  };
 };
 
 /**
@@ -340,45 +381,50 @@ export function run<T>(
 }
 
 /**
- * Helper to enrich input$ with group metadata for combinators, and apply a function to the enriched input$.
- * @param type - The group type ('and', 'or', 'conj', 'disj')
- * @param groupId - The unique group id
- * @param goals - The goals in this group (array)
- * @param fn - Function to apply to the enriched input$
- * @param branch - (optional) branch index for or/disj
- * @returns A function that takes input$ and returns the result of fn(enrichedInput$)
+ * Creates an enriched substitution with group metadata
+ */
+function createEnrichedSubst(
+  s: Subst,
+  type: string,
+  groupId: number,
+  goals: Goal[],
+  innerGoals: Goal[],
+  branch?: number
+): Subst {
+  const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
+  const newPath = [...parentPath, {
+    type: Symbol(type),
+    id: groupId,
+    ...(branch !== undefined ? { branch } : {})
+  }];
+  const parentOuterGoals = (s.get(SQL_OUTER_GROUP_GOALS) as Goal[]) || [];
+  const goalsInnerGoals = goals.flatMap(goal => (goal as any).innerGoals ? [goal, ...(goal as any).innerGoals] : [goal]);
+  const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
+  
+  const newSubst = new Map(s);
+  newSubst.set(SQL_GROUP_ID, groupId);
+  newSubst.set(SQL_GROUP_PATH, newPath);
+  newSubst.set(SQL_INNER_GROUP_GOALS, innerGoals);
+  newSubst.set(SQL_OUTER_GROUP_GOALS, combinedOuterGoals);
+  return newSubst;
+}
+
+/**
+ * Unified helper for enriching input with group metadata
  */
 function enrichGroupInput(
   type: string,
   groupId: number,
   goals: Goal[],
-  fn: (enrichedInput$: SimpleObservable<Subst>) => any,
-  branch?: number
+  fn: (enrichedInput$: SimpleObservable<Subst>) => any
 ) {
   const newInput$ = (input$: SimpleObservable<Subst>) => {
-    const enrichedInput$ = input$.map(s => {
-      const parentPath = (s.get(SQL_GROUP_PATH) as any[]) || [];
-      const newPath = [...parentPath, {
-        type: Symbol(type),
-        id: groupId,
-        ...(branch !== undefined ? {
-          branch
-        } : {})
-      }];
-      const parentOuterGoals = (s.get(SQL_OUTER_GROUP_GOALS) as Goal[]) || [];
-      const goalsInnerGoals = goals.flatMap(goal => goal.innerGoals ? [goal, ...goal.innerGoals] : [goal]);
-      const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
-      // const combinedOuterGoals = [...parentOuterGoals, ...goalsInnerGoals];
-      const newSubst = new Map(s);
-      newSubst.set(SQL_GROUP_ID, groupId);
-      newSubst.set(SQL_GROUP_PATH, newPath);
-      newSubst.set(SQL_INNER_GROUP_GOALS, goals);
-      newSubst.set(SQL_OUTER_GROUP_GOALS, combinedOuterGoals);
-      return newSubst;
-    });
+    const enrichedInput$ = input$.map(s => 
+      createEnrichedSubst(s, type, groupId, goals, goals)
+    );
     return fn(enrichedInput$);
   };
-  newInput$.innerGoals = goals;
-  newInput$.displayName = `${type}_${groupId}`; // For better debugging
+  (newInput$ as any).innerGoals = goals;
+  newInput$.displayName = `${type}_${groupId}`;
   return newInput$;
 }

@@ -526,14 +526,11 @@ export class RegularRelationWithMerger {
         });
         const subscription = input$.subscribe({
           next: async (subst: Subst) => {
-            if(DEBUG_GOALS.includes(goalId)) {
-              this.logger.log("GOAL_NEXT", {
-                goalId,
-                batchIndex,
-                input_complete,
-                subst,
-              });
-            }
+            this.logger.log("GOAL_NEXT", {
+              goalId,
+              batchIndex,
+              input_complete,
+            });
             if (cancelled) return;
             if (!batchKeyUpdated) {
               const groupId = subst.get(SQL_GROUP_ID) as number | undefined;

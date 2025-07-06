@@ -131,3 +131,16 @@ export function groundo(term: Term): Goal {
 export function nonGroundo(term: Term): Goal {
   return not(groundo(term));
 }
+
+/**
+ * A goal that logs each substitution it sees along with a message.
+ */
+export function substLog(msg: string): Goal {
+  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+    new SimpleObservable<Subst>((observer) => {
+      console.log(`[substLog] ${msg}:`, s);
+      observer.next(s);
+      observer.complete?.();
+    })
+  );
+}

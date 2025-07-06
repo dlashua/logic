@@ -3,7 +3,7 @@ import { walk } from "../core/kernel.ts";
 import { eq, and, or } from "../core/combinators.ts";
 import { createLogicVarProxy, query } from "../query.ts";
 import { membero } from "../relations/lists.ts";
-import { not } from "../relations/control.ts";
+import { not, substLog } from "../relations/control.ts";
 import { familytree, info_color, info_number, relDB } from "./familytree-sql-facts.ts";
 
 const {
@@ -22,8 +22,9 @@ const results = await query()
     // membero($.top, [
     //   "robert", "roy_long"
     // ]),
-
-    and(
+    substLog("top"),
+    // substLog("first and"),
+    and (
       parent_kid($.top, $.kid1),
       parent_kid($.kid1, $.kid2),
       parent_kid($.kid2, $.kid3),

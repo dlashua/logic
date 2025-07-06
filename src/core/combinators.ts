@@ -118,50 +118,6 @@ export const or = (...goals: Goal[]): Goal => {
     const sharedInput$ = input$.share();
     const goalsRun = goals.map(goal => goal(sharedInput$));
     return goalsRun.reduce((acc, goal) => acc.merge(goal));
-
-    const groupId = ++groupIdCounter;
-    // Collect all input substitutions first
-    const collectedInputs: Subst[] = [];
-    let inputCompleted = false;
-    return new SimpleObservable<Subst>(observer => {
-      const subscriptions: (() => void)[] = [];
-      // First, collect all input substitutions
-      const inputSub = input$.subscribe({
-        next: (s) => {
-          collectedInputs.push(s);
-        },
-        error: observer.error,
-        complete: () => {
-          inputCompleted = true;
-          // Now execute each goal with a stream of enriched substitutions
-          let completedGoals = 0;
-          goals.forEach((goal, index) => {
-            const enrichedInputs = collectedInputs.map(s => 
-              createEnrichedSubst(s, "or_in", groupId, [], [goal], index)
-            );
-            const enrichedStream = new SimpleObservable<Subst>(goalObserver => {
-              enrichedInputs.forEach(enrichedSubst => goalObserver.next(enrichedSubst));
-              goalObserver.complete?.();
-            });
-            const goalSub = goal(enrichedStream).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: () => {
-                completedGoals++;
-                if (completedGoals === goals.length) {
-                  observer.complete?.();
-                }
-              }
-            });
-            subscriptions.push(() => goalSub.unsubscribe?.());
-          });
-        }
-      });
-      subscriptions.push(() => inputSub.unsubscribe?.());
-      return () => {
-        subscriptions.forEach(unsub => unsub());
-      };
-    });
   });
 };
 

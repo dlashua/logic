@@ -1,12 +1,7 @@
 import type { Term, Subst } from "../core/types.ts";
 import { isVar, walk, unify } from "../core/kernel.ts";
 import { queryUtils } from "../shared/utils.ts";
-import type { 
-  GoalRecord, 
-  WhereCondition,
-  QueryParams,
-  DataRow
-} from "./types.ts";
+import type { GoalRecord, WhereCondition, QueryParams, DataRow } from "./types.ts"
 
 /**
  * Helper functions for AbstractRelation
@@ -156,7 +151,10 @@ export function collectColumnsFromGoals(
   const additionalColumns: string[] = []; // Could be from options
   const columns = [...new Set([...allGoalColumns, ...additionalColumns])];
   
-  return { columns, additionalColumns };
+  return {
+    columns,
+    additionalColumns 
+  };
 }
 
 /**

@@ -88,7 +88,7 @@ const q = makeQuery();
 const results = await q.toArray();
 
 console.dir({
-  // allres: results,
+  allres: results,
   oneres: results.filter(x => x.person === "celeste"),
   rescnt: results.length,
 }, {

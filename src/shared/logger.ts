@@ -1,7 +1,7 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: true,
+  enabled: false,
   allowedIds: new Set<string>([
     // "FLUSH_BATCH",
     // "FLUSH_BATCH_COMPLETE",

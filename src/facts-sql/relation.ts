@@ -1,11 +1,18 @@
 import { nextTick } from "process";
 import { log } from "console";
 import type { Term, Subst, Goal, Observable } from "../core/types.ts";
-import { unify, isVar, walk } from "../core/kernel.ts";
+import {
+  unify,
+  isVar,
+  walk,
+  GOAL_GROUP_ID,
+  GOAL_GROUP_PATH,
+  GOAL_GROUP_CONJ_GOALS,
+  GOAL_GROUP_ALL_GOALS
+} from "../core/kernel.ts"
 import { Logger, getDefaultLogger } from "../shared/logger.ts";
 import { queryUtils } from "../shared/utils.ts";
 import { SimpleObservable } from "../core/observable.ts";
-import { GOAL_GROUP_ID, GOAL_GROUP_PATH, GOAL_GROUP_INNER_GOALS, GOAL_GROUP_OUTER_GOALS } from "../core/combinators.ts"
 import { RelationOptions } from "./types.ts";
 import type { DBManager, GoalRecord } from "./index.ts";
 
@@ -800,8 +807,8 @@ export class RegularRelationWithMerger {
 
   async findRelatedGoals(myGoal: GoalRecord, s: Subst) {
     // Get both inner and outer group goals from the substitution
-    const innerGroupGoals = s.get(GOAL_GROUP_INNER_GOALS) as Goal[] || [];
-    const outerGroupGoals = s.get(GOAL_GROUP_OUTER_GOALS) as Goal[] || [];
+    const innerGroupGoals = s.get(GOAL_GROUP_CONJ_GOALS) as Goal[] || [];
+    const outerGroupGoals = s.get(GOAL_GROUP_ALL_GOALS) as Goal[] || [];
     
     // For query merging, use inner group goals (same logical group)
     // For caching, use outer group goals (cross-branch sharing)

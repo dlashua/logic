@@ -6,8 +6,8 @@ import {
   Term,
   Observable
 } from "../core/types.ts"
-import { walk, isVar } from "../core/kernel.ts";
-import { eq , enrichGroupInput } from "../core/combinators.ts";
+import { walk, isVar, enrichGroupInput } from "../core/kernel.ts";
+import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
 function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {

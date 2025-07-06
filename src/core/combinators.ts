@@ -11,15 +11,11 @@ import {
   lvar,
   walk,
   isVar,
-  liftGoal
+  liftGoal,
+  enrichGroupInput,
+  createEnrichedSubst
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
-
-// Well-known symbols for SQL query coordination
-export const GOAL_GROUP_ID = Symbol('goal-group-id');
-export const GOAL_GROUP_PATH = Symbol('goal-group-path');
-export const GOAL_GROUP_INNER_GOALS = Symbol('goal-group-inner-goals'); // Goals in immediate group
-export const GOAL_GROUP_OUTER_GOALS = Symbol('goal-group-outer-goals'); // Goals across all related groups
 
 // Counter for generating unique group IDs
 let groupIdCounter = 0;
@@ -376,80 +372,3 @@ export function run<T>(
   });
 }
 
-/**
- * Creates an enriched substitution with group metadata
- */
-function createEnrichedSubst(
-  s: Subst,
-  type: string,
-  groupId: number,
-  conjGoals: Goal[],
-  disjGoals: Goal[],
-  branch?: number
-): Subst {
-  const parentPath = (s.get(GOAL_GROUP_PATH) as any[]) || [];
-  const newPath = [...parentPath, {
-    type: Symbol(type),
-    id: groupId,
-    ...(branch !== undefined ? {
-      branch 
-    } : {})
-  }];
-  const parentOuterGoals = (s.get(GOAL_GROUP_OUTER_GOALS) as Goal[]) || [];
-  // Recursively collect all innerGoals from the combined goals array
-  function collectAllInnerConjGoals(goals: Goal[]): Goal[] {
-    return goals.flatMap(goal => {
-      const innerGoals = (goal as any)?.conjGoals ?? [] as Goal[];
-      if (innerGoals && innerGoals.length > 0) {
-        return [...collectAllInnerConjGoals(innerGoals)];
-      } else {
-        return [goal];
-      }
-    });
-  }
-  function collectAllInnerGoals(goals: Goal[]): Goal[] {
-    return goals.flatMap(goal => {
-      const innerConjGoals = (goal as any)?.conjGoals ?? [] as Goal[];
-      const innerDisjGoals = (goal as any)?.disjGoals ?? [] as Goal[];
-      const innerGoals = [...(new Set([...innerConjGoals, ...innerDisjGoals]))];
-      if (innerGoals && innerGoals.length > 0) {
-        return [...collectAllInnerGoals(innerGoals)];
-      } else {
-        return [goal];
-      }
-    });
-  }
-
-  const allGoals = [...conjGoals, ...disjGoals];
-  const conjInnerConj = collectAllInnerConjGoals(conjGoals);
-  const disjInnerAll = collectAllInnerGoals(allGoals);
-
-  const newSubst = new Map(s);
-  newSubst.set(GOAL_GROUP_ID, groupId);
-  newSubst.set(GOAL_GROUP_PATH, newPath);
-  newSubst.set(GOAL_GROUP_INNER_GOALS, [...(new Set([...conjGoals, ...conjInnerConj]))]);
-  newSubst.set(GOAL_GROUP_OUTER_GOALS, [...(new Set([...parentOuterGoals, ...conjGoals, ...disjGoals, ...disjInnerAll]))]);
-  return newSubst;
-}
-
-/**
- * Unified helper for enriching input with group metadata
- */
-export function enrichGroupInput(
-  type: string,
-  groupId: number,
-  conjGoals: Goal[],
-  disjGoals: Goal[],
-  fn: (enrichedInput$: SimpleObservable<Subst>) => any
-) {
-  const newInput$ = (input$: SimpleObservable<Subst>) => {
-    const enrichedInput$ = input$.map(s => 
-      createEnrichedSubst(s, type, groupId, conjGoals, disjGoals)
-    );
-    return fn(enrichedInput$);
-  };
-  (newInput$ as any).conjGoals = conjGoals;
-  (newInput$ as any).disjGoals = disjGoals;
-  newInput$.displayName = `${type}_${groupId}`;
-  return newInput$;
-}

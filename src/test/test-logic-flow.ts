@@ -29,15 +29,15 @@ const results = await query()
     //   "robert", "louis"
     // ]),
     substLog("top"),
+    parent_kid($.parent, $.person),
     info_number($.person, 4),
     // substLog("after info_number"),
 
-    parent_kid($.parent, $.person),
     // substLog("after parent_kid"),
     or(
       info_color($.person, "blue"),
       info_color($.person, "black"),
-      info_color($.person, "orange"),
+      info_color($.person, "pink"),
     ),
     // substLog("after or"),
 

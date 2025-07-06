@@ -8,9 +8,10 @@ import {
   isCons,
   isLogicList,
   isNil,
-  logicListToArray
+  logicListToArray,
+  enrichGroupInput
 } from "../core/kernel.ts"
-import { and, eq , enrichGroupInput } from "../core/combinators.ts";
+import { and, eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
 /**

@@ -12,6 +12,7 @@ const {
 
 const log = console.log;
 
+const start = Date.now();
 const results = await query()
   .where(($) => [
 
@@ -53,8 +54,9 @@ const results = await query()
 
   ]).toArray();
 
-
+const elapsed = Date.now() - start;
 console.log("queries", relDB.getQueries());
 log("results", results);
+log("elapsed time", elapsed);
 
 process.exit(0);

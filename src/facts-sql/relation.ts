@@ -608,7 +608,27 @@ export class RegularRelationWithMerger {
   }
 
   /**
-   * Process cached rows by unifying them with the query and emitting results.
+   * Helper to format the sql-row-cache for logging
+   */
+  private formatRowCacheForLog(rowCache: unknown): Record<number, any> {
+    const result: Record<number, any> = {};
+    if (!(rowCache instanceof Map)) return result;
+    for (const [goalId, rows] of rowCache.entries()) {
+      if (Array.isArray(rows)) {
+        if (rows.length <= 5) {
+          result[goalId] = rows;
+        } else {
+          result[goalId] = {
+            count: rows.length
+          };
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Process cached rows by filtering them to match grounded terms before unification.
    */
   private async processCachedRows(
     goalId: number, 
@@ -617,9 +637,18 @@ export class RegularRelationWithMerger {
     subst: Subst, 
     observer: any
   ): Promise<void> {
-    for (const row of cachedRows) {
+    // Filter cached rows to only those that match grounded terms in the current substitution
+    const filteredRows = cachedRows.filter(row => {
+      for (const [col, term] of Object.entries(queryObj)) {
+        const grounded = walk(term, subst);
+        if (!isVar(grounded) && row[col] !== grounded) {
+          return false;
+        }
+      }
+      return true;
+    });
+    for (const row of filteredRows) {
       const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
-      
       if (unifiedSubst) {
         // Preserve cache entries for other goals when processing cache hits
         const originalCache = getOrCreateRowCache(subst);
@@ -627,14 +656,20 @@ export class RegularRelationWithMerger {
         preservedCache.delete(goalId); // Only remove our own cache
         unifiedSubst.set(ROW_CACHE, preservedCache);
 
-        this.logger.log("UNIFY_SUCCESS", {
-          goalId,
-          queryObj,
-          row,
-          wasFromCache: true,
-          unifiedSubst,
+        // Format the substitution for logging
+        this.logger.log("UNIFY_SUCCESS", () => {
+          const logSubst = new Map(unifiedSubst);
+          if (logSubst.has(ROW_CACHE)) {
+            logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+          }
+          return {
+            goalId,
+            queryObj,
+            row,
+            wasFromCache: true,
+            unifiedSubst: logSubst,
+          };
         });
-        
         observer.next(new Map(unifiedSubst));
         await new Promise(resolve => nextTick(resolve));
       }
@@ -653,56 +688,39 @@ export class RegularRelationWithMerger {
     cacheCompatibleGoals: GoalRecord[]
   ): Promise<void> {
     for (const subst of substitutions) {
+      // Remove any existing cache entry for the current goalId before populating
+      const cache = getOrCreateRowCache(subst);
+      cache.delete(goalId);
       for (const row of rows) {
         const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
         if (unifiedSubst) {
           const passed = getOrCreateRowCache(unifiedSubst);
-          // For each cache-compatible goal, cache ALL rows that match the future goal's queryObj under the current substitution
+          // For each cache-compatible goal, cache ALL rows (no filtering)
           for (const otherGoal of cacheCompatibleGoals) {
             if (otherGoal.goalId === goalId) continue; // Don't cache for our own goal
-            // Determine which columns are actually constraining (bound or literal)
-            let hasConstraint = false;
-            const matchingRows = rows.filter(candidateRow => {
-              for (const [col, term] of Object.entries(otherGoal.queryObj)) {
-                if (isVar(term)) {
-                  const bound = unifiedSubst.get(term.id);
-                  if (bound !== undefined) {
-                    hasConstraint = true;
-                    if (candidateRow[col] !== bound) {
-                      return false;
-                    }
-                  }
-                } else {
-                  hasConstraint = true;
-                  if (candidateRow[col] !== term) {
-                    return false;
-                  }
-                }
-              }
-              return true;
+            passed.set(otherGoal.goalId, rows);
+            this.logger.log("CACHED_FOR_OTHER_GOAL", {
+              myGoalId: goalId,
+              otherGoalId: otherGoal.goalId,
+              rowCount: rows.length,
+              reason: "cache-beneficiary",
+              otherGoalQueryObj: otherGoal.queryObj,
+              availableColumns: rows.length > 0 ? Object.keys(rows[0]) : []
             });
-            // Only set the cache if there was a constraint and not all rows matched
-            if (hasConstraint && matchingRows.length !== rows.length) {
-              passed.set(otherGoal.goalId, matchingRows);
-              this.logger.log("CACHED_FOR_OTHER_GOAL", {
-                myGoalId: goalId,
-                otherGoalId: otherGoal.goalId,
-                rowCount: matchingRows.length,
-                reason: "cache-beneficiary",
-                otherGoalQueryObj: otherGoal.queryObj,
-                availableColumns: matchingRows.length > 0 ? Object.keys(matchingRows[0]) : []
-              });
-            }
           }
-          // Also populate cache for my goal in case other goals need it
-          passed.set(goalId, [row]);
 
-          this.logger.log("UNIFY_SUCCESS", {
-            goalId,
-            queryObj,
-            row,
-            wasFromCache: false,
-            updatedSubst: unifiedSubst,
+          this.logger.log("UNIFY_SUCCESS", () => {
+            const logSubst = new Map(unifiedSubst);
+            if (logSubst.has(ROW_CACHE)) {
+              logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+            }
+            return {
+              goalId,
+              queryObj,
+              row,
+              wasFromCache: false,
+              updatedSubst: logSubst,
+            };
           });
           observer.next(new Map(unifiedSubst));
           await new Promise(resolve => nextTick(resolve));

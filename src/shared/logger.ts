@@ -1,7 +1,7 @@
 import util from 'node:util';
 
 const DEFAULT_CONFIG = {
-  enabled: true,
+  enabled: false,
   allowedIds: new Set<string>([
     // "FLUSH_BATCH",
     "FLUSH_BATCH_COMPLETE",
@@ -88,17 +88,22 @@ export interface LoggerConfig {
 export class Logger {
   constructor(private config: LoggerConfig) {}
 
-  log(id: string, data: Record<string, any> | string): void {
+  log(id: string, data: Record<string, any> | string | (() => Record<string, any> | string)): void {
     if (!this.config.enabled) return;
-    
     if (this.config.deniedIds.has(id)) return;
-    
     if (this.config.allowedIds.size > 0 && !this.config.allowedIds.has(id)) return;
-    
-    if(typeof data === "string") {
-      console.log(`[${id}] ${data}`);
+
+    let out: Record<string, any> | string;
+    if (typeof data === "function") {
+      out = data();
     } else {
-      console.log(`[${id}]`, util.inspect(data, {
+      out = data;
+    }
+
+    if(typeof out === "string") {
+      console.log(`[${id}] ${out}`);
+    } else {
+      console.log(`[${id}]`, util.inspect(out, {
         depth: null,
         colors: true 
       }));

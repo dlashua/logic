@@ -1,3 +1,4 @@
+import util from "node:util";
 import {
   ConsNode,
   Goal,
@@ -37,7 +38,7 @@ let notGroupId = 0;
 
 export function not(goal: Goal): Goal {
   const groupId = ++notGroupId;
-  return enrichGroupInput("not", groupId, [], (input$: Observable<Subst>) =>
+  return enrichGroupInput("not", groupId, [], [goal],(input$: Observable<Subst>) =>
     toSimple(input$).flatMap((s: Subst) => {
       let found = false;
       return new SimpleObservable<Subst>((observer) => {
@@ -143,7 +144,10 @@ export function nonGroundo(term: Term): Goal {
 export function substLog(msg: string): Goal {
   return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
     new SimpleObservable<Subst>((observer) => {
-      console.log(`[substLog] ${msg}:`, s);
+      console.log(`[substLog] ${msg}:`, util.inspect(s, {
+        depth: null,
+        colors: true 
+      }));
       observer.next(s);
       observer.complete?.();
     })

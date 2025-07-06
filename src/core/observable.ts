@@ -239,12 +239,64 @@ export class SimpleObservable<T> implements Observable<T> {
     });
   }
 
+  share(): SimpleObservable<T> {
+    let observers: Observer<T>[] = [];
+    let subscription: Subscription | null = null;
+    let refCount = 0;
+    let completed = false;
+    let lastError: any = null;
+
+    return new SimpleObservable<T>((observer) => {
+      if (completed) {
+        if (lastError !== null) {
+          observer.error?.(lastError);
+        } else {
+          observer.complete?.();
+        }
+        return;
+      }
+
+      observers.push(observer);
+      refCount++;
+
+      if (subscription === null) {
+        subscription = this.subscribe({
+          next: (value) => {
+            observers.slice().forEach(o => o.next?.(value));
+          },
+          error: (err) => {
+            lastError = err;
+            completed = true;
+            observers.slice().forEach(o => o.error?.(err));
+            observers = [];
+          },
+          complete: () => {
+            completed = true;
+            observers.slice().forEach(o => o.complete?.());
+            observers = [];
+          }
+        });
+      }
+
+      return () => {
+        observers = observers.filter(o => o !== observer);
+        refCount--;
+        if (refCount === 0 && subscription) {
+          subscription.unsubscribe();
+          subscription = null;
+        }
+      };
+    });
+  }
+
   merge(other: SimpleObservable<T>): SimpleObservable<T> {
     return new SimpleObservable<T>((observer) => {
       let completed = 0;
       const subscriptions = [
         this.subscribe({
-          next: observer.next,
+          next: (r) => {
+            observer.next(r)
+          },
           error: observer.error,
           complete: () => {
             completed++;
@@ -254,7 +306,9 @@ export class SimpleObservable<T> implements Observable<T> {
           }
         }),
         other.subscribe({
-          next: observer.next,
+          next: (r) => {
+            observer.next(r)
+          },
           error: observer.error,
           complete: () => {
             completed++;

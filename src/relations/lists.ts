@@ -22,7 +22,7 @@ let memberoGroupId = 0;
 export function membero(x: Term, list: Term): Goal {
   const groupId = ++memberoGroupId;
   // @ts-expect-error
-  return enrichGroupInput("membero", groupId, [membero], (input$) =>
+  return enrichGroupInput("membero", groupId, [membero], [], (input$) =>
     new SimpleObservable<Subst>((observer) => {
       const subscriptions: any[] = [];
       let cancelled = false;

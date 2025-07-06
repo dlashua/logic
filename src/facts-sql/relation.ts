@@ -134,11 +134,10 @@ function getOrCreateRowCache(s: Map<string | Symbol, any>): Map<number, Record<s
 /**
  * Get and remove the cache for a goalId from the substitution's ROW_CACHE.
  */
-function takeCache(goalId: number, s: Subst): Record<string, any>[] | null {
+function getCacheForGoalId(goalId: number, s: Subst): Record<string, any>[] | null {
   const cache = getOrCreateRowCache(s);
   if (cache.has(goalId)) {
     const rows = cache.get(goalId) as Record<string, any>[];
-    cache.delete(goalId);
     return rows;
   }
   return null;
@@ -183,9 +182,9 @@ function createUpdatedSubstWithCacheForOtherGoals(dbObj: DBManager, s: Subst, my
  * For caching, we can be more permissive than merging - goals can benefit
  * from each other's cached results as long as they share some variable mappings.
  */
-function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord, subst: Subst): boolean {
+function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord, subst: Subst): string {
   if (myGoal.table !== otherGoal.table) {
-    return false;
+    return "wrong_table";
   }
 
   const myColumns = Object.keys(myGoal.queryObj);
@@ -208,26 +207,26 @@ function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord, subst:
           if(myValue === otherValue) {
             matches++;
           } else {
-            return false;
+            return "value_not_match";
           }
         } else {
-          return false;
+          return "term_to_var";
         }
       } else {
         // myGoal has a variable, otherGoal just needs a variable in this column
         if (isVar(otherValue)) {
           matches++;
         } else {
-          return false;
+          return "var_to_term";
         }
       }
     }
   }
 
   if(matches > 0) {
-    return true;
+    return "match";
   }
-  return false;
+  return "no_matches";
 }
 
 /**
@@ -369,7 +368,7 @@ export class RegularRelationWithMerger {
         cacheCompatible: isCompatible
       });
       
-      if (isCompatible) {
+      if (isCompatible === "match") {
         cacheBeneficiaryGoals.push(goal);
       }
     }
@@ -647,6 +646,20 @@ export class RegularRelationWithMerger {
       }
       return true;
     });
+
+    this.logger.log("DB_NO_ROWS", () => {
+      const logSubst = new Map(subst);
+      if (logSubst.has(ROW_CACHE)) {
+        logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+      }
+      return {
+        goalId,
+        queryObj,
+        wasFromCache: true,
+        updatedSubst: logSubst,
+      };
+    });
+
     for (const row of filteredRows) {
       const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
       if (unifiedSubst) {
@@ -672,6 +685,20 @@ export class RegularRelationWithMerger {
         });
         observer.next(new Map(unifiedSubst));
         await new Promise(resolve => nextTick(resolve));
+      } else {
+        this.logger.log("UNIFY_FAILURE", () => {
+          const logSubst = new Map(unifiedSubst);
+          if (logSubst.has(ROW_CACHE)) {
+            logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+          }
+          return {
+            goalId,
+            queryObj,
+            row,
+            wasFromCache: true,
+            unifiedSubst: logSubst,
+          };
+        });
       }
     }
   }
@@ -691,6 +718,20 @@ export class RegularRelationWithMerger {
       // Remove any existing cache entry for the current goalId before populating
       const cache = getOrCreateRowCache(subst);
       cache.delete(goalId);
+      if(rows.length === 0) {
+        this.logger.log("DB_NO_ROWS", () => {
+          const logSubst = new Map(subst);
+          if (logSubst.has(ROW_CACHE)) {
+            logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+          }
+          return {
+            goalId,
+            queryObj,
+            wasFromCache: false,
+            updatedSubst: logSubst,
+          };
+        });
+      }
       for (const row of rows) {
         const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
         if (unifiedSubst) {
@@ -724,6 +765,20 @@ export class RegularRelationWithMerger {
           });
           observer.next(new Map(unifiedSubst));
           await new Promise(resolve => nextTick(resolve));
+        } else {
+          this.logger.log("UNIFY_FAILURE", () => {
+            const logSubst = new Map(unifiedSubst);
+            if (logSubst.has(ROW_CACHE)) {
+              logSubst.set(ROW_CACHE, this.formatRowCacheForLog(logSubst.get(ROW_CACHE)));
+            }
+            return {
+              goalId,
+              queryObj,
+              row,
+              wasFromCache: false,
+              updatedSubst: logSubst,
+            };
+          });
         }
       }
     }
@@ -878,7 +933,7 @@ export class RegularRelationWithMerger {
             }
             
             // Check cache first - if hit, process immediately without batching
-            const cache = takeCache(goalId, subst);
+            const cache = getCacheForGoalId(goalId, subst);
             if (cache) {
               this.logger.log("CACHE_HIT_IMMEDIATE", {
                 goalId,

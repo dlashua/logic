@@ -101,7 +101,7 @@ export const and = (...goals: Goal[]): Goal => {
   if (goals.length === 1) {
     return goals[0];
   }
-  return enrichGroupInput("and", ++groupIdCounter, goals, (enrichedInput$) =>
+  return enrichGroupInput("and", ++groupIdCounter, goals, [], (enrichedInput$) =>
     goals.reduce((acc, goal) => goal(acc), enrichedInput$)
   );
 };
@@ -118,16 +118,17 @@ export const or = (...goals: Goal[]): Goal => {
     return goals[0];
   }
   
-  return enrichGroupInput("or", ++groupIdCounter, [], (input$: SimpleObservable<Subst>) => {
+  return enrichGroupInput("or", ++groupIdCounter, [], goals, (input$: SimpleObservable<Subst>) => {
+    const sharedInput$ = input$.share();
+    const goalsRun = goals.map(goal => goal(sharedInput$));
+    return goalsRun.reduce((acc, goal) => acc.merge(goal));
+
     const groupId = ++groupIdCounter;
-    
     // Collect all input substitutions first
     const collectedInputs: Subst[] = [];
     let inputCompleted = false;
-    
     return new SimpleObservable<Subst>(observer => {
       const subscriptions: (() => void)[] = [];
-      
       // First, collect all input substitutions
       const inputSub = input$.subscribe({
         next: (s) => {
@@ -136,20 +137,16 @@ export const or = (...goals: Goal[]): Goal => {
         error: observer.error,
         complete: () => {
           inputCompleted = true;
-          
           // Now execute each goal with a stream of enriched substitutions
           let completedGoals = 0;
-          
           goals.forEach((goal, index) => {
             const enrichedInputs = collectedInputs.map(s => 
-              createEnrichedSubst(s, "or_in", groupId, [goal], [goal], index)
+              createEnrichedSubst(s, "or_in", groupId, [], [goal], index)
             );
-            
             const enrichedStream = new SimpleObservable<Subst>(goalObserver => {
               enrichedInputs.forEach(enrichedSubst => goalObserver.next(enrichedSubst));
               goalObserver.complete?.();
             });
-            
             const goalSub = goal(enrichedStream).subscribe({
               next: observer.next,
               error: observer.error,
@@ -160,14 +157,11 @@ export const or = (...goals: Goal[]): Goal => {
                 }
               }
             });
-            
             subscriptions.push(() => goalSub.unsubscribe?.());
           });
         }
       });
-      
       subscriptions.push(() => inputSub.unsubscribe?.());
-      
       return () => {
         subscriptions.forEach(unsub => unsub());
       };
@@ -273,7 +267,7 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
  * Negation as failure - succeeds only if the goal fails
  */
 export function not(goal: Goal): Goal {
-  return enrichGroupInput("not", ++groupIdCounter, [goal], (enrichedInput$) => {
+  return enrichGroupInput("not", ++groupIdCounter, [], [], (enrichedInput$) => {
     return new SimpleObservable<Subst>((observer) => {
       enrichedInput$.subscribe({
         next: (s) => {
@@ -389,8 +383,8 @@ function createEnrichedSubst(
   s: Subst,
   type: string,
   groupId: number,
-  goals: Goal[],
-  innerGoals: Goal[],
+  conjGoals: Goal[],
+  disjGoals: Goal[],
   branch?: number
 ): Subst {
   const parentPath = (s.get(GOAL_GROUP_PATH) as any[]) || [];
@@ -402,25 +396,39 @@ function createEnrichedSubst(
     } : {})
   }];
   const parentOuterGoals = (s.get(GOAL_GROUP_OUTER_GOALS) as Goal[]) || [];
-  // Recursively collect all innerGoals from the goals array
-  function collectAllInnerGoals(goals: Goal[]): Goal[] {
+  // Recursively collect all innerGoals from the combined goals array
+  function collectAllInnerConjGoals(goals: Goal[]): Goal[] {
     return goals.flatMap(goal => {
-      const inner = (goal as any).innerGoals as Goal[] | undefined;
-      if (inner && inner.length > 0) {
-        return [goal, ...collectAllInnerGoals(inner)];
+      const innerGoals = (goal as any)?.conjGoals ?? [] as Goal[];
+      if (innerGoals && innerGoals.length > 0) {
+        return [...collectAllInnerConjGoals(innerGoals)];
       } else {
         return [goal];
       }
     });
   }
-  const goalsInnerGoals = collectAllInnerGoals(goals);
-  const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
-  
+  function collectAllInnerGoals(goals: Goal[]): Goal[] {
+    return goals.flatMap(goal => {
+      const innerConjGoals = (goal as any)?.conjGoals ?? [] as Goal[];
+      const innerDisjGoals = (goal as any)?.disjGoals ?? [] as Goal[];
+      const innerGoals = [...(new Set([...innerConjGoals, ...innerDisjGoals]))];
+      if (innerGoals && innerGoals.length > 0) {
+        return [...collectAllInnerGoals(innerGoals)];
+      } else {
+        return [goal];
+      }
+    });
+  }
+
+  const allGoals = [...conjGoals, ...disjGoals];
+  const conjInnerConj = collectAllInnerConjGoals(conjGoals);
+  const disjInnerAll = collectAllInnerGoals(allGoals);
+
   const newSubst = new Map(s);
   newSubst.set(GOAL_GROUP_ID, groupId);
   newSubst.set(GOAL_GROUP_PATH, newPath);
-  newSubst.set(GOAL_GROUP_INNER_GOALS, innerGoals);
-  newSubst.set(GOAL_GROUP_OUTER_GOALS, combinedOuterGoals);
+  newSubst.set(GOAL_GROUP_INNER_GOALS, [...(new Set([...conjGoals, ...conjInnerConj]))]);
+  newSubst.set(GOAL_GROUP_OUTER_GOALS, [...(new Set([...parentOuterGoals, ...conjGoals, ...disjGoals, ...disjInnerAll]))]);
   return newSubst;
 }
 
@@ -430,16 +438,18 @@ function createEnrichedSubst(
 export function enrichGroupInput(
   type: string,
   groupId: number,
-  goals: Goal[],
+  conjGoals: Goal[],
+  disjGoals: Goal[],
   fn: (enrichedInput$: SimpleObservable<Subst>) => any
 ) {
   const newInput$ = (input$: SimpleObservable<Subst>) => {
     const enrichedInput$ = input$.map(s => 
-      createEnrichedSubst(s, type, groupId, goals, goals)
+      createEnrichedSubst(s, type, groupId, conjGoals, disjGoals)
     );
     return fn(enrichedInput$);
   };
-  (newInput$ as any).innerGoals = goals;
+  (newInput$ as any).conjGoals = conjGoals;
+  (newInput$ as any).disjGoals = disjGoals;
   newInput$.displayName = `${type}_${groupId}`;
   return newInput$;
 }

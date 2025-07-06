@@ -111,7 +111,7 @@ export function aggregateRelFactory(
   // @ts-expect-error
   const name = aggFn.name || aggFn.displayName || "aggregateRelFactory";
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return enrichGroupInput(name, ++aggregateIdCounter, [], (input$) =>
+    return enrichGroupInput(name, ++aggregateIdCounter, [], [], (input$) =>
       toSimple(input$).flatMap((s: Subst) =>
         new SimpleObservable<Subst>((observer) => {
           const results: Term[] = [];
@@ -176,6 +176,7 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     enrichGroupInput(
       "groupAggregateRelFactory",
       ++groupAggregateIdCounter,
+      [],
       [goal],
       (input$: Observable<Subst>) =>
         groupByGoal(

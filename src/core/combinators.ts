@@ -1,3 +1,4 @@
+import jsonata from "jsonata";
 import {
   Goal,
   Subst,
@@ -365,6 +366,171 @@ export function run<T>(
         });
       }
     });
+  });
+}
+
+/**
+ * project: Declarative data transformation relation for logic engine.
+ * Allows extracting or mapping fields from an object using a path string or mapping object.
+ * Example:
+ *   project($.input, "species.name", $.species_name)
+ *   project($.input, { genus: "genera[0].genus" }, $.output)
+ */
+function getByPath(obj: any, path: string): any {
+  if (!path) return obj;
+  const parts = path.split(".");
+  let current = obj;
+  for (const part of parts) {
+    if (!current) return undefined;
+    const match = part.match(/^(\w+)\[\?\(@\.(.+?)==['"](.+?)['"]\)\]$/);
+    if (match) {
+      const [_, arrKey, filterKey, filterVal] = match;
+      current = (current[arrKey] || []).find((x: any) => x?.[filterKey] === filterVal);
+    } else if (part.endsWith("]")) {
+      const arrMatch = part.match(/^(\w+)\[(\d+)\]$/);
+      if (arrMatch) {
+        const [_, arrKey, idx] = arrMatch;
+        current = (current[arrKey] || [])[parseInt(idx)];
+      } else {
+        current = current[part];
+      }
+    } else {
+      current = current[part];
+    }
+  }
+  return current;
+}
+
+// project(input, "field.path", outputVar)
+// project(input, { out1: "path1", out2: "path2" }, outputObjVar)
+export function project(
+  inputVar: any,
+  pathOrMap: string | Record<string, string>,
+  outputVar: any
+): Goal {
+  return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
+    const subscription = input$.subscribe({
+      next: (s) => {
+        const input = walk(inputVar, s);
+        if (isVar(input)) return;
+        if (input === undefined) return;
+        if (typeof pathOrMap === "string") {
+          const value = getByPath(input, pathOrMap);
+          const unified = unify(outputVar, value, s);
+          if (unified !== null) observer.next(unified);
+        } else {
+          const outObj: Record<string, any> = {};
+          for (const key in pathOrMap) {
+            outObj[key] = getByPath(input, pathOrMap[key]);
+          }
+          const unified = unify(outputVar, outObj, s);
+          if (unified !== null) observer.next(unified);
+        }
+      },
+      error: observer.error,
+      complete: observer.complete
+    });
+    return () => subscription.unsubscribe?.();
+  });
+}
+
+/**
+ * projectJsonata: Declarative data transformation using JSONata expressions.
+ *
+ * @param inputVars - An object mapping keys to logic vars, or a single logic var.
+ * @param jsonataExpr - The JSONata template string.
+ * @param outputVars - An object mapping output keys to logic vars, or a single logic var.
+ *
+ * Example:
+ *   projectJsonata({ x: $.some_var, y: $.some_other_var }, "{ thing: x, thang: y }", { thing: $.thing_here, thang: $.thang_here })
+ *   projectJsonata($.input, "$value + 1", $.output)
+ */
+export function projectJsonata(
+  inputVars: any,
+  jsonataExpr: string,
+  outputVars: any
+): Goal {
+  const expr = jsonata(jsonataExpr);
+  return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
+    let active = 0;
+    let completed = false;
+    const subscription = input$.subscribe({
+      next: async (s) => {
+        active++;
+        // Prepare input for JSONata
+        let inputObj: any;
+        if (typeof inputVars === "object" && inputVars !== null && !isVar(inputVars)) {
+          inputObj = {};
+          for (const key in inputVars) {
+            inputObj[key] = walk(inputVars[key], s);
+          }
+        } else {
+          // inputObj = {
+          //   value: walk(inputVars, s) 
+          // };
+          inputObj = walk(inputVars, s);
+        }
+        // Evaluate JSONata
+        let result;
+        try {
+          result = await expr.evaluate(inputObj);
+        } catch (e) {
+          observer.error?.(e);
+          active--;
+          if (completed && active === 0) observer.complete?.();
+          return;
+        }
+        // Unify result to output logic vars
+        if (typeof outputVars === "object" && outputVars !== null && !isVar(outputVars)) {
+          if (result && typeof result.then === "function") {
+            result.then((resolved: any) => {
+              for (const key in outputVars) {
+                const unified = unify(outputVars[key], resolved?.[key], s);
+                if (unified !== null) observer.next(unified);
+              }
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            }).catch((e: any) => {
+              observer.error?.(e);
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            });
+          } else {
+            const resolved = result as any;
+            for (const key in outputVars) {
+              const unified = unify(outputVars[key], resolved?.[key], s);
+              if (unified !== null) observer.next(unified);
+            }
+            active--;
+            if (completed && active === 0) observer.complete?.();
+          }
+        } else {
+          if (result && typeof result.then === "function") {
+            result.then((resolved: any) => {
+              const unified = unify(outputVars, resolved, s);
+              if (unified !== null) observer.next(unified);
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            }).catch((e: any) => {
+              observer.error?.(e);
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            });
+          } else {
+            const unified = unify(outputVars, result, s);
+            if (unified !== null) observer.next(unified);
+            active--;
+            if (completed && active === 0) observer.complete?.();
+          }
+        }
+      },
+      error: observer.error,
+      complete: () => {
+        completed = true;
+        if (active === 0) observer.complete?.();
+      }
+    });
+    return () => subscription.unsubscribe?.();
   });
 }
 

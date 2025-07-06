@@ -1,7 +1,9 @@
+import { inspect } from "node:util";
 import { makeRelREST } from "../facts-rest/index.ts";
 import { query } from "../query.ts";
 import { lvar } from "../core/kernel.ts";
 import { membero } from "../relations/lists.ts";
+import { eq, lift, project, projectJsonata } from "../core/combinators.ts";
 
 // Example 1: Pokemon API with primary key in path
 console.log("=== Pokemon API Test (Primary Key in Path) ===");
@@ -14,28 +16,55 @@ const pokemonApi = await makeRelREST({
   }
 });
 
-const pokemonDB = pokemonApi.rel("pokemon", {
+const pokemon = pokemonApi.rel("pokemon", {
   restPrimaryKey: "name" // Primary key will be included in URL path
 });
 
-try {
-  const results = await query()
-    .where($ => [
-      // membero($.name, ["charmeleon", "charizard", "metapod"]),
-      membero($.name, ["charmeleon"]),
+const pokemon_species = pokemonApi.rel("pokemon-species", {
+  restPrimaryKey: "name" // Primary key will be included in URL path
+});
 
-      pokemonDB({
-        name: $.name, // This will become /pokemon/charmeleon
-        weight: $.weight,
-        height: $.height,
-        species: $.species,
-      })
-    ])
-    .toArray();
+
+const results = await query()
+  .where($ => [
+    membero($.name, ["charmeleon", "charizard", "metapod"]),
+    // membero($.name, ["charmeleon"]),
+
+    pokemon({
+      name: $.name,
+      species: $._species,
+    }),
+
+    pokemon({
+      name: $.name,
+      weight: $.weight,
+      height: $.height,
+    }),
+
+    projectJsonata(
+      $._species,
+      "$.name",
+      $.species_name
+    ),
+
+    pokemon_species({
+      name: $.species_name,
+      genera: $._species_genera,
+    }),
+
+    projectJsonata(
+      $._species_genera,
+      "$[language.name='en'].genus",
+      $.species_genus_en,
+    ),
+
+  ])
+  .toArray();
   
-  console.log("✅ Pokemon API Success!");
-  console.log("Results:", results);
-  console.log("Queries", pokemonApi.getQueries());
-} catch (error) {
-  console.log("❌ Pokemon API error:", error.message);
-}
+console.log("✅ Pokemon API Success!");
+console.log("Results:", inspect(results, {
+  depth: null,
+  colors: true 
+}));
+console.log("Queries", pokemonApi.getQueries());
+

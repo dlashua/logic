@@ -82,6 +82,7 @@ function formatSubstitutions<Fmt>(
         next: (s: Subst) => {
           const result: Partial<RunResult<Fmt>> = {};
           for (const key in formatter) {
+            if(key.startsWith("_")) continue;
             const term = formatter[key];
             result[key] = walk(term, s);
           }

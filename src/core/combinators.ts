@@ -115,9 +115,49 @@ export const or = (...goals: Goal[]): Goal => {
   }
   
   return enrichGroupInput("or", ++groupIdCounter, [], goals, (input$: SimpleObservable<Subst>) => {
-    const sharedInput$ = input$.share();
-    const goalsRun = goals.map(goal => goal(sharedInput$));
-    return goalsRun.reduce((acc, goal) => acc.merge(goal));
+    return new SimpleObservable<Subst>((observer) => {
+      // Collect all input substitutions first
+      const inputSubsts: Subst[] = [];
+      
+      const inputSubscription = input$.subscribe({
+        next: (s) => inputSubsts.push(s),
+        error: observer.error,
+        complete: () => {
+          // Now run each goal with each input substitution
+          let completedGoals = 0;
+          const subscriptions: any[] = [];
+          
+          for (const goal of goals) {
+            // Create fresh input stream for this goal
+            const goalInput$ = new SimpleObservable<Subst>((goalObserver) => {
+              inputSubsts.forEach(s => goalObserver.next(s));
+              goalObserver.complete?.();
+            });
+            
+            const goalSubscription = goal(goalInput$).subscribe({
+              next: observer.next,
+              error: observer.error,
+              complete: () => {
+                completedGoals++;
+                if (completedGoals === goals.length) {
+                  observer.complete?.();
+                }
+              }
+            });
+            subscriptions.push(goalSubscription);
+          }
+          
+          // Return cleanup function for goal subscriptions
+          return () => {
+            subscriptions.forEach(sub => sub.unsubscribe?.());
+          };
+        }
+      });
+      
+      return () => {
+        inputSubscription.unsubscribe?.();
+      };
+    });
   });
 };
 

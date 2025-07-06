@@ -54,7 +54,7 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      membero($.person, ["celeste", "daniel", "jason", "brooke", "emerson"]),
+      membero($.person, ["louis", "celeste", "daniel", "jason", "brooke", "emerson"]),
       // familytree.parent_kid($.parent, $.person),
       // not(eq($.parent, "daniel")),
       // ifte(
@@ -85,6 +85,13 @@ function makeQuery() {
 }
 
 const q = makeQuery();
+const obs$ = q.getSubstObservale();
+obs$.subscribe({
+  next: (v) => console.dir(v, {
+    depth: null 
+  })
+})
+
 const results = await q.toArray();
 
 console.dir({

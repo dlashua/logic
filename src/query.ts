@@ -160,6 +160,15 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
     return this;
   }
 
+  getSubstObservale() {
+    const initialSubst: Subst = new Map();
+    const combinedGoal = and(...this._goals);
+    // Updated for streaming protocol: pass Observable<Subst> to the goal
+    const substStream = combinedGoal(SimpleObservable.of(initialSubst));
+    return substStream;
+  }
+
+
   private getObservable(): Observable<any> {
     if (this._goals.length === 0) {
       throw new Error("Query must have at least one .where() clause.");

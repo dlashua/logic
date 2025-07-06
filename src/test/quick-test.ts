@@ -20,8 +20,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-// const BACKEND = "sql";
-const BACKEND = "mem";
+const BACKEND = "sql";
+// const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -54,7 +54,7 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      membero($.person, ["louis", "celeste", "daniel", "jason", "brooke", "emerson"]),
+      // membero($.person, ["louis", "celeste", "daniel", "jason", "brooke", "emerson"]),
       // familytree.parent_kid($.parent, $.person),
       // not(eq($.parent, "daniel")),
       // ifte(
@@ -65,32 +65,33 @@ function makeQuery() {
 
       familytree.person($.person),
       
-      // familytree.parentAgg($.person, $.parents),
-      // familytree.stepParentAgg($.person, $.step_parents),
-      // familytree.grandparentAgg($.person, $.grand_parents),
-      // familytree.greatgrandparentAgg($.person, $.great_grand_parents),
-      // familytree.uncleAgg($.person, $.uncle, 1),
+      familytree.parentAgg($.person, $.parents),
+      familytree.stepParentAgg($.person, $.step_parents),
+      familytree.grandparentAgg($.person, $.grand_parents),
+      familytree.greatgrandparentAgg($.person, $.great_grand_parents),
+      familytree.uncleAgg($.person, $.uncle, 1),
   
-      // familytree.siblingsAgg($.person, $.siblings),
-      // familytree.cousinsAgg($.person, $.cousins_1, 1),
-      // familytree.cousinsAgg($.person, $.cousins_2, 2),
-      // familytree.cousinsAgg($.person, $.cousins_3, 3),
+      familytree.siblingsAgg($.person, $.siblings),
+      familytree.cousinsAgg($.person, $.cousins_1, 1),
+      familytree.cousinsAgg($.person, $.cousins_2, 2),
+      familytree.cousinsAgg($.person, $.cousins_3, 3),
 
-      // familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-      // familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+      familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+      familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
   
-      // familytree.kidsAgg($.person, $.kids),
+      familytree.kidsAgg($.person, $.kids),
   
     ])
 }
 
 const q = makeQuery();
-const obs$ = q.getSubstObservale();
-obs$.subscribe({
-  next: (v) => console.dir(v, {
-    depth: null 
-  })
-})
+
+// const obs$ = q.getSubstObservale();
+// obs$.subscribe({
+//   next: (v) => console.dir(v, {
+//     depth: null 
+//   })
+// })
 
 const results = await q.toArray();
 

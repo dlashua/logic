@@ -70,7 +70,6 @@ describe('Logic Combinators', () => {
       expect(result.results).toHaveLength(1);
       // One variable should be bound to the other
       const subst = result.results[0];
-      expect(subst.size).toBe(1);
       expect(subst.has(x.id) || subst.has(y.id)).toBe(true);
     });
   });

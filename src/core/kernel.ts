@@ -9,6 +9,7 @@ import {
   Goal,
 } from "./types.ts";
 import { SimpleObservable } from "./observable.ts";
+import { enrichGroupInput } from "./combinators.ts";
 
 let varCounter = 0;
 
@@ -237,24 +238,29 @@ export function logicListToArray(list: Term): Term[] {
   return out;
 }
 
+let liftGoalGroupId = 0;
 
 // Helper: Convert a single-substitution goal to the new protocol
 export function liftGoal(singleGoal: (s: Subst) => SimpleObservable<Subst>): Goal {
-  return (input$) => new SimpleObservable(observer => {
-    const subs = input$.subscribe({
-      next: (s) => {
-        const out$ = singleGoal(s);
-        out$.subscribe({
-          next: (s2) => observer.next(s2),
-          error: (e) => observer.error?.(e),
-          complete: () => { /* pass */} // wait for all
-        });
-      },
-      error: (e) => observer.error?.(e),
-      complete: () => observer.complete?.()
-    });
-    return () => subs.unsubscribe?.();
-  });
+  const groupType = singleGoal.name || "liftGoal";
+  const groupId = ++liftGoalGroupId;
+  return enrichGroupInput(groupType, groupId, [], (input$) =>
+    new SimpleObservable(observer => {
+      const subs = input$.subscribe({
+        next: (s) => {
+          const out$ = singleGoal(s);
+          out$.subscribe({
+            next: (s2) => observer.next(s2),
+            error: (e) => observer.error?.(e),
+            complete: () => { /* pass */} // wait for all
+          });
+        },
+        error: (e) => observer.error?.(e),
+        complete: () => observer.complete?.()
+      });
+      return () => subs.unsubscribe?.();
+    })
+  );
 }
 
 // Helper: Chain goals (like flatMap for observables)

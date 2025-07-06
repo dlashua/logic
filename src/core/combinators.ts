@@ -28,7 +28,7 @@ let groupIdCounter = 0;
  * A goal that succeeds if two terms can be unified.
  */
 export function eq(u: Term, v: Term): Goal {
-  return liftGoal((s: Subst) => {
+  return liftGoal(function eq (s: Subst){
     return new SimpleObservable<Subst>((observer) => {
       try {
         const result = unify(u, v, s);
@@ -118,7 +118,7 @@ export const or = (...goals: Goal[]): Goal => {
     return goals[0];
   }
   
-  return (input$: SimpleObservable<Subst>) => {
+  return enrichGroupInput("or", ++groupIdCounter, [], (input$: SimpleObservable<Subst>) => {
     const groupId = ++groupIdCounter;
     
     // Collect all input substitutions first
@@ -142,7 +142,7 @@ export const or = (...goals: Goal[]): Goal => {
           
           goals.forEach((goal, index) => {
             const enrichedInputs = collectedInputs.map(s => 
-              createEnrichedSubst(s, "or", groupId, [goal], [goal], index)
+              createEnrichedSubst(s, "or_in", groupId, [goal], [goal], index)
             );
             
             const enrichedStream = new SimpleObservable<Subst>(goalObserver => {
@@ -172,7 +172,7 @@ export const or = (...goals: Goal[]): Goal => {
         subscriptions.forEach(unsub => unsub());
       };
     });
-  };
+  });
 };
 
 /**
@@ -273,25 +273,27 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
  * Negation as failure - succeeds only if the goal fails
  */
 export function not(goal: Goal): Goal {
-  return (input$) => new SimpleObservable<Subst>((observer) => {
-    input$.subscribe({
-      next: (s) => {
-        let succeeded = false;
-        goal(SimpleObservable.of(s)).subscribe({
-          next: () => {
-            succeeded = true;
-          },
-          complete: () => {
-            if (!succeeded) {
-              observer.next(s); // Original substitution unchanged
-            }
-            observer.complete?.();
-          },
-          error: observer.error
-        });
-      },
-      error: observer.error,
-      complete: observer.complete
+  return enrichGroupInput("not", ++groupIdCounter, [goal], (enrichedInput$) => {
+    return new SimpleObservable<Subst>((observer) => {
+      enrichedInput$.subscribe({
+        next: (s) => {
+          let succeeded = false;
+          goal(SimpleObservable.of(s)).subscribe({
+            next: () => {
+              succeeded = true;
+            },
+            complete: () => {
+              if (!succeeded) {
+                observer.next(s); // Return enriched substitution unchanged
+              }
+              observer.complete?.();
+            },
+            error: observer.error
+          });
+        },
+        error: observer.error,
+        complete: observer.complete
+      });
     });
   });
 }
@@ -400,7 +402,18 @@ function createEnrichedSubst(
     } : {})
   }];
   const parentOuterGoals = (s.get(GOAL_GROUP_OUTER_GOALS) as Goal[]) || [];
-  const goalsInnerGoals = goals.flatMap(goal => (goal as any).innerGoals ? [goal, ...(goal as any).innerGoals] : [goal]);
+  // Recursively collect all innerGoals from the goals array
+  function collectAllInnerGoals(goals: Goal[]): Goal[] {
+    return goals.flatMap(goal => {
+      const inner = (goal as any).innerGoals as Goal[] | undefined;
+      if (inner && inner.length > 0) {
+        return [goal, ...collectAllInnerGoals(inner)];
+      } else {
+        return [goal];
+      }
+    });
+  }
+  const goalsInnerGoals = collectAllInnerGoals(goals);
   const combinedOuterGoals = [...new Set([...parentOuterGoals, ...goalsInnerGoals])];
   
   const newSubst = new Map(s);
@@ -414,7 +427,7 @@ function createEnrichedSubst(
 /**
  * Unified helper for enriching input with group metadata
  */
-function enrichGroupInput(
+export function enrichGroupInput(
   type: string,
   groupId: number,
   goals: Goal[],

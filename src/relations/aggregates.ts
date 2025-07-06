@@ -6,7 +6,7 @@ import type {
   Observable
 } from "../core/types.ts"
 import { walk, arrayToLogicList } from "../core/kernel.ts";
-import { eq } from "../core/combinators.ts";
+import { eq , enrichGroupInput } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
 function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
@@ -94,6 +94,8 @@ export function groupByGoal(
   );
 }
 
+let aggregateIdCounter = 0;
+
 /**
  * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.
  * - x: variable to collect
@@ -106,29 +108,56 @@ export function aggregateRelFactory(
   aggFn: (results: Term[]) => any,
   dedup = false,
 ) {
+  // @ts-expect-error
+  const name = aggFn.name || aggFn.displayName || "aggregateRelFactory";
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
-      new SimpleObservable<Subst>((observer) => {
-        const results: Term[] = [];
-        toSimple(goal(SimpleObservable.of(s))).subscribe({
-          next: (s1) => {
-            const val = walk(x, s1);
-            results.push(val);
-          },
-          complete: () => {
-            const agg = aggFn(dedup ? deduplicate(results) : results);
-            toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: observer.complete
-            });
-          },
-          error: observer.error
-        });
-      })
+    return enrichGroupInput(name, ++aggregateIdCounter, [], (input$) =>
+      toSimple(input$).flatMap((s: Subst) =>
+        new SimpleObservable<Subst>((observer) => {
+          const results: Term[] = [];
+          toSimple(goal(SimpleObservable.of(s))).subscribe({
+            next: (s1) => {
+              const val = walk(x, s1);
+              results.push(val);
+            },
+            complete: () => {
+              const agg = aggFn(dedup ? deduplicate(results) : results);
+              toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
+                next: observer.next,
+                error: observer.error,
+                complete: observer.complete
+              });
+            },
+            error: observer.error
+          });
+        })
+      )
     );
-  };
+  }
+  //   return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+  //     new SimpleObservable<Subst>((observer) => {
+  //       const results: Term[] = [];
+  //       toSimple(goal(SimpleObservable.of(s))).subscribe({
+  //         next: (s1) => {
+  //           const val = walk(x, s1);
+  //           results.push(val);
+  //         },
+  //         complete: () => {
+  //           const agg = aggFn(dedup ? deduplicate(results) : results);
+  //           toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
+  //             next: observer.next,
+  //             error: observer.error,
+  //             complete: observer.complete
+  //           });
+  //         },
+  //         error: observer.error
+  //       });
+  //     })
+  //   );
+  // };
 }
+
+let groupAggregateIdCounter = 0;
 
 /**
  * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
@@ -144,30 +173,36 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outAgg: Term,
     dedup = false,
   ): Goal =>
-    (input$: Observable<Subst>) => groupByGoal(
-      keyVar,
-      valueVar,
-      goal,
-      input$,
-      (s, key, items) => {
-        const groupItems = dedup ? deduplicate(items) : items;
-        const agg = aggFn(groupItems);
-        return new SimpleObservable<Subst>((observer) => {
-          toSimple(eq(outKey, key)(SimpleObservable.of(s))).subscribe({
-            next: (s2) => {
-              toSimple(eq(outAgg, agg)(SimpleObservable.of(s2))).subscribe({
-                next: observer.next,
+    enrichGroupInput(
+      "groupAggregateRelFactory",
+      ++groupAggregateIdCounter,
+      [goal],
+      (input$: Observable<Subst>) =>
+        groupByGoal(
+          keyVar,
+          valueVar,
+          goal,
+          input$,
+          (s, key, items) => {
+            const groupItems = dedup ? deduplicate(items) : items;
+            const agg = aggFn(groupItems);
+            return new SimpleObservable<Subst>((observer) => {
+              toSimple(eq(outKey, key)(SimpleObservable.of(s))).subscribe({
+                next: (s2) => {
+                  toSimple(eq(outAgg, agg)(SimpleObservable.of(s2))).subscribe({
+                    next: observer.next,
+                    error: observer.error,
+                    complete: observer.complete
+                  });
+                },
                 error: observer.error,
-                complete: observer.complete
+                complete: () => {
+                  observer.complete?.();
+                }
               });
-            },
-            error: observer.error,
-            complete: () => {
-              observer.complete?.();
-            }
-          });
-        });
-      },
+            });
+          },
+        )
     );
 }
 
@@ -180,14 +215,14 @@ export const group_by_counto = groupAggregateRelFactory(
  * collecto(x, goal, xs): xs is the list of all values x can take under goal (logic relation version)
  * Usage: collecto(x, membero(x, ...), xs)
  */
-export const collecto = aggregateRelFactory((arr) => arrayToLogicList(arr));
+export const collecto = aggregateRelFactory(function collecto (arr) { return arrayToLogicList(arr)});
 
 /**
  * collect_distincto(x, goal, xs): xs is the list of distinct values of x under goal.
  * Usage: collect_distincto(x, goal, xs)
  */
 export const collect_distincto = aggregateRelFactory(
-  (arr) => arrayToLogicList(arr),
+  function collecto_distincto (arr) { return arrayToLogicList(arr)},
   true,
 );
 

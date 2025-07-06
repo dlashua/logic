@@ -6,7 +6,7 @@ import {
   Observable
 } from "../core/types.ts"
 import { walk, isVar } from "../core/kernel.ts";
-import { eq } from "../core/combinators.ts";
+import { eq , enrichGroupInput } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
 function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
@@ -33,31 +33,36 @@ export const uniqueo = (t: Term, g: Goal): Goal =>
     });
   });
 
+let notGroupId = 0;
+
 export function not(goal: Goal): Goal {
-  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
-    let found = false;
-    return new SimpleObservable<Subst>((observer) => {
-      goal(SimpleObservable.of(s)).subscribe({
-        next: (subst) => {
-          let addedNewBindings = false;
-          for (const [key, value] of subst) {
-            if (!s.has(key)) {
-              addedNewBindings = true;
-              break;
+  const groupId = ++notGroupId;
+  return enrichGroupInput("not", groupId, [], (input$: Observable<Subst>) =>
+    toSimple(input$).flatMap((s: Subst) => {
+      let found = false;
+      return new SimpleObservable<Subst>((observer) => {
+        goal(SimpleObservable.of(s)).subscribe({
+          next: (subst) => {
+            let addedNewBindings = false;
+            for (const [key, value] of subst) {
+              if (!s.has(key)) {
+                addedNewBindings = true;
+                break;
+              }
             }
+            if (!addedNewBindings) {
+              found = true;
+            }
+          },
+          error: observer.error,
+          complete: () => {
+            if (!found) observer.next(s);
+            observer.complete?.();
           }
-          if (!addedNewBindings) {
-            found = true;
-          }
-        },
-        error: observer.error,
-        complete: () => {
-          if (!found) observer.next(s);
-          observer.complete?.();
-        }
+        });
       });
-    });
-  });
+    })
+  );
 }
 
 export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));

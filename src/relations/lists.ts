@@ -10,62 +10,68 @@ import {
   isNil,
   logicListToArray
 } from "../core/kernel.ts"
-import { and, eq } from "../core/combinators.ts";
+import { and, eq , enrichGroupInput } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
 /**
  * A goal that succeeds if `x` is a member of the logic `list`.
  * Optimized for both arrays and logic lists.
  */
+let memberoGroupId = 0;
+
 export function membero(x: Term, list: Term): Goal {
-  return (input$) => new SimpleObservable<Subst>((observer) => {
-    const subscriptions: any[] = [];
-    let cancelled = false;
-    let active = 0;
-    let inputComplete = false;
-    const checkComplete = () => {
-      if (inputComplete && active === 0) {
-        observer.complete?.();
-      }
-    };
-    input$.subscribe({
-      next: (s) => {
-        const l = walk(list, s);
-        // Fast path for arrays
-        if (Array.isArray(l)) {
-          for (let i = 0; i < l.length; i++) {
-            const item = l[i];
-            const s2 = unify(x, item, s);
-            if (s2) observer.next(s2);
-          }
-        } else if (l && typeof l === "object" && "tag" in l && (l as any).tag === "cons") {
-          const s1 = unify(x, (l as any).head, s);
-          if (s1) observer.next(s1);
-          active++;
-          // Recursive call for tail
-          const sub = membero(x, (l as any).tail)(SimpleObservable.of(s)).subscribe({
-            next: observer.next,
-            error: observer.error,
-            complete: () => {
-              active--;
-              checkComplete();
-            }
-          });
-          subscriptions.push(sub);
+  const groupId = ++memberoGroupId;
+  // @ts-expect-error
+  return enrichGroupInput("membero", groupId, [membero], (input$) =>
+    new SimpleObservable<Subst>((observer) => {
+      const subscriptions: any[] = [];
+      let cancelled = false;
+      let active = 0;
+      let inputComplete = false;
+      const checkComplete = () => {
+        if (inputComplete && active === 0) {
+          observer.complete?.();
         }
-        // If neither array nor cons, do nothing (no result)
-      },
-      error: observer.error,
-      complete: () => {
-        inputComplete = true;
-        checkComplete();
-      }
-    });
-    return () => {
-      cancelled = true;
-      subscriptions.forEach(sub => sub.unsubscribe?.());
-    };
-  });
+      };
+      input$.subscribe({
+        next: (s) => {
+          const l = walk(list, s);
+          // Fast path for arrays
+          if (Array.isArray(l)) {
+            for (let i = 0; i < l.length; i++) {
+              const item = l[i];
+              const s2 = unify(x, item, s);
+              if (s2) observer.next(s2);
+            }
+          } else if (l && typeof l === "object" && "tag" in l && (l as any).tag === "cons") {
+            const s1 = unify(x, (l as any).head, s);
+            if (s1) observer.next(s1);
+            active++;
+            // Recursive call for tail
+            const sub = membero(x, (l as any).tail)(SimpleObservable.of(s)).subscribe({
+              next: observer.next,
+              error: observer.error,
+              complete: () => {
+                active--;
+                checkComplete();
+              }
+            });
+            subscriptions.push(sub);
+          }
+          // If neither array nor cons, do nothing (no result)
+        },
+        error: observer.error,
+        complete: () => {
+          inputComplete = true;
+          checkComplete();
+        }
+      });
+      return () => {
+        cancelled = true;
+        subscriptions.forEach(sub => sub.unsubscribe?.());
+      };
+    })
+  );
 }
 
 /**

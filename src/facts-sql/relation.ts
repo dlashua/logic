@@ -144,33 +144,7 @@ function takeCache(goalId: number, s: Subst): Record<string, any>[] | null {
   return null;
 }
 
-/**
- * Peek at the cache for a goalId in the substitution's ROW_CACHE (does not remove).
- */
-function peekCache(goalId: number, s: Subst): Record<string, any>[] | null {
-  const cache = getOrCreateRowCache(s);
-  if (cache.has(goalId)) {
-    return cache.get(goalId) as Record<string, any>[];
-  }
-  return null;
-}
 
-/**
- * Create a new substitution with an updated ROW_CACHE, removing a goal's cache and/or adding new caches.
- */
-function createUpdatedSubst(s: Subst, goalIdToRemove: number, newCaches?: Record<number, Record<string, any>[]>): Subst {
-  const newSubst = new Map(s);
-  const originalCache = getOrCreateRowCache(s);
-  const newCache = new Map(originalCache);
-  newCache.delete(goalIdToRemove);
-  if (newCaches) {
-    for (const [goalId, rows] of Object.entries(newCaches)) {
-      newCache.set(Number(goalId), rows);
-    }
-  }
-  newSubst.set(ROW_CACHE, newCache);
-  return newSubst;
-}
 
 /**
  * Create a new substitution with cache for other compatible goals in the same batch.
@@ -208,124 +182,86 @@ function createUpdatedSubstWithCacheForOtherGoals(dbObj: DBManager, s: Subst, my
  * Find goals that share the same top-level execution path and could benefit from caching.
  * This includes goals from different groups but same top-level execution context.
  */
-function findGoalsForCaching(myGoal: GoalRecord, dbObj: DBManager, subst: Subst, logger: Logger): GoalRecord[] {
-  const myPath = subst.get(SQL_GROUP_PATH) as any[] || [];
-  const myTopLevelId = myPath.length > 0 ? myPath[0].id : null;
-  
-  logger.log("CROSS_GROUP_CACHE_CHECK", {
-    myGoalId: myGoal.goalId,
-    myPath,
-    myTopLevelId
-  });
-  
-  // Find all goals that share the same table and have compatible query structure
-  // regardless of execution path (this enables cross-OR-branch caching)
-  const allGoals = dbObj.getGoals();
-  const compatibleGoals: GoalRecord[] = [];
-  
-  for (const otherGoal of allGoals) {
-    if (otherGoal.goalId === myGoal.goalId || otherGoal.table !== myGoal.table) {
-      continue;
-    }
-    
-    // Check if this goal could benefit from our results (subset relationship)
-    if (couldBenefitFromCache(myGoal, otherGoal)) {
-      logger.log("CROSS_GROUP_CACHE_CHECK", {
-        myGoalId: myGoal.goalId,
-        otherGoalId: otherGoal.goalId,
-        canBenefit: true,
-        reason: "same-table-compatible-query"
-      });
-      compatibleGoals.push(otherGoal);
-    }
-  }
-  
-  return compatibleGoals;
-}
 
 /**
- * Check if otherGoal's query would be satisfied by myGoal's results.
- * This is true if otherGoal's constraints are a superset of myGoal's constraints.
+ * Check if one goal could benefit from cached data of another goal.
+ * For caching, we can be more permissive than merging - goals can benefit
+ * from each other's cached results as long as they share some variable mappings.
  */
 function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord): boolean {
-  // For now, implement a simple heuristic:
-  // If both goals query the same table with the same columns, they can share cache
-  const myColumns = Object.keys(myGoal.queryObj);
-  const otherColumns = Object.keys(otherGoal.queryObj);
+  // For caching purposes, goals can benefit from each other as long as:
+  // 1. They are for the same table
+  // 2. They share at least one variable-to-column mapping
   
-  // Check if they have the same query structure (same columns)
-  if (myColumns.length !== otherColumns.length) {
+  if (myGoal.table !== otherGoal.table) {
     return false;
   }
   
-  return myColumns.every(col => otherColumns.includes(col));
-}
-
-/**
- * Find goals compatible for merging: same table and transitively connected via shared variables.
- * Uses graph traversal to find all goals that are connected through variable sharing.
- */
-function findCompatibleGoals(myGoal: GoalRecord, commonGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
-  // Filter to same table goals (don't filter by direct matches - we'll check transitive connections)
-  const sameTableGoals = commonGoals.filter(g => g.goal.table === myGoal.table);
+  const myColumns = Object.keys(myGoal.queryObj);
+  const otherColumns = Object.keys(otherGoal.queryObj);
   
-  if (sameTableGoals.length === 0) {
-    return [];
-  }
-  
-  // Build adjacency list for variable sharing graph
-  const allGoals = [myGoal, ...sameTableGoals.map(g => g.goal)];
-  const adjacencyList = new Map<number, Set<number>>();
-  
-  // Initialize adjacency list
-  for (const goal of allGoals) {
-    adjacencyList.set(goal.goalId, new Set());
-  }
-  
-  // Helper to check if two goals share variables
-  const haveSharedVars = (goalA: GoalRecord, goalB: GoalRecord): boolean => {
-    const aVarIds = Object.values(queryUtils.onlyVars(goalA.queryObj)).map(x => x.id);
-    const bVarIds = Object.values(queryUtils.onlyVars(goalB.queryObj)).map(x => x.id);
-    return aVarIds.some(av => bVarIds.includes(av));
-  };
-  
-  // Build edges between goals that share variables
-  for (let i = 0; i < allGoals.length; i++) {
-    for (let j = i + 1; j < allGoals.length; j++) {
-      const goalA = allGoals[i];
-      const goalB = allGoals[j];
+  // Check if they share any common columns with the same variable mappings
+  for (const column of myColumns) {
+    if (otherColumns.includes(column)) {
+      const myValue = myGoal.queryObj[column];
+      const otherValue = otherGoal.queryObj[column];
       
-      if (haveSharedVars(goalA, goalB)) {
-        adjacencyList.get(goalA.goalId)!.add(goalB.goalId);
-        adjacencyList.get(goalB.goalId)!.add(goalA.goalId);
+      // If both map the same variable to the same column, they can benefit from caching
+      if (isVar(myValue) && isVar(otherValue) && myValue.id === otherValue.id) {
+        return true;
+      }
+      
+      // If both map the same literal value to the same column, they can benefit from caching
+      if (!isVar(myValue) && !isVar(otherValue) && myValue === otherValue) {
+        return true;
       }
     }
   }
   
-  // DFS to find all goals connected to myGoal
-  const visited = new Set<number>();
-  const connected = new Set<number>();
-  
-  const dfs = (goalId: number) => {
-    if (visited.has(goalId)) return;
-    visited.add(goalId);
-    connected.add(goalId);
-    
-    const neighbors = adjacencyList.get(goalId) || new Set();
-    for (const neighborId of neighbors) {
-      dfs(neighborId);
-    }
-  };
-  
-  // Start DFS from myGoal
-  dfs(myGoal.goalId);
-  
-  // Return all connected goals except myGoal itself
-  return allGoals.filter(goal => 
-    connected.has(goal.goalId) && 
-    goal.goalId !== myGoal.goalId
-  );
+  return false;
 }
+
+/**
+ * Check if two goals can have their queries merged.
+ * Requires identical variable-to-column mappings for safe merging.
+ */
+function canMergeQueries(goalA: GoalRecord, goalB: GoalRecord): boolean {
+  const aColumns = Object.keys(goalA.queryObj);
+  const bColumns = Object.keys(goalB.queryObj);
+  
+  // Check if they have the same query structure (same columns)
+  if (aColumns.length !== bColumns.length) {
+    return false;
+  }
+  
+  if (!aColumns.every(col => bColumns.includes(col))) {
+    return false;
+  }
+  
+  // Check that the same variables are mapped to the same columns
+  for (const column of aColumns) {
+    const aValue = goalA.queryObj[column];
+    const bValue = goalB.queryObj[column];
+    
+    // Both must be variables with the same ID, or both must be the same literal value
+    if (isVar(aValue) && isVar(bValue)) {
+      if (aValue.id !== bValue.id) {
+        return false;
+      }
+    } else if (isVar(aValue) || isVar(bValue)) {
+      // One is a variable, the other is not - they can't be merged
+      return false;
+    } else {
+      // Both are literal values - they must be equal
+      if (aValue !== bValue) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
 
 /**
  * Collect all WHERE clause values from a set of goals for merging.
@@ -381,6 +317,392 @@ export class RegularRelationWithMerger {
     this.primaryKey = options?.primaryKey;
   }
 
+  /**
+   * Find goals that are compatible for query merging.
+   * These goals must have identical variable-to-column mappings.
+   */
+  private findMergeCompatibleGoals(myGoal: GoalRecord, relatedGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
+    // Filter to same table goals that can be safely merged
+    const compatibleGoals: GoalRecord[] = [];
+    for (const { goal } of relatedGoals) {
+      if (goal.table === myGoal.table && canMergeQueries(myGoal, goal)) {
+        compatibleGoals.push(goal);
+      }
+    }
+    
+    this.logger.log("MERGE_COMPATIBILITY_CHECK", {
+      myGoalId: myGoal.goalId,
+      candidateGoals: relatedGoals.map(g => ({
+        goalId: g.goal.goalId,
+        queryObj: g.goal.queryObj
+      })),
+      mergeCompatibleGoalIds: compatibleGoals.map(g => g.goalId),
+      table: this.table
+    });
+    
+    return compatibleGoals;
+  }
+
+  /**
+   * Find goals that are compatible for result caching.
+   * These goals can benefit from our query results even if not merged.
+   */
+  private findCacheCompatibleGoals(myGoal: GoalRecord, relatedGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
+    const cacheBeneficiaryGoals: GoalRecord[] = [];
+    const candidateGoalsWithCompatibility = [];
+    
+    for (const { goal } of relatedGoals) {
+      const isCompatible = goal.table === myGoal.table && couldBenefitFromCache(myGoal, goal);
+      
+      candidateGoalsWithCompatibility.push({
+        goalId: goal.goalId,
+        queryObj: goal.queryObj,
+        cacheCompatible: isCompatible
+      });
+      
+      if (isCompatible) {
+        cacheBeneficiaryGoals.push(goal);
+      }
+    }
+    
+    this.logger.log("CACHE_COMPATIBILITY_CHECK", {
+      myGoalId: myGoal.goalId,
+      myGoalQueryObj: myGoal.queryObj,
+      candidateGoals: candidateGoalsWithCompatibility,
+      cacheCompatibleGoalIds: cacheBeneficiaryGoals.map(g => g.goalId),
+      table: this.table
+    });
+    
+    return cacheBeneficiaryGoals;
+  }
+
+  /**
+   * Collect WHERE clauses from substitutions for batching.
+   */
+  private async collectWhereClausesFromSubstitutions(
+    queryObj: Record<string, Term>,
+    substitutions: Subst[]
+  ): Promise<Record<string, Set<any>>> {
+    const whereClauses: Record<string, Set<any>> = {};
+    for (const subst of substitutions) {
+      const walked = await queryUtils.walkAllKeys(queryObj, subst);
+      const whereCols = queryUtils.onlyGrounded(walked);
+      for (const [col, value] of Object.entries(whereCols)) {
+        if (!whereClauses[col]) whereClauses[col] = new Set();
+        whereClauses[col].add(value);
+      }
+    }
+    return whereClauses;
+  }
+
+  /**
+   * Collect all columns needed for query from goals.
+   */
+  private collectColumnsFromGoals(
+    myQueryObj: Record<string, Term>,
+    cacheCompatibleGoals: GoalRecord[],
+    mergeCompatibleGoals?: GoalRecord[]
+  ): { columns: string[], additionalColumns: string[] } {
+    const allGoalColumns = new Set<string>();
+    
+    // Add columns from current goal
+    Object.keys(myQueryObj).forEach(col => allGoalColumns.add(col));
+    
+    // Add columns from merge-compatible goals (if any)
+    if (mergeCompatibleGoals) {
+      for (const goal of mergeCompatibleGoals) {
+        Object.keys(goal.queryObj).forEach(col => allGoalColumns.add(col));
+      }
+    }
+    
+    // Add columns from cache-compatible goals
+    for (const cacheGoal of cacheCompatibleGoals) {
+      Object.keys(cacheGoal.queryObj).forEach(col => allGoalColumns.add(col));
+    }
+    
+    const additionalColumns = this.options?.selectColumns || [];
+    const columns = [...new Set([...allGoalColumns, ...additionalColumns])];
+    return {
+      columns,
+      additionalColumns 
+    };
+  }
+
+  /**
+   * Execute a query and handle logging.
+   */
+  private async executeQueryWithLogging(
+    whereClauses: Record<string, Set<any>>,
+    columns: string[],
+    goalId: number,
+    substitutions: Subst[],
+    mergeCompatibleGoals?: GoalRecord[],
+    cacheCompatibleGoals?: GoalRecord[]
+  ): Promise<Record<string, any>[]> {
+    const query = buildSelectQuery(this.dbObj, this.table, whereClauses, columns);
+    const sqlString = query.toString();
+    
+    // Create G/M/C prefix: G:current M:merge C:cache
+    const mergeIds = mergeCompatibleGoals?.map(g => g.goalId).join(',') || '';
+    const cacheIds = cacheCompatibleGoals?.map(g => g.goalId).join(',') || '';
+    const prefix = `G:${goalId}${mergeIds ? ` M:${mergeIds}` : ''}${cacheIds ? ` C:${cacheIds}` : ''}`;
+    
+    this.dbObj.addQuery(`${prefix} - ${sqlString}`);
+    
+    // Choose appropriate log message based on whether this is a merge or single query
+    const logType = mergeCompatibleGoals?.length ? "DB_QUERY_MERGED" : "DB_QUERY_BATCH";
+    const logData: any = {
+      table: this.table,
+      sql: sqlString,
+      goalId,
+      substitutionCount: substitutions.length
+    };
+    
+    if (mergeCompatibleGoals?.length) {
+      logData.mergedGoalIds = [goalId, ...mergeCompatibleGoals.map(g => g.goalId)];
+    }
+    
+    if (cacheCompatibleGoals?.length) {
+      logData.cacheCompatibleGoalIds = cacheCompatibleGoals.map(g => g.goalId);
+    }
+    
+    this.logger.log(logType, logData);
+    
+    const rows = await query;
+    if (rows.length) {
+      const rowsLogType = mergeCompatibleGoals?.length ? "DB_ROWS_MERGED" : "DB_ROWS";
+      this.logger.log(rowsLogType, {
+        table: this.table,
+        sql: sqlString,
+        goalId,
+        rows,
+      });
+    }
+    
+    return rows;
+  }
+
+  /**
+   * Build and execute a query for the given goals and substitutions.
+   * Handles both merged queries (multiple goals) and single goal queries.
+   */
+  private async buildAndExecuteQuery(
+    goalId: number, 
+    queryObj: Record<string, Term>, 
+    substitutions: Subst[], 
+    mergeCompatibleGoals: GoalRecord[],
+    cacheCompatibleGoals: GoalRecord[]
+  ): Promise<Record<string, any>[]> {
+    const myGoal = this.dbObj.getGoalById(goalId);
+    if (!myGoal) return [];
+
+    if (mergeCompatibleGoals.length > 0) {
+      // Execute merged query with compatible goals
+      return this.executeMergedQuery(myGoal, queryObj, substitutions, mergeCompatibleGoals, cacheCompatibleGoals);
+    } else {
+      // Execute single goal query
+      return this.executeSingleGoalQuery(goalId, queryObj, substitutions, cacheCompatibleGoals);
+    }
+  }
+
+  /**
+   * Execute a merged query that combines multiple compatible goals.
+   */
+  private async executeMergedQuery(
+    myGoal: GoalRecord, 
+    queryObj: Record<string, Term>, 
+    substitutions: Subst[], 
+    compatibleGoals: GoalRecord[],
+    cacheCompatibleGoals: GoalRecord[]
+  ): Promise<Record<string, any>[]> {
+    const allGoalsToMerge = [myGoal, ...compatibleGoals];
+    
+    // Collect WHERE clauses from compatible goals
+    const representativeSubst = substitutions[0];
+    const goalWhereClauses = await collectAllWhereClauses(allGoalsToMerge, representativeSubst);
+    
+    // Also collect WHERE clauses from all substitutions (for batching)
+    const substWhereClauses = await this.collectWhereClausesFromSubstitutions(queryObj, substitutions);
+    
+    // Merge both sets of WHERE clauses
+    const mergedWhereClauses: Record<string, Set<any>> = {
+      ...goalWhereClauses 
+    };
+    for (const [col, values] of Object.entries(substWhereClauses)) {
+      if (mergedWhereClauses[col]) {
+        for (const value of values) {
+          mergedWhereClauses[col].add(value);
+        }
+      } else {
+        mergedWhereClauses[col] = new Set(values);
+      }
+    }
+    
+    // Collect all columns needed by all goals (merge + cache compatible) 
+    const { columns: allColumns, additionalColumns } = this.collectColumnsFromGoals(queryObj, cacheCompatibleGoals, compatibleGoals);
+    
+    this.logger.log("MERGED_QUERY_COLUMN_SELECTION", {
+      goalId: myGoal.goalId,
+      mergeGoalIds: allGoalsToMerge.map(g => g.goalId),
+      mergeGoalColumns: allGoalsToMerge.flatMap(g => Object.keys(g.queryObj)),
+      cacheCompatibleGoalIds: cacheCompatibleGoals.map(g => g.goalId),
+      cacheCompatibleColumns: cacheCompatibleGoals.flatMap(g => Object.keys(g.queryObj)),
+      additionalColumns,
+      finalSelectedColumns: allColumns,
+      table: this.table
+    });
+    
+    // Execute merged query
+    return await this.executeQueryWithLogging(
+      mergedWhereClauses, 
+      allColumns, 
+      myGoal.goalId, 
+      substitutions, 
+      compatibleGoals, 
+      cacheCompatibleGoals
+    );
+  }
+
+  /**
+   * Execute a query for a single goal (no merging).
+   */
+  private async executeSingleGoalQuery(
+    goalId: number, 
+    queryObj: Record<string, Term>, 
+    substitutions: Subst[],
+    cacheCompatibleGoals: GoalRecord[]
+  ): Promise<Record<string, any>[]> {
+    // Collect WHERE clauses from substitutions
+    const allWhereClauses = await this.collectWhereClausesFromSubstitutions(queryObj, substitutions);
+    
+    // Collect columns from current goal and cache-compatible goals
+    const { columns: allColumns, additionalColumns } = this.collectColumnsFromGoals(queryObj, cacheCompatibleGoals);
+    
+    this.logger.log("SINGLE_QUERY_COLUMN_SELECTION", {
+      goalId,
+      myGoalColumns: Object.keys(queryObj),
+      cacheCompatibleGoalIds: cacheCompatibleGoals.map(g => g.goalId),
+      cacheCompatibleColumns: cacheCompatibleGoals.flatMap(g => Object.keys(g.queryObj)),
+      additionalColumns,
+      finalSelectedColumns: allColumns,
+      table: this.table
+    });
+    
+    return await this.executeQueryWithLogging(
+      allWhereClauses, 
+      allColumns, 
+      goalId, 
+      substitutions, 
+      undefined, // no merge goals
+      cacheCompatibleGoals
+    );
+  }
+
+  /**
+   * Populate cache for goals that can benefit from our query results.
+   */
+  private populateCacheForCompatibleGoals(
+    goalId: number, 
+    substitutions: Subst[], 
+    rows: Record<string, any>[], 
+    cacheCompatibleGoals: GoalRecord[]
+  ): void {
+    if (cacheCompatibleGoals.length === 0) return;
+
+    for (const subst of substitutions) {
+      const passed = getOrCreateRowCache(subst);
+      
+      for (const otherGoal of cacheCompatibleGoals) {
+        if (otherGoal.goalId !== goalId) {
+          passed.set(otherGoal.goalId, rows);
+          this.logger.log("CACHED_FOR_OTHER_GOAL", {
+            myGoalId: goalId,
+            otherGoalId: otherGoal.goalId,
+            rowCount: rows.length,
+            reason: "cache-beneficiary",
+            otherGoalQueryObj: otherGoal.queryObj,
+            availableColumns: rows.length > 0 ? Object.keys(rows[0]) : []
+          });
+        }
+      }
+      
+      // Also populate cache for my goal in case other goals need it
+      passed.set(goalId, rows);
+    }
+  }
+
+  /**
+   * Process cached rows by unifying them with the query and emitting results.
+   */
+  private async processCachedRows(
+    goalId: number, 
+    queryObj: Record<string, Term>, 
+    cachedRows: Record<string, any>[], 
+    subst: Subst, 
+    observer: any
+  ): Promise<void> {
+    for (const row of cachedRows) {
+      const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
+      
+      if (unifiedSubst) {
+        // Preserve cache entries for other goals when processing cache hits
+        const originalCache = getOrCreateRowCache(subst);
+        const preservedCache = new Map(originalCache);
+        preservedCache.delete(goalId); // Only remove our own cache
+        unifiedSubst.set(ROW_CACHE, preservedCache);
+
+        this.logger.log("UNIFY_SUCCESS", {
+          goalId,
+          queryObj,
+          row,
+          wasFromCache: true,
+          unifiedSubst,
+        });
+        
+        observer.next(new Map(unifiedSubst));
+        await new Promise(resolve => nextTick(resolve));
+      }
+    }
+  }
+
+  /**
+   * Process fresh query rows by unifying them with the query and emitting results.
+   */
+  private async processFreshRows(
+    goalId: number, 
+    queryObj: Record<string, Term>, 
+    rows: Record<string, any>[], 
+    substitutions: Subst[], 
+    observer: any
+  ): Promise<void> {
+    for (const subst of substitutions) {
+      for (const row of rows) {
+        const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
+        if (unifiedSubst) {
+          // Cache results for other compatible goals
+          const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
+            this.dbObj, 
+            unifiedSubst, 
+            goalId, 
+            row, 
+            this.logger
+          );
+            
+          this.logger.log("UNIFY_SUCCESS", {
+            goalId,
+            queryObj,
+            row,
+            wasFromCache: false,
+            updatedSubst,
+          });
+          
+          observer.next(new Map(updatedSubst));
+          await new Promise(resolve => nextTick(resolve));
+        }
+      }
+    }
+  }
+
   haveAtLeastOneMatchingVar(a: GoalRecord, b: GoalRecord) {
     const aVarIds = Object.values(queryUtils.onlyVars(a.queryObj)).map(x => x.id);
     const bVarIds = Object.values(queryUtils.onlyVars(b.queryObj)).map(x => x.id);
@@ -395,7 +717,7 @@ export class RegularRelationWithMerger {
     }
   }
 
-  async processGoal(myGoal: GoalRecord, s: Subst) {
+  async findRelatedGoals(myGoal: GoalRecord, s: Subst) {
     // Get both inner and outer group goals from the substitution
     const innerGroupGoals = s.get(SQL_INNER_GROUP_GOALS) as Goal[] || [];
     const outerGroupGoals = s.get(SQL_OUTER_GROUP_GOALS) as Goal[] || [];
@@ -418,23 +740,24 @@ export class RegularRelationWithMerger {
       .map(goalId => this.dbObj.getGoalById(goalId))
       .filter(goal => goal !== undefined) as GoalRecord[];
     
-    this.logger.log("COMPATIBLE_GOALS", {
+    this.logger.log("FOUND_RELATED_GOALS", {
       myGoalId: myGoal.goalId,
+      myGoalQueryObj: myGoal.queryObj,
       innerGroupGoalsCount: innerGroupGoals.length,
       outerGroupGoalsCount: outerGroupGoals.length,
       usingOuterGroupForCaching: outerGroupGoals.length > 0,
       foundOtherGoalIds: otherGoalIds,
-      compatibleGoalIds: otherGoals.map(g => g.goalId),
-      allGoals: otherGoals.map(g => ({
+      relatedGoals: otherGoals.map(g => ({
         goalId: g.goalId,
-        table: g.table 
+        table: g.table,
+        queryObj: g.queryObj
       }))
     });
     
-    // Return all goals with empty matchingIds - let findCompatibleGoals handle transitive matching
+    // Return all goals with empty matchingIds - let compatibility checking handle filtering
     return otherGoals.map(goal => ({
       goal,
-      matchingIds: [] // Empty since we'll use transitive closure in findCompatibleGoals
+      matchingIds: [] // Empty since compatibility filtering happens in calling functions
     }));
   }
 
@@ -485,37 +808,10 @@ export class RegularRelationWithMerger {
               cacheMissCount: batch.length
             });
             
+            // Use extracted function to process fresh query results
             const rows = await this.executeQueryForSubstitutions(goalId, queryObj, batch);
+            await this.processFreshRows(goalId, queryObj, rows, batch, observer);
             
-            // Process SQL results for all cache misses
-            for (const subst of batch) {
-              if (cancelled) return;
-              
-              for (const row of rows) {
-                if (cancelled) return;
-                
-                const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
-                if (unifiedSubst && !cancelled) {
-                  // Cache results for other compatible goals
-                  const updatedSubst = createUpdatedSubstWithCacheForOtherGoals(
-                    this.dbObj, 
-                    unifiedSubst, 
-                    goalId, 
-                    row, 
-                    this.logger
-                  );
-                    
-                  this.logger.log("UNIFY_SUCCESS", {
-                    goalId,
-                    queryObj,
-                    row,
-                    wasFromCache: false
-                  });
-                  observer.next(new Map(updatedSubst));
-                  await new Promise(resolve => nextTick(resolve));
-                }
-              }
-            }
             batchIndex++;
             this.logger.log("FLUSH_BATCH_COMPLETE", {
               goalId,
@@ -556,29 +852,8 @@ export class RegularRelationWithMerger {
                 table: this.table
               });
               
-              // Process cached results immediately
-              for (const row of cache) {
-                if (cancelled) return;
-                
-                const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
-
-                if (unifiedSubst && !cancelled) {
-                  // Preserve cache entries for other goals when processing cache hits
-                  const originalCache = getOrCreateRowCache(subst);
-                  const preservedCache = new Map(originalCache);
-                  preservedCache.delete(goalId); // Only remove our own cache
-                  unifiedSubst.set(ROW_CACHE, preservedCache);
-
-                  this.logger.log("UNIFY_SUCCESS", {
-                    goalId,
-                    queryObj,
-                    row,
-                    wasFromCache: true
-                  });
-                  observer.next(new Map(unifiedSubst));
-                  await new Promise(resolve => nextTick(resolve));
-                }
-              }
+              // Use extracted function to process cached results immediately
+              await this.processCachedRows(goalId, queryObj, cache, subst, observer);
             } else {
               // Cache miss - add to batch for SQL processing
               batchProcessor.addItem(subst);
@@ -642,181 +917,28 @@ export class RegularRelationWithMerger {
       table: this.table
     });
     
-    // Removed global cache check - using improved grouping mechanism instead
-    
-    // Always check for goal merging opportunities (regardless of batch size)
     const myGoal = this.dbObj.getGoalById(goalId);
-    if (myGoal && substitutions.length > 0) {
-      const representativeSubst = substitutions[0];
-      const commonGoals = await this.processGoal(myGoal, representativeSubst);
-      const compatibleGoals = findCompatibleGoals(myGoal, commonGoals);
-      
-      if (compatibleGoals.length > 0) {
-        this.logger.log("MERGING_COMPATIBLE_GOALS", {
-          myGoalId: goalId,
-          compatibleGoalIds: compatibleGoals.map(g => g.goalId),
-          substitutionCount: substitutions.length
-        });
-        
-        // Merge WHERE clauses from all compatible goals AND from all substitutions
-        const allGoalsToMerge = [myGoal, ...compatibleGoals];
-        
-        // Collect WHERE clauses from compatible goals
-        const goalWhereClauses = await collectAllWhereClauses(allGoalsToMerge, representativeSubst);
-        
-        // Also collect WHERE clauses from all substitutions (for batching)
-        const substWhereClauses: Record<string, Set<any>> = {};
-        for (const subst of substitutions) {
-          const walked = await queryUtils.walkAllKeys(queryObj, subst);
-          const whereCols = queryUtils.onlyGrounded(walked);
-          for (const [col, value] of Object.entries(whereCols)) {
-            if (!substWhereClauses[col]) substWhereClauses[col] = new Set();
-            substWhereClauses[col].add(value);
-          }
-        }
-        
-        // Merge both sets of WHERE clauses
-        const mergedWhereClauses: Record<string, Set<any>> = {
-          ...goalWhereClauses 
-        };
-        for (const [col, values] of Object.entries(substWhereClauses)) {
-          if (mergedWhereClauses[col]) {
-            // Combine values from both sources
-            for (const value of values) {
-              mergedWhereClauses[col].add(value);
-            }
-          } else {
-            mergedWhereClauses[col] = new Set(values);
-          }
-        }
-        
-        // Collect all columns needed by all goals
-        const allGoalColumns = new Set<string>();
-        for (const goal of allGoalsToMerge) {
-          Object.keys(goal.queryObj).forEach(col => allGoalColumns.add(col));
-        }
-        const additionalColumns = this.options?.selectColumns || [];
-        const allColumns = [...new Set([...allGoalColumns, ...additionalColumns])];
-        
-        // Execute merged query
-        const query = buildSelectQuery(this.dbObj, this.table, mergedWhereClauses, allColumns);
-        const sqlString = query.toString();
-        this.dbObj.addQuery(`${goalId} - ${allGoalsToMerge.map(g => g.goalId)} - ${sqlString}`);
-        this.logger.log("DB_QUERY_MERGED", {
-          table: this.table,
-          sql: sqlString,
-          goalId,
-          mergedGoalIds: allGoalsToMerge.map(g => g.goalId),
-          substitutionCount: substitutions.length
-        });
-        
-        const rows = await query;
-        if (rows.length) {
-          this.logger.log("DB_ROWS_MERGED", {
-            table: this.table,
-            sql: sqlString,
-            goalId,
-            rows,
-          });
-        }
-        
-        // Removed global cache storage - using improved grouping mechanism instead
-        
-        // Cache results for all goals in outer group that query the same table
-        for (const subst of substitutions) {
-          const passed = getOrCreateRowCache(subst);
-          
-          // Get outer group goals for cross-branch caching
-          const outerGroupGoals = subst.get(SQL_OUTER_GROUP_GOALS) as Goal[] || [];
-          
-          // Find all outer group goal IDs that query the same table
-          const outerGroupGoalIds = outerGroupGoals
-            .map(goalFn => observableToGoalId.get(goalFn as unknown as Observable<any>))
-            .filter(goalId => goalId !== undefined) as number[];
-          
-          const sameTableGoalsInOuterGroup = outerGroupGoalIds
-            .map(goalId => this.dbObj.getGoalById(goalId))
-            .filter(goal => goal !== undefined && goal.table === this.table && goal.goalId !== goalId) as GoalRecord[];
-          
-          this.logger.log("OUTER_GROUP_CACHE_POPULATION", {
-            myGoalId: goalId,
-            outerGroupGoalCount: outerGroupGoals.length,
-            sameTableGoalsCount: sameTableGoalsInOuterGroup.length,
-            sameTableGoalIds: sameTableGoalsInOuterGroup.map(g => g.goalId)
-          });
-          
-          // Cache for all same-table goals in outer group (cross-branch caching)
-          for (const otherGoal of sameTableGoalsInOuterGroup) {
-            passed.set(otherGoal.goalId, rows);
-            this.logger.log("CACHED_FOR_OTHER_GOAL", {
-              myGoalId: goalId,
-              otherGoalId: otherGoal.goalId,
-              rowCount: rows.length,
-              reason: "outer-group-table-match"
-            });
-          }
-          
-          // Cache for goals in the same inner group (existing logic for query merging)
-          for (const otherGoal of compatibleGoals) {
-            if (otherGoal.goalId !== goalId && otherGoal.table === myGoal.table) {
-              passed.set(otherGoal.goalId, rows);
-              this.logger.log("CACHED_FOR_OTHER_GOAL", {
-                myGoalId: goalId,
-                otherGoalId: otherGoal.goalId,
-                rowCount: rows.length,
-                reason: "same-inner-group"
-              });
-            }
-          }
-          
-          // Also populate cache for my goal in case other goals need it
-          passed.set(goalId, rows);
-        }
-        
-        return rows;
-      }
-    }
+    if (!myGoal) return [];
     
-    // Fallback: regular batching without goal merging
-    const allWhereClauses: Record<string, Set<any>> = {};
-    for (const subst of substitutions) {
-      const walked = await queryUtils.walkAllKeys(queryObj, subst);
-      const whereCols = queryUtils.onlyGrounded(walked);
-      for (const [col, value] of Object.entries(whereCols)) {
-        if (!allWhereClauses[col]) allWhereClauses[col] = new Set();
-        allWhereClauses[col].add(value);
-      }
-    }
+    const representativeSubst = substitutions[0];
     
-    const requiredColumns = Object.keys(queryObj);
-    const additionalColumns = this.options?.selectColumns || [];
-    const allColumns = [...new Set([...requiredColumns, ...additionalColumns])];
+    // Step 1: Find all related goals (do this once)
+    const relatedGoals = await this.findRelatedGoals(myGoal, representativeSubst);
     
-    const query = buildSelectQuery(this.dbObj, this.table, allWhereClauses, allColumns);
-    const sqlString = query.toString();
-    this.dbObj.addQuery(`${goalId} - ${sqlString}`);
-    this.logger.log("DB_QUERY_BATCH", {
-      table: this.table,
-      sql: sqlString,
-      goalId,
-      substitutionCount: substitutions.length
-    });
+    // Step 2: Find merge-compatible goals
+    const mergeCompatibleGoals = this.findMergeCompatibleGoals(myGoal, relatedGoals);
     
-    const rows = await query;
-    if (rows.length) {
-      this.logger.log("DB_ROWS", {
-        table: this.table,
-        sql: sqlString,
-        goalId,
-        rows,
-      });
-    }
+    // Step 3: Find cache-compatible goals
+    const cacheCompatibleGoals = this.findCacheCompatibleGoals(myGoal, relatedGoals);
     
-    // Removed global cache storage - using improved grouping mechanism instead
+    // Step 4: Build and execute query (merged or single)
+    const rows = await this.buildAndExecuteQuery(goalId, queryObj, substitutions, mergeCompatibleGoals, cacheCompatibleGoals);
+    
+    // Step 5: Populate cache for compatible goals
+    this.populateCacheForCompatibleGoals(goalId, substitutions, rows, cacheCompatibleGoals);
     
     return rows;
   }
-
 
   // Make unifyRowWithQuery public so it can be used by batch processor
   public unifyRowWithQuery(row: any, queryObj: Record<string, Term>, s: Subst): Subst | null {

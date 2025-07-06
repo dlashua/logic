@@ -142,7 +142,7 @@ export const or = (...goals: Goal[]): Goal => {
           
           goals.forEach((goal, index) => {
             const enrichedInputs = collectedInputs.map(s => 
-              createEnrichedSubst(s, "or", groupId, goals, [goal], index)
+              createEnrichedSubst(s, "or", groupId, [goal], [goal], index)
             );
             
             const enrichedStream = new SimpleObservable<Subst>(goalObserver => {
@@ -395,7 +395,9 @@ function createEnrichedSubst(
   const newPath = [...parentPath, {
     type: Symbol(type),
     id: groupId,
-    ...(branch !== undefined ? { branch } : {})
+    ...(branch !== undefined ? {
+      branch 
+    } : {})
   }];
   const parentOuterGoals = (s.get(SQL_OUTER_GROUP_GOALS) as Goal[]) || [];
   const goalsInnerGoals = goals.flatMap(goal => (goal as any).innerGoals ? [goal, ...(goal as any).innerGoals] : [goal]);

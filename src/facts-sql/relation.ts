@@ -179,45 +179,54 @@ function createUpdatedSubstWithCacheForOtherGoals(dbObj: DBManager, s: Subst, my
 // --- Goal Compatibility & Merging Utilities ---
 
 /**
- * Find goals that share the same top-level execution path and could benefit from caching.
- * This includes goals from different groups but same top-level execution context.
- */
-
-/**
  * Check if one goal could benefit from cached data of another goal.
  * For caching, we can be more permissive than merging - goals can benefit
  * from each other's cached results as long as they share some variable mappings.
  */
-function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord): boolean {
-  // For caching purposes, goals can benefit from each other as long as:
-  // 1. They are for the same table
-  // 2. They share at least one variable-to-column mapping
-  
+function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord, subst: Subst): boolean {
   if (myGoal.table !== otherGoal.table) {
     return false;
   }
-  
+
   const myColumns = Object.keys(myGoal.queryObj);
   const otherColumns = Object.keys(otherGoal.queryObj);
-  
-  // Check if they share any common columns with the same variable mappings
+
+  let matches = 0;
+
   for (const column of myColumns) {
     if (otherColumns.includes(column)) {
-      const myValue = myGoal.queryObj[column];
-      const otherValue = otherGoal.queryObj[column];
-      
-      // If both map the same variable to the same column, they can benefit from caching
-      if (isVar(myValue) && isVar(otherValue) && myValue.id === otherValue.id) {
-        return true;
-      }
-      
-      // If both map the same literal value to the same column, they can benefit from caching
-      if (!isVar(myValue) && !isVar(otherValue) && myValue === otherValue) {
-        return true;
+
+      // Walk the value in the current substitution to see if it's grounded
+      const myValueRaw = myGoal.queryObj[column];
+      const otherValueRaw = otherGoal.queryObj[column];
+      const myValue = walk(myValueRaw, subst);
+      const otherValue = walk(otherValueRaw, subst);
+
+      if (!isVar(myValue)) {
+        // myGoal has a ground value, otherGoal must match exactly
+        if (!isVar(otherValue)) {
+          if(myValue === otherValue) {
+            matches++;
+          } else {
+            return false;
+          }
+        } else {
+          return false;
+        }
+      } else {
+        // myGoal has a variable, otherGoal just needs a variable in this column
+        if (isVar(otherValue)) {
+          matches++;
+        } else {
+          return false;
+        }
       }
     }
   }
-  
+
+  if(matches > 0) {
+    return true;
+  }
   return false;
 }
 
@@ -347,12 +356,12 @@ export class RegularRelationWithMerger {
    * Find goals that are compatible for result caching.
    * These goals can benefit from our query results even if not merged.
    */
-  private findCacheCompatibleGoals(myGoal: GoalRecord, relatedGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
+  private findCacheCompatibleGoals(myGoal: GoalRecord, relatedGoals: { goal: GoalRecord, matchingIds: string[] }[], subst: Subst): GoalRecord[] {
     const cacheBeneficiaryGoals: GoalRecord[] = [];
     const candidateGoalsWithCompatibility = [];
     
     for (const { goal } of relatedGoals) {
-      const isCompatible = goal.table === myGoal.table && couldBenefitFromCache(myGoal, goal);
+      const isCompatible = couldBenefitFromCache(myGoal, goal, subst);
       
       candidateGoalsWithCompatibility.push({
         goalId: goal.goalId,
@@ -929,7 +938,7 @@ export class RegularRelationWithMerger {
     const mergeCompatibleGoals = this.findMergeCompatibleGoals(myGoal, relatedGoals);
     
     // Step 3: Find cache-compatible goals
-    const cacheCompatibleGoals = this.findCacheCompatibleGoals(myGoal, relatedGoals);
+    const cacheCompatibleGoals = this.findCacheCompatibleGoals(myGoal, relatedGoals, representativeSubst);
     
     // Step 4: Build and execute query (merged or single)
     const rows = await this.buildAndExecuteQuery(goalId, queryObj, substitutions, mergeCompatibleGoals, cacheCompatibleGoals);

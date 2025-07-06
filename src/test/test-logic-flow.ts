@@ -23,16 +23,20 @@ const results = await query()
     // substLog("top"),
     // substLog("first and"),
     // and (
-    // or(
-    //   info_color($.kid3, "blue"),
-    //   info_color($.kid3, "pink"),
-    // ),
-    membero($.top, [
-      "robert", "louis"
-    ]),
+
+    // membero($.top, [
+    //   "robert", "louis"
+    // ]),
     parent_kid($.top, $.kid1),
     parent_kid($.kid1, $.kid2),
     parent_kid($.kid2, $.kid3),
+
+    or(
+      info_color($.kid3, "blue"),
+      info_color($.kid3, "pink"),
+    ),
+
+
     // ),
     // not(info_number($.kid3, 4)),
     // parent_kid($.kid3, $.kid4),

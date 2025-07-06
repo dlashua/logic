@@ -29,6 +29,9 @@ export interface QueryParams {
   whereConditions: WhereCondition[];
   limit?: number;
   offset?: number;
+  relationOptions?: RelationOptions;
+  goalId?: number;
+  logQuery?: (queryString: string) => void;
 }
 
 /**
@@ -43,6 +46,8 @@ export interface RelationOptions {
   primaryKey?: string;
   selectColumns?: string[];
   fullScanKeys?: string[];
+  // For REST APIs that need primary key in URL path
+  restPrimaryKey?: string;
 }
 
 /**
@@ -139,5 +144,18 @@ export interface RestDataStoreConfig {
     limitParam?: string;
     offsetParam?: string;
     maxPageSize?: number;
+  };
+  // New generic features
+  features?: {
+    /** Whether to include primary key in URL path instead of query params */
+    primaryKeyInPath?: boolean;
+    /** Whether API supports comma-separated values for IN operations */
+    supportsInOperator?: boolean;
+    /** Whether API supports field selection via query params */
+    supportsFieldSelection?: boolean;
+    /** Custom URL builder for different API patterns */
+    urlBuilder?: (table: string, primaryKey?: string, primaryKeyValue?: any) => string;
+    /** Custom query parameter formatter */
+    queryParamFormatter?: (column: string, operator: string, value: any) => { key: string; value: string };
   };
 }

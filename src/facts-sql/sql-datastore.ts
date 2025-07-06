@@ -43,6 +43,12 @@ export class SqlDataStore implements DataStore {
       query = query.offset(params.offset);
     }
 
+    // Log the actual SQL query
+    if (params.logQuery) {
+      const goalPrefix = params.goalId ? `G:${params.goalId}` : 'SQL';
+      params.logQuery(`${goalPrefix} - ${query.toString()}`);
+    }
+
     return await query;
   }
 

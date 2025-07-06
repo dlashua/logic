@@ -287,17 +287,13 @@ export class AbstractRelation {
     const queryParams: QueryParams = {
       table: this.table,
       selectColumns: columns.columns,
-      whereConditions
+      whereConditions,
+      relationOptions: this._options,
+      goalId,
+      logQuery: (queryString: string) => this.goalManager.addQuery(queryString)
     };
 
-    // Log the query
-    const mergeIds = mergeCompatibleGoals.map(g => g.goalId).join(',');
-    const cacheIds = cacheCompatibleGoals.map(g => g.goalId).join(',');
-    const prefix = `G:${goalId}${mergeIds ? ` M:${mergeIds}` : ''}${cacheIds ? ` C:${cacheIds}` : ''}`;
-    
-    this.goalManager.addQuery(`${prefix} - ${this.formatQueryForLog(queryParams)}`);
-
-    // Execute via data store
+    // Execute via data store (it will handle query logging)
     const rows = await this.dataStore.executeQuery(queryParams);
 
     this.logger.log("DB_QUERY_EXECUTED", {

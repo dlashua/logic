@@ -6,6 +6,7 @@ import type {
   RestDataStoreConfig
 } from "../facts-abstract/types.ts";
 import type { RestRelationOptions } from "./types.ts";
+import type { RelationCache } from "./relation-cache.ts";
 
 /**
  * REST API implementation of DataStore
@@ -15,8 +16,11 @@ export class RestDataStore implements DataStore {
   readonly type = "rest";
 
   private config: Required<RestDataStoreConfig>;
+  private cache?: RelationCache | null;
+  private cacheMethods: string[];
+  private cachePrefix: string;
 
-  constructor(config: RestDataStoreConfig) {
+  constructor(config: RestDataStoreConfig & { cache?: RelationCache | null, cacheMethods?: string[], cachePrefix?: string }) {
     this.config = {
       baseUrl: config.baseUrl.replace(/\/$/, ''), // Remove trailing slash
       apiKey: config.apiKey ?? '',
@@ -37,22 +41,35 @@ export class RestDataStore implements DataStore {
         ...config.features
       }
     };
+    this.cache = config.cache;
+    this.cacheMethods = config.cacheMethods ?? ["GET"];
+    this.cachePrefix = config.cachePrefix ?? "";
   }
 
   async executeQuery(params: QueryParams): Promise<DataRow[]> {
-    // Type assertion: treat relationOptions as RestRelationOptions for REST
-    const restParams = {
+    // Detect a 'limit' whereCondition and move it to params.limit
+    let limitFromWhere: number | undefined = undefined;
+    const filteredWhere = params.whereConditions.filter(c => {
+      if (c.column === 'limit' && c.operator === 'eq' && typeof c.value === 'number') {
+        limitFromWhere = c.value;
+        return false;
+      }
+      return true;
+    });
+    const effectiveParams = {
       ...params,
+      limit: limitFromWhere ?? params.limit,
+      whereConditions: filteredWhere,
       relationOptions: params.relationOptions as RestRelationOptions
     };
 
     // Handle IN operations that don't support comma-separated values
     if (!this.config.features.supportsInOperator) {
-      return await this.executeQueryWithoutInOperator(restParams);
+      return await this.executeQueryWithoutInOperator(effectiveParams);
     }
 
     // Build URL - check for primary key in path
-    const { baseUrl, primaryKeyCondition, otherConditions } = this.buildUrl(restParams);
+    const { baseUrl, primaryKeyCondition, otherConditions } = this.buildUrl(effectiveParams);
     const url = new URL(baseUrl);
 
     // Add non-primary-key WHERE conditions as query parameters
@@ -61,15 +78,15 @@ export class RestDataStore implements DataStore {
     }
 
     // Add field selection (if the API supports it)
-    if (this.config.features.supportsFieldSelection && params.selectColumns.length > 0) {
-      url.searchParams.append('fields', params.selectColumns.join(','));
+    if (this.config.features.supportsFieldSelection && effectiveParams.selectColumns.length > 0) {
+      url.searchParams.append('fields', effectiveParams.selectColumns.join(','));
     }
 
     // Add pagination
-    this.addPaginationToUrl(url, params);
+    // this.addPaginationToUrl(url, effectiveParams);
 
     // Execute the request
-    return await this.executeHttpRequest(url.toString(), params);
+    return await this.executeHttpRequest(url.toString(), effectiveParams);
   }
 
   private async executeQueryWithoutInOperator(params: QueryParams): Promise<DataRow[]> {
@@ -129,7 +146,7 @@ export class RestDataStore implements DataStore {
     }
 
     // Add pagination
-    this.addPaginationToUrl(url, params);
+    // this.addPaginationToUrl(url, params);
 
     // Execute the request
     return await this.executeHttpRequest(url.toString(), params);
@@ -248,6 +265,64 @@ export class RestDataStore implements DataStore {
     }
   }
 
+  // Helper: auto-paginate for APIs with { results: [], page: number } format
+  private async fetchAllPages(url: string, params: QueryParams, initialData: any, initialPage: number, pageSize: number, totalLimit: number): Promise<DataRow[]> {
+    const allResults: DataRow[] = Array.isArray(initialData.results) ? initialData.results : [];
+    let page = initialPage;
+    const done = false;
+    // Cache the initial page if caching is enabled
+    const method = 'GET';
+    const shouldCache = this.cache && this.cacheMethods.includes(method);
+    const limitKey = params.limit !== undefined ? `:limit=${params.limit}` : '';
+    if (shouldCache) {
+      const cacheKey = this.cachePrefix + method + ':' + url + limitKey;
+      await this.cache!.set(cacheKey, initialData.results);
+    }
+    while (!done && allResults.length < totalLimit) {
+      page++;
+      const pagedUrl = new URL(url);
+      pagedUrl.searchParams.set("page", String(page));
+      pagedUrl.searchParams.set("limit", String(pageSize));
+      const pagedUrlStr = pagedUrl.toString();
+      let pageResults: any[] | undefined = undefined;
+      let fromCache = false;
+      const pageLimitKey = params.limit !== undefined ? `:limit=${params.limit}` : '';
+      if (shouldCache) {
+        const cacheKey = this.cachePrefix + method + ':' + pagedUrlStr + pageLimitKey;
+        const cached = await this.cache!.get(cacheKey);
+        if (cached !== undefined) {
+          pageResults = Array.isArray(cached) ? cached : (cached && typeof cached === 'object' && Array.isArray(cached.results) ? cached.results : []);
+          fromCache = true;
+        }
+      }
+      if (!fromCache) {
+        const response = await fetch(pagedUrlStr, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...this.config.headers,
+            ...(this.config.apiKey ? {
+              'Authorization': `Bearer ${this.config.apiKey}` 
+            } : {})
+          },
+          signal: AbortSignal.timeout(this.config.timeout)
+        });
+        if (!response.ok) break;
+        const data = await response.json();
+        pageResults = Array.isArray(data.results) ? data.results : [];
+        if (shouldCache) {
+          const cacheKey = this.cachePrefix + method + ':' + pagedUrlStr + pageLimitKey;
+          await this.cache!.set(cacheKey, pageResults);
+        }
+      }
+      if (!pageResults || pageResults.length === 0) break;
+      allResults.push(...pageResults);
+      if (pageResults.length < pageSize) break; // last page
+    }
+    return allResults.slice(0, totalLimit);
+  }
+
   private async executeHttpRequest(url: string, params: QueryParams): Promise<DataRow[]> {
     // Prepare headers
     const headers: Record<string, string> = {
@@ -260,6 +335,39 @@ export class RestDataStore implements DataStore {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
 
+    // Determine HTTP method (default GET)
+    const method = 'GET'; // TODO: support other methods if needed
+    const limitKey = params.limit !== undefined ? `:limit=${params.limit}` : '';
+    const cacheKey = this.cachePrefix + method + ':' + url + limitKey;
+
+    const shouldCache = this.cache && this.cacheMethods.includes(method);
+
+    if (shouldCache) {
+      const cached = await this.cache!.get(cacheKey);
+      if (cached !== undefined) {
+        if (params.logQuery) {
+          const goalPrefix = params.goalId ? `GC:${params.goalId}` : 'REST_CACHE';
+          const headersStr = Object.keys(headers).length > 2 ? 
+            ` Headers: ${JSON.stringify({
+              ...headers,
+              Authorization: undefined 
+            })}` : '';
+          params.logQuery(`${goalPrefix} - ${method} ${url}${headersStr}`);
+        }
+        if (Array.isArray(cached)) {
+          return cached;
+        }
+        if (typeof cached === 'string') {
+          try {
+            const arr = JSON.parse(cached);
+            if (Array.isArray(arr)) return arr;
+          } catch (e) {/* ignore parse error */}
+        }
+        if (cached && typeof cached === 'object') return [cached];
+        return [];
+      }
+    }
+
     // Log the actual HTTP request
     if (params.logQuery) {
       const goalPrefix = params.goalId ? `G:${params.goalId}` : 'REST';
@@ -268,13 +376,12 @@ export class RestDataStore implements DataStore {
           ...headers,
           Authorization: undefined 
         })}` : '';
-      params.logQuery(`${goalPrefix} - GET ${url}${headersStr}`);
+      params.logQuery(`${goalPrefix} - ${method} ${url}${headersStr}`);
     }
 
-    console.log("FETCHING", url);
     // Execute the request
     const response = await fetch(url, {
-      method: 'GET',
+      method,
       headers,
       signal: AbortSignal.timeout(this.config.timeout)
     });
@@ -284,24 +391,36 @@ export class RestDataStore implements DataStore {
     }
 
     const data = await response.json();
-    console.log("RESPONSE", response.status, url)
 
-    // Handle different response formats
-    if (Array.isArray(data)) {
-      return data;
+    // Auto-paginate if response is { results: [], page: number }
+    const totalLimit = params.limit ?? 50;
+    let result: DataRow[];
+    if (data && Array.isArray(data.results) && typeof data.page === "number") {
+      if (data.results.length >= totalLimit) {
+        result = data.results.slice(0, totalLimit);
+      } else {
+        // Fetch more pages if needed
+        const pageSize = data.results.length;
+        if (pageSize === 0) return [];
+        result = await this.fetchAllPages(url, params, data, data.page, pageSize, totalLimit);
+      }
+    } else if (Array.isArray(data)) {
+      result = data;
     } else if (data.data && Array.isArray(data.data)) {
-      // Handle wrapped responses like { data: [...], total: 100 }
-      return data.data;
+      result = data.data;
     } else if (data.results && Array.isArray(data.results)) {
-      // Handle pagination format like { results: [...], count: 100 }
-      return data.results;
+      result = data.results;
     } else if (typeof data === 'object' && data !== null) {
-      // Handle single object responses (like Pokemon API individual records)
-      return [data];
+      result = [data];
     } else {
       console.error("UNEXPECTED FORMAT");
       throw new Error(`Unexpected REST API response format: ${JSON.stringify(data)}`);
     }
+
+    if (shouldCache) {
+      await this.cache!.set(cacheKey, result);
+    }
+    return result;
   }
 
   async getColumns(relationIdentifier: string): Promise<string[]> {

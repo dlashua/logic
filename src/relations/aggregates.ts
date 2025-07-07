@@ -5,10 +5,13 @@ import type {
   Var,
   Observable
 } from "../core/types.ts"
-import { walk, arrayToLogicList, enrichGroupInput } from "../core/kernel.ts";
+import { walk, arrayToLogicList, enrichGroupInput, unify } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
+/**
+ * @deprecated Avoid using toSimple. Use native Observable/subscribe patterns instead.
+ */
 function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
   return (input$ instanceof SimpleObservable)
     ? input$
@@ -58,7 +61,7 @@ export function groupByGoal(
           });
         },
         complete: () => {
-          const grouped = new Map<string, { key: any; items: any[] }>();
+          const grouped = new Map<string, { key: any; items: any }>();
           for (const { key, value } of pairs) {
             const k = JSON.stringify(key);
             if (!grouped.has(k))
@@ -232,3 +235,192 @@ export const collect_distincto = aggregateRelFactory(
  * Usage: counto(x, goal, n)
  */
 export const counto = aggregateRelFactory((arr) => arr.length);
+
+/**
+ * count_valueo(x, goal, value, count):
+ *   count is the number of times x == value in the stream of substitutions from goal.
+ *   (Canonical, goal-wrapping version: aggregates over all solutions to goal.)
+ */
+export function count_valueo(
+  x: Term,
+  goal: Goal,
+  value: Term,
+  count: Term
+): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      const inputSub = input$.subscribe({
+        next: (s: Subst) => {
+          // For each input substitution, run the goal, then count in that stream
+          count_value_streamo(x, value, count)(goal(SimpleObservable.of(s))).subscribe({
+            next: (sCount) => {
+              // Merge the count result with the original substitution
+              // sCount may only bind 'count', so unify with s
+              const merged = new Map(s);
+              for (const [k, v] of sCount) merged.set(k, v);
+              observer.next(merged);
+            },
+            error: observer.error,
+            complete: observer.complete,
+          });
+        },
+        error: observer.error,
+        complete: observer.complete,
+      });
+      return () => inputSub.unsubscribe();
+    });
+}
+
+/**
+ * count_value_streamo(x, value, count):
+ *   count is the number of times x == value in the current stream of substitutions.
+ *   (Stream-based version: aggregates over the current stream, like maxo/mino.)
+ *
+ * Usage: count_value_streamo(x, value, count)
+ */
+export function count_value_streamo(
+  x: Term,
+  value: Term,
+  count: Term
+): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      const substitutions: Subst[] = [];
+      input$.subscribe({
+        next: (s) => substitutions.push(s),
+        error: observer.error,
+        complete: () => {
+          let n = 0;
+          for (const s of substitutions) {
+            const val = walk(x, s);
+            const target = walk(value, s);
+            if (JSON.stringify(val) === JSON.stringify(target)) n++;
+          }
+          eq(count, n)(SimpleObservable.of(new Map())).subscribe({
+            next: observer.next,
+            error: observer.error,
+            complete: observer.complete,
+          });
+        },
+      });
+    });
+}
+
+/**
+ * group_by_count_streamo(x, count):
+ *   For each unique value of x in the current stream, emit a substitution with x and its count.
+ *   Example: if stream is x=A,x=A,x=B,x=A,x=B,x=C, emits x=A,count=3; x=B,count=2; x=C,count=1
+ *   (Stream-based group-by-count, canonical in Datalog/logic aggregation.)
+ */
+export function group_by_count_streamo(
+  x: Term,
+  count: Term
+): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      // Map from value key to array of substitutions
+      const valueMap = new Map<string, { value: any, substitutions: Subst[] }>();
+      input$.subscribe({
+        next: (s) => {
+          const val = walk(x, s);
+          const k = JSON.stringify(val);
+          if (!valueMap.has(k)) valueMap.set(k, {
+            value: val,
+            substitutions: []
+          });
+          valueMap.get(k)!.substitutions.push(s);
+        },
+        error: observer.error,
+        complete: () => {
+          for (const { value, substitutions } of valueMap.values()) {
+            const subst = new Map(substitutions[0]);
+            const subst1 = unify(x, value, subst);
+            if (subst1 === null) continue;
+            const subst2 = unify(count, substitutions.length, subst1);
+            if (subst2 === null) continue;
+            observer.next(subst2 as Subst);
+          }
+          observer.complete?.();
+        },
+      });
+    });
+}
+
+/**
+ * sort_by_streamo(x, orderOrFn?):
+ *   Sorts the stream of substitutions by the value of x.
+ *   - If orderOrFn is 'asc' (default), sorts ascending.
+ *   - If orderOrFn is 'desc', sorts descending.
+ *   - If orderOrFn is a function (a, b) => number, uses it as the comparator on walked x values.
+ *   Emits the same substitutions, but in sorted order by x.
+ *   Example: if stream is x=3, x=1, x=2, emits x=1, x=2, x=3 (asc)
+ */
+export function sort_by_streamo(
+  x: Term,
+  orderOrFn?: 'asc' | 'desc' | ((a: any, b: any) => number)
+): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      const buffer: { value: any, subst: Subst }[] = [];
+      input$.subscribe({
+        next: (s) => {
+          const val = walk(x, s);
+          buffer.push({
+            value: val,
+            subst: s
+          });
+        },
+        error: observer.error,
+        complete: () => {
+          let comparator: (a: { value: any }, b: { value: any }) => number;
+          if (typeof orderOrFn === 'function') {
+            comparator = (a, b) => orderOrFn(a.value, b.value);
+          } else if (orderOrFn === 'desc') {
+            comparator = (a, b) => {
+              if (a.value < b.value) return 1;
+              if (a.value > b.value) return -1;
+              return 0;
+            };
+          } else { // 'asc' or undefined
+            comparator = (a, b) => {
+              if (a.value < b.value) return -1;
+              if (a.value > b.value) return 1;
+              return 0;
+            };
+          }
+          buffer.sort(comparator);
+          for (const { subst } of buffer) {
+            observer.next(subst);
+          }
+          observer.complete?.();
+        },
+      });
+    });
+}
+
+/**
+ * take_streamo(n):
+ *   Allows only the first n substitutions to pass through the stream.
+ *   Example: take_streamo(3) will emit only the first 3 substitutions.
+ */
+export function take_streamo(n: number): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      let count = 0;
+      const sub = input$.subscribe({
+        next: (s) => {
+          if (count < n) {
+            observer.next(s);
+            count++;
+            if (count === n) {
+              observer.complete?.();
+              sub.unsubscribe();
+            }
+          }
+        },
+        error: observer.error,
+        complete: observer.complete,
+      });
+      return () => sub.unsubscribe();
+    });
+}

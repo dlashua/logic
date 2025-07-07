@@ -352,13 +352,12 @@ export class RestDataStore implements DataStore {
       const cached = await this.cache!.get(cacheKey);
       if (cached !== undefined) {
         if (params.logQuery) {
-          const goalPrefix = params.goalId ? `GC:${params.goalId}` : 'REST_CACHE';
           const headersStr = Object.keys(headers).length > 2 ? 
             ` Headers: ${JSON.stringify({
               ...headers,
               Authorization: undefined 
             })}` : '';
-          params.logQuery(`${goalPrefix} - ${method} ${url}${headersStr}`);
+          params.logQuery(`[CACHED] ${method} ${url}${headersStr}`);
         }
         if (Array.isArray(cached)) {
           return cached;
@@ -376,13 +375,12 @@ export class RestDataStore implements DataStore {
 
     // Log the actual HTTP request
     if (params.logQuery) {
-      const goalPrefix = params.goalId ? `G:${params.goalId}` : 'REST';
       const headersStr = Object.keys(headers).length > 2 ? 
         ` Headers: ${JSON.stringify({
           ...headers,
           Authorization: undefined 
         })}` : '';
-      params.logQuery(`${goalPrefix} - ${method} ${url}${headersStr}`);
+      params.logQuery(`${method} ${url}${headersStr}`);
     }
 
     // Execute the request

@@ -45,8 +45,7 @@ export class SqlDataStore implements DataStore {
 
     // Log the actual SQL query
     if (params.logQuery) {
-      const goalPrefix = params.goalId ? `G:${params.goalId}` : 'SQL';
-      params.logQuery(`${goalPrefix} - ${query.toString()}`);
+      params.logQuery(`${query.toString()}`);
     }
 
     return await query;

@@ -21,18 +21,18 @@ function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
 
 export const uniqueo = (t: Term, g: Goal): Goal =>
   enrichGroupInput("uniqueo", [g], [],
-  (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
-    const seen = new Set();
-    return toSimple(g(SimpleObservable.of(s))).flatMap((s2: Subst) => {
-      const w_t = walk(t, s2);
-      if (isVar(w_t)) {
+    (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
+      const seen = new Set();
+      return toSimple(g(SimpleObservable.of(s))).flatMap((s2: Subst) => {
+        const w_t = walk(t, s2);
+        if (isVar(w_t)) {
+          return SimpleObservable.of(s2);
+        }
+        const key = JSON.stringify(w_t);
+        if (seen.has(key)) return SimpleObservable.empty();
+        seen.add(key);
         return SimpleObservable.of(s2);
-      }
-      const key = JSON.stringify(w_t);
-      if (seen.has(key)) return SimpleObservable.empty();
-      seen.add(key);
-      return SimpleObservable.of(s2);
-    });
+      });
     }));
 
 export function not(goal: Goal): Goal {
@@ -140,14 +140,34 @@ export function nonGroundo(term: Term): Goal {
  * A goal that logs each substitution it sees along with a message.
  */
 export function substLog(msg: string): Goal {
-  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+  return (input$: Observable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
-      console.log(`[substLog] ${msg}:`, util.inspect(s, {
-        depth: null,
-        colors: true 
-      }));
-      observer.next(s);
-      observer.complete?.();
-    })
-  );
+      const sub = input$.subscribe({
+        next: (s) => {
+          console.log(`[substLog] ${msg}:`, util.inspect(s, {
+            depth: null,
+            colors: true
+          }));
+          observer.next(s);
+        },
+        error: observer.error,
+        complete: observer.complete,
+      });
+      return () => sub.unsubscribe();
+    });
+}
+
+export function fail(): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      const sub = input$.subscribe({
+        next: (s) => {
+
+          /* pass */
+        },
+        error: observer.error,
+        complete: observer.complete,
+      });
+      return () => sub.unsubscribe();
+    });
 }

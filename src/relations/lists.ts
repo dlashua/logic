@@ -177,14 +177,14 @@ export function lengtho(arrayOrList: Term, length: Term): Goal {
         } else if (Array.isArray(walkedArray)) {
           actualLength = walkedArray.length;
         } else {
-          observer.complete?.();
+          // observer.complete?.();
           return;
         }
         const unified = unify(actualLength, walkedLength, s);
         if (unified !== null) {
           observer.next(unified);
         }
-        observer.complete?.();
+        // observer.complete?.();
       },
       error: observer.error,
       complete: observer.complete

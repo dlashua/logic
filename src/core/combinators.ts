@@ -18,9 +18,6 @@ import {
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
 
-// Counter for generating unique group IDs
-let groupIdCounter = 0;
-
 /**
  * A goal that succeeds if two terms can be unified.
  */
@@ -98,7 +95,7 @@ export const and = (...goals: Goal[]): Goal => {
   if (goals.length === 1) {
     return goals[0];
   }
-  return enrichGroupInput("and", ++groupIdCounter, goals, [], (enrichedInput$) =>
+  return enrichGroupInput("and", goals, [], (enrichedInput$) =>
     goals.reduce((acc, goal) => goal(acc), enrichedInput$)
   );
 };
@@ -115,7 +112,7 @@ export const or = (...goals: Goal[]): Goal => {
     return goals[0];
   }
   
-  return enrichGroupInput("or", ++groupIdCounter, [], goals, (input$: SimpleObservable<Subst>) => {
+  return enrichGroupInput("or", [], goals, (input$: SimpleObservable<Subst>) => {
     return new SimpleObservable<Subst>((observer) => {
       // Collect all input substitutions first
       const inputSubsts: Subst[] = [];
@@ -260,7 +257,7 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
  * Negation as failure - succeeds only if the goal fails
  */
 export function not(goal: Goal): Goal {
-  return enrichGroupInput("not", ++groupIdCounter, [], [], (enrichedInput$) => {
+  return enrichGroupInput("not", [], [], (enrichedInput$) => {
     return new SimpleObservable<Subst>((observer) => {
       enrichedInput$.subscribe({
         next: (s) => {

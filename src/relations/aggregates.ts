@@ -97,8 +97,6 @@ export function groupByGoal(
   );
 }
 
-let aggregateIdCounter = 0;
-
 /**
  * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.
  * - x: variable to collect
@@ -114,7 +112,7 @@ export function aggregateRelFactory(
   // @ts-expect-error
   const name = aggFn.name || aggFn.displayName || "aggregateRelFactory";
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return enrichGroupInput(name, ++aggregateIdCounter, [], [], (input$) =>
+    return enrichGroupInput(name, [], [goal], (input$) =>
       toSimple(input$).flatMap((s: Subst) =>
         new SimpleObservable<Subst>((observer) => {
           const results: Term[] = [];
@@ -160,8 +158,6 @@ export function aggregateRelFactory(
   // };
 }
 
-let groupAggregateIdCounter = 0;
-
 /**
  * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
  * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg, dedup?) => Goal
@@ -178,7 +174,6 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
   ): Goal =>
     enrichGroupInput(
       "groupAggregateRelFactory",
-      ++groupAggregateIdCounter,
       [],
       [goal],
       (input$: Observable<Subst>) =>

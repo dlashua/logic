@@ -17,6 +17,10 @@ export const GOAL_GROUP_CONJ_GOALS = Symbol('goal-group-conj-goals'); // Goals i
 export const GOAL_GROUP_ALL_GOALS = Symbol('goal-group-all-goals'); // Goals across all related groups
 
 let varCounter = 0;
+let groupCounter = 0;
+export function nextGroupId() {
+  return groupCounter++;
+}
 
 /**
  * Creates a new, unique logic variable.
@@ -243,13 +247,10 @@ export function logicListToArray(list: Term): Term[] {
   return out;
 }
 
-let liftGoalGroupId = 0;
-
 // Helper: Convert a single-substitution goal to the new protocol
 export function liftGoal(singleGoal: (s: Subst) => SimpleObservable<Subst>): Goal {
   const groupType = singleGoal.name || "liftGoal";
-  const groupId = ++liftGoalGroupId;
-  return enrichGroupInput(groupType, groupId, [], [], (input$) =>
+  return enrichGroupInput(groupType, [], [], (input$) =>
     new SimpleObservable(observer => {
       const subs = input$.subscribe({
         next: (s) => {
@@ -279,11 +280,11 @@ export function chainGoals(goals: Goal[], initial$: SimpleObservable<Subst>): Si
 export function createEnrichedSubst(
   s: Subst,
   type: string,
-  groupId: number,
   conjGoals: Goal[],
   disjGoals: Goal[],
   branch?: number
 ): Subst {
+  const groupId = nextGroupId();
   const parentPath = (s.get(GOAL_GROUP_PATH) as any[]) || [];
   const newPath = [...parentPath, {
     type: Symbol(type),
@@ -334,19 +335,18 @@ export function createEnrichedSubst(
  */
 export function enrichGroupInput(
   type: string,
-  groupId: number,
   conjGoals: Goal[],
   disjGoals: Goal[],
   fn: (enrichedInput$: SimpleObservable<Subst>) => any
 ) {
   const newInput$ = (input$: SimpleObservable<Subst>) => {
     const enrichedInput$ = input$.map(s => 
-      createEnrichedSubst(s, type, groupId, conjGoals, disjGoals)
+      createEnrichedSubst(s, type, conjGoals, disjGoals)
     );
     return fn(enrichedInput$);
   };
   (newInput$ as any).conjGoals = conjGoals;
   (newInput$ as any).disjGoals = disjGoals;
-  newInput$.displayName = `${type}_${groupId}`;
+  newInput$.displayName = `${type}`;
   return newInput$;
 }

@@ -20,6 +20,7 @@ function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
 }
 
 export const uniqueo = (t: Term, g: Goal): Goal =>
+  enrichGroupInput("uniqueo", [g], [],
   (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
     const seen = new Set();
     return toSimple(g(SimpleObservable.of(s))).flatMap((s2: Subst) => {
@@ -32,13 +33,10 @@ export const uniqueo = (t: Term, g: Goal): Goal =>
       seen.add(key);
       return SimpleObservable.of(s2);
     });
-  });
-
-let notGroupId = 0;
+    }));
 
 export function not(goal: Goal): Goal {
-  const groupId = ++notGroupId;
-  return enrichGroupInput("not", groupId, [], [goal],(input$: Observable<Subst>) =>
+  return enrichGroupInput("not", [], [goal], (input$: Observable<Subst>) =>
     toSimple(input$).flatMap((s: Subst) => {
       let found = false;
       return new SimpleObservable<Subst>((observer) => {

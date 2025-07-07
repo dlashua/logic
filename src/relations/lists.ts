@@ -18,12 +18,10 @@ import { SimpleObservable } from "../core/observable.ts";
  * A goal that succeeds if `x` is a member of the logic `list`.
  * Optimized for both arrays and logic lists.
  */
-let memberoGroupId = 0;
 
 export function membero(x: Term, list: Term): Goal {
-  const groupId = ++memberoGroupId;
   // @ts-expect-error
-  return enrichGroupInput("membero", groupId, [membero], [], (input$) =>
+  return enrichGroupInput("membero", [membero], [], (input$) =>
     new SimpleObservable<Subst>((observer) => {
       const subscriptions: any[] = [];
       let cancelled = false;

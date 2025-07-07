@@ -117,7 +117,13 @@ export class RestDataStore implements DataStore {
             whereConditions: [...otherConditions, eqCondition]
           };
           const results = await this.executeQueryDirect(queryParams);
-          allResults.push(...results);
+          // Tag each result row with the IN value for correct unification
+          for (const row of results) {
+            allResults.push({
+              ...row,
+              [inCondition.column]: value 
+            });
+          }
         }
       }
     }

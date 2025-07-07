@@ -28,16 +28,16 @@ const results = await query()
     // membero($.top, [
     //   "robert", "louis"
     // ]),
-    substLog("top"),
+    // substLog("top"),
     parent_kid($.parent, $.person),
     info_number($.person, 4),
     // substLog("after info_number"),
 
-    // substLog("after parent_kid"),
+    substLog("after parent_kid"),
     or(
       info_color($.person, "blue"),
       info_color($.person, "black"),
-      info_color($.person, "pink"),
+    // info_color($.person, "pink"),
     ),
     // substLog("after or"),
 

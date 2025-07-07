@@ -110,6 +110,7 @@ export interface CacheEntry {
   data: DataRow[];
   timestamp: number;
   goalId: number;
+  meta: Record<string,any> | undefined;
 }
 
 /**
@@ -117,7 +118,7 @@ export interface CacheEntry {
  */
 export interface CacheManager {
   get(goalId: number, subst: Subst): DataRow[] | null;
-  set(goalId: number, subst: Subst, rows: DataRow[]): void;
+  set(goalId: number, subst: Subst, rows: DataRow[], meta?: Record<string,any>): void;
   clear(goalId?: number): void;
   has(goalId: number, subst: Subst): boolean;
 }

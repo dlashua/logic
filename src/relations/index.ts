@@ -33,8 +33,16 @@ export {
   gteo,
   lteo,
   pluso,
-  multo
+  multo,
+  maxo,
+  mino
 } from './numeric.ts';
+
+// Object operations
+export {
+  extract,
+  extractEach
+} from './objects.ts';
 
 // Control flow operations
 export {

@@ -13,21 +13,26 @@ const pokemonApi = await makeRelREST({
     primaryKeyInPath: true, // Use /pokemon/{id} URLs
     supportsFieldSelection: false, // Pokemon API doesn't support field selection
     supportsInOperator: false // Pokemon API doesn't support comma-separated values
-  }
+  },
+  pagination: {
+    limitParam: 'limit',
+    offsetParam: 'offset',
+    maxPageSize: 20,
+  },
 });
 
 const pokemon = pokemonApi.rel("pokemon", {
-  restPrimaryKey: "name" // Primary key will be included in URL path
+  restPrimaryKey: "name" 
 });
 
 const pokemon_species = pokemonApi.rel("pokemon-species", {
-  restPrimaryKey: "name" // Primary key will be included in URL path
+  restPrimaryKey: "name" 
 });
 
 
 const results = await query()
   .where($ => [
-    membero($.name, ["charmeleon", "charizard", "metapod"]),
+    membero($.name, ["charizard"]),
     // membero($.name, ["charmeleon"]),
 
     pokemon({
@@ -50,13 +55,28 @@ const results = await query()
     pokemon_species({
       name: $.species_name,
       genera: $._species_genera,
+      varieties: $._species_varieties,
     }),
+
+    projectJsonata(
+      $._species_varieties,
+      "$[*].pokemon.name",
+      $.varieties_list,
+    ),
 
     projectJsonata(
       $._species_genera,
       "$[language.name='en'].genus",
       $.species_genus_en,
     ),
+
+    
+    membero($.more_name, $.varieties_list),
+    pokemon({
+      name: $.more_name,
+      weight: $.more_weight,
+      height: $.more_height,
+    }),
 
   ])
   .toArray();

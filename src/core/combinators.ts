@@ -465,9 +465,6 @@ export function projectJsonata(
             inputObj[key] = walk(inputVars[key], s);
           }
         } else {
-          // inputObj = {
-          //   value: walk(inputVars, s) 
-          // };
           inputObj = walk(inputVars, s);
         }
         // Evaluate JSONata
@@ -484,10 +481,20 @@ export function projectJsonata(
         if (typeof outputVars === "object" && outputVars !== null && !isVar(outputVars)) {
           if (result && typeof result.then === "function") {
             result.then((resolved: any) => {
+              let currentSubst = s;
               for (const key in outputVars) {
-                const unified = unify(outputVars[key], resolved?.[key], s);
-                if (unified !== null) observer.next(unified);
+                const value = resolved && typeof resolved === 'object' ? resolved[key] : undefined;
+                const unified = unify(outputVars[key], value, currentSubst);
+                if (unified !== null) {
+                  currentSubst = unified;
+                } else {
+                  // If any unification fails, skip this result
+                  active--;
+                  if (completed && active === 0) observer.complete?.();
+                  return;
+                }
               }
+              observer.next(currentSubst);
               active--;
               if (completed && active === 0) observer.complete?.();
             }).catch((e: any) => {
@@ -497,10 +504,20 @@ export function projectJsonata(
             });
           } else {
             const resolved = result as any;
+            let currentSubst = s;
             for (const key in outputVars) {
-              const unified = unify(outputVars[key], resolved?.[key], s);
-              if (unified !== null) observer.next(unified);
+              const value = resolved && typeof resolved === 'object' ? resolved[key] : undefined;
+              const unified = unify(outputVars[key], value, currentSubst);
+              if (unified !== null) {
+                currentSubst = unified;
+              } else {
+                // If any unification fails, skip this result
+                active--;
+                if (completed && active === 0) observer.complete?.();
+                return;
+              }
             }
+            observer.next(currentSubst);
             active--;
             if (completed && active === 0) observer.complete?.();
           }

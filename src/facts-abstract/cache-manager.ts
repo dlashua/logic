@@ -24,12 +24,13 @@ export class DefaultCacheManager implements CacheManager {
   /**
    * Set cached rows for a goal in a substitution
    */
-  set(goalId: number, subst: Subst, rows: DataRow[]): void {
+  set(goalId: number, subst: Subst, rows: DataRow[], meta?: Record<string, any>): void {
     const cache = this.getOrCreateRowCache(subst);
     cache.set(goalId, {
       data: rows,
       timestamp: Date.now(),
-      goalId
+      goalId,
+      meta,
     });
   }
 

@@ -6,7 +6,7 @@ import {
   or
 } from "../core/combinators.ts"
 import { query } from "../query.ts";
-import { not } from "../relations/control.ts";
+import { fail, not, substLog } from "../relations/control.ts";
 import { membero } from "../relations/lists.ts";
 
 console.log("START quick-test");
@@ -54,7 +54,9 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      // membero($.person, ["louis", "celeste", "daniel", "jason", "brooke", "emerson"]),
+
+      membero($.person, ["celeste"]),
+      // membero($.person, ["emerson", "louis", "celeste", "daniel", "jason", "brooke"]),
       // familytree.parent_kid($.parent, $.person),
       // not(eq($.parent, "daniel")),
       // ifte(
@@ -62,24 +64,25 @@ function makeQuery() {
       //   eq(1,1),
       //   eq($.stepparent, "none"),
       // )
-
-      familytree.person($.person),
       
+      // fail(),
+      familytree.person($.person),
       familytree.parentAgg($.person, $.parents),
+      substLog("top"),
       familytree.stepParentAgg($.person, $.step_parents),
       familytree.grandparentAgg($.person, $.grand_parents),
-      familytree.greatgrandparentAgg($.person, $.great_grand_parents),
-      familytree.uncleAgg($.person, $.uncle, 1),
+      // familytree.greatgrandparentAgg($.person, $.great_grand_parents),
+      // familytree.uncleAgg($.person, $.uncle, 1),
   
       familytree.siblingsAgg($.person, $.siblings),
       familytree.cousinsAgg($.person, $.cousins_1, 1),
-      familytree.cousinsAgg($.person, $.cousins_2, 2),
-      familytree.cousinsAgg($.person, $.cousins_3, 3),
+      // familytree.cousinsAgg($.person, $.cousins_2, 2),
+      // familytree.cousinsAgg($.person, $.cousins_3, 3),
 
-      familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
-      familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
+      // familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),
+      // familytree.cousinsAgg($.person, $.cousins_1_1y, 1, -1),
   
-      familytree.kidsAgg($.person, $.kids),
+      // familytree.kidsAgg($.person, $.kids),
   
     ])
 }
@@ -96,7 +99,7 @@ const q = makeQuery();
 const results = await q.toArray();
 
 console.dir({
-  allres: results,
+  // allres: results,
   oneres: results.filter(x => x.person === "celeste"),
   rescnt: results.length,
 }, {

@@ -1,10 +1,31 @@
 import { inspect } from "node:util";
+import { resolve } from "path";
+import { fileURLToPath } from 'url';
+import { X } from "vitest/dist/chunks/reporters.d.BFLkQcL6.js";
 import { makeRelREST } from "../facts-rest/index.ts";
 import { query } from "../query.ts";
 import { lvar } from "../core/kernel.ts";
-import { gteo, maxo, extractEach } from "../relations/index.ts";
+import {
+  gteo,
+  maxo,
+  extractEach,
+  membero,
+  lengtho,
+  lteo
+} from "../relations/index.ts"
 import { Term } from "../core/types.ts";
 import { and, eq, fresh, or } from "../core/combinators.ts";
+import {
+  collect_distincto,
+  group_by_collecto,
+  group_by_count_streamo,
+  sort_by_streamo,
+  take_streamo
+} from "../relations/aggregates.ts"
+import { SqlRelationCache } from "../facts-rest/relation-cache.ts";
+import { substLog } from "../relations/control.ts";
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 // const tmdbSearchApi = await makeRelREST({
 //   baseUrl: "https://api.themoviedb.org/3/search/",
@@ -21,6 +42,18 @@ import { and, eq, fresh, or } from "../core/combinators.ts";
 //   },
 // });
 
+const restCache = new SqlRelationCache({
+  knexConfig: {
+    client: "better-sqlite3",
+    connection: {
+      filename: resolve(__dirname, "../../data/rest_cache.db"),
+    },
+    useNullAsDefault: true,
+  },
+  tableName: "cache",
+  ttlSeconds: 60 * 60 * 6,
+})
+
 const tmdbApi = await makeRelREST({
   baseUrl: "https://api.themoviedb.org/3/",
   features: {
@@ -34,13 +67,15 @@ const tmdbApi = await makeRelREST({
     offsetParam: 'offset',
     maxPageSize: 20,
   },
+  cache: restCache,
 });
 
 const search = tmdbApi.rel("/search/:type");
-
 const movie = tmdbApi.rel("/movie/:id");
-
 const movie_credits = tmdbApi.rel("/movie/:id/credits")
+const discover_movie = tmdbApi.rel("/discover/movie")
+
+const SCIFI_GENRE = 878;
 
 const most_popular_movie = (query: Term<string>, data: Record<string, Term>) => 
   fresh((popularity, id) => and(
@@ -61,39 +96,73 @@ const most_popular_movie = (query: Term<string>, data: Record<string, Term>) =>
 
 const results = await query()
   .where($ => [
-
-    most_popular_movie(
-      "matrix",
-      {
-        id: $.id,
-        title: $.title,
-        release_date: $.release_date,
-      }
-    ),
-
-    movie_credits({
+    discover_movie({
+      with_genres: SCIFI_GENRE,
+      sort_by: "popularity.desc",
+      region: "United States",
       id: $.id,
-      cast: $._cast,
-    }),
+      title: $.title,
+      // primary_release_year: $.release_year,
+      "primary_release_date.gte": "1990-01-01",
+      "primary_release_date.lte": "1999-12-31",
+      popularity: $.movie_popularity,
+      // release_date: $.release_date,
+      limit: 1000,
+    }),  
+    // sort_by_streamo($.movie_popularity, "desc"),
 
-    extractEach($._cast, {
-      name: $.actor_name,
-      popularity: $.actor_popularity,
-      character: $.actor_character,
-    }),
 
-    gteo($.actor_popularity, 0.8),
-    or(
-      eq($.actor_name, "Robert Taylor"),
-      eq($.actor_name, "Keanu Reeves"),
-      // eq($.actor_character, "Neo"),
-    )
-
+    // group_by_collecto(
+    //   $.actor_name,
+    //   $.title,
+    //   and(
+    //     // membero($.release_year, ["1990", "1991", "1992", "1993", "1994", "1995", "1996", "1997", "1998", "1999"]),
+    //     discover_movie({
+    //       with_genres: SCIFI_GENRE,
+    //       sort_by: "popularity.desc",
+    //       region: "United States",
+    //       id: $.id,
+    //       title: $.title,
+    //       // primary_release_year: $.release_year,
+    //       "primary_release_date.gte": "1990-01-01",
+    //       "primary_release_date.lte": "1999-12-31",
+    //       popularity: $.movie_popularity,
+    //       // release_date: $.release_date,
+    //       limit: 1000,
+    //     }),  
+    //     // sort_by_streamo($.movie_popularity, "desc"),
+    //     // take_streamo(500),
+    //     movie_credits({
+    //       id: $.id,
+    //       cast: $._cast,
+    //     }),
+    //     extractEach($._cast, {
+    //       name: $.actor_name,
+    //       popularity: $.actor_popularity,
+    //       // order: $.actor_movie_order,
+    //     }),
+    //     // lteo($.actor_movie_order, 9),
+    //     gteo($.actor_popularity, 3),
+    //   ),
+    //   $.title_actor,
+    //   $.titles,
+    // ),
+    // lengtho($.titles, $.titles_count),
+    // sort_by_streamo($.titles_count, "desc"),
+    // take_streamo(10),
   ])
+  // .select(
+  //   $ => ({
+  //     title_actor: $.title_actor,
+  //     count: $.titles_count,
+  //     titles: $.titles,
+  //   })
+  // )
   .toArray();
   
 console.log("Results:", inspect(results, {
   depth: null,
   colors: true 
 }));
-console.log("Queries", tmdbApi.getQueries());
+console.log("Queries", tmdbApi.getQueries().filter(x => x.startsWith("G:")));
+// console.log("Queries", tmdbApi.getQueries());

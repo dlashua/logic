@@ -52,9 +52,10 @@ const DEFAULT_CONFIG = {
     // "GOAL_STARTED",
     // "FOUND_RELATED_GOALS",
     // "MERGE_COMPATIBILITY_CHECK",
-    // "CACHE_COMPATIBILITY_CHECK",
+    "CACHE_COMPATIBILITY_CHECK",
     // "SINGLE_QUERY_COLUMN_SELECTION",
     // "MERGED_QUERY_COLUMN_SELECTION",
+    "GOAL_CREATED",
 
   ]), // empty means allow all
   deniedIds: new Set<string>([

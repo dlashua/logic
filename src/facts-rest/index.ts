@@ -22,7 +22,7 @@ export const makeRelREST = async (
   const systemConfig: AbstractRelationConfig = {
     batchSize: 50, // Smaller batches for REST APIs
     debounceMs: 100, // Longer debounce for network calls
-    enableCaching: false,
+    enableCaching: true,
     enableQueryMerging: false, // REST APIs might not benefit from query merging
     ...config
   };

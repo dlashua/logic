@@ -15,8 +15,8 @@ const DEFAULT_CONFIG = {
     // "DB_QUERY_BATCH",
     // "CACHE_HIT",
     // "CACHE_MISS",
-    "UNIFY_SUCCESS",
-    "UNIFY_FAILURE",
+    // "UNIFY_SUCCESS",
+    // "UNIFY_FAILURE",
 
     // "GOAL_BATCH_KEY_UPDATED",
     // "ABOUT_TO_CALL_CACHE_OR_QUERY",
@@ -24,8 +24,8 @@ const DEFAULT_CONFIG = {
     // "COMPATIBLE_GOALS",
     // "ABOUT_TO_PROCESS_GOAL",
     // "GOAL_GROUP_INFO", 
-    "DB_ROWS",
-    "DB_NO_ROWS",
+    // "DB_ROWS",
+    // "DB_NO_ROWS",
     // "FLUSH_BATCH",
     // "COMPATIBLE_MERGE_GOALS",
     // "DB_QUERY_MERGED",
@@ -36,8 +36,8 @@ const DEFAULT_CONFIG = {
     // "USING_SUBSTITUTION_BATCHING",
     // "CACHE_PERFORMANCE",
     // "BATCH_PERFORMANCE",
-    "CACHE_HIT_IMMEDIATE",
-    "CACHE_MISS_TO_BATCH",
+    // "CACHE_HIT_IMMEDIATE",
+    // "CACHE_MISS_TO_BATCH",
     // "PROCESSING_CACHE_MISSES",
     // "EXECUTING_QUERY_FOR_CACHE_MISSES",
     // "SINGLE_CACHE_MISS_WITH_GOAL_MERGING",
@@ -58,18 +58,18 @@ const DEFAULT_CONFIG = {
 
   ]), // empty means allow all
   deniedIds: new Set<string>([
-    "UNIFY_FAILED",
+    // "UNIFY_FAILED",
 
-    "THIS_GOAL_ROWS",
+    // "THIS_GOAL_ROWS",
     // "ALL_GOAL_ROWS",
-    "COMMON_GOALS",
-    "DB_QUERY",
+    // "COMMON_GOALS",
+    // "DB_QUERY",
 
-    "GOAL_CREATED",
-    "SAW_CACHE",
+    // "GOAL_CREATED",
+    // "SAW_CACHE",
     // "SHARED_GOALS", // Disabled to reduce noise
     // "DB_QUERY", // Disabled to reduce noise
-    // "NO_DB_ROWS",
+    // "DB_NO_ROWS",
     // "DB_ROWS",
     // "GOAL_CREATED", // Disabled to reduce noise
     // "MERGEABLE_CHECK", // Disabled to reduce noise  

@@ -2,6 +2,7 @@ import { getDefaultLogger } from "../shared/logger.ts";
 import { createAbstractRelationSystem } from "../facts-abstract/index.ts";
 import type { AbstractRelationConfig, RestDataStoreConfig } from "../facts-abstract/types.ts";
 import { RestDataStore } from "./rest-datastore.ts";
+import type { RestRelationOptions } from "./types.ts";
 
 /**
  * REST API implementation using the abstract data layer
@@ -26,7 +27,7 @@ export const makeRelREST = async (
   };
   
   // Create the abstract relation system
-  const relationSystem = await createAbstractRelationSystem(dataStore, logger, systemConfig);
+  const relationSystem = createAbstractRelationSystem<RestRelationOptions>(dataStore, logger, systemConfig);
   
   return {
     rel: relationSystem.rel,

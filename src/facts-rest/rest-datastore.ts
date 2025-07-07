@@ -162,10 +162,9 @@ export class RestDataStore implements DataStore {
 
     let path = '';
     let usedColumns = new Set<string>();
-    // Use RestRelationOptions for pathTemplate
-    const relationOptions = params.relationOptions as RestRelationOptions | undefined;
-    if (relationOptions?.pathTemplate) {
-      const filled = fillPathTemplate(relationOptions.pathTemplate, params.whereConditions);
+
+    if (params.relationIdentifier) {
+      const filled = fillPathTemplate(params.relationIdentifier, params.whereConditions);
       path = filled.path;
       usedColumns = filled.usedColumns;
     } else if (this.config.features.primaryKeyInPath) {
@@ -188,20 +187,21 @@ export class RestDataStore implements DataStore {
         otherConditions = params.whereConditions;
       }
       if (primaryKeyCondition) {
-        path = `/${params.table}/${primaryKeyCondition.value}`;
+        path = `/${params.relationIdentifier}/${primaryKeyCondition.value}`;
+        // @ts-expect-error
         usedColumns.add(primaryKeyColumn);
       } else {
-        path = `/${params.table}`;
+        path = `/${params.relationIdentifier}`;
       }
     } else {
-      path = `/${params.table}`;
+      path = `/${params.relationIdentifier}`;
     }
     // Remove used columns from query params
     const otherConditions = params.whereConditions.filter(c => !usedColumns.has(c.column));
     const baseUrl = `${this.config.baseUrl}${path}`;
     return {
       baseUrl,
-      primaryKeyCondition: null, // Not used with pathTemplate
+      primaryKeyCondition: null,
       otherConditions
     };
   }
@@ -304,11 +304,11 @@ export class RestDataStore implements DataStore {
     }
   }
 
-  async getColumns(table: string): Promise<string[]> {
+  async getColumns(relationIdentifier: string): Promise<string[]> {
     // This would typically require a schema endpoint
     // For now, we'll return an empty array or make a sample query
     try {
-      const url = `${this.config.baseUrl}/${table}`;
+      const url = `${this.config.baseUrl}/${relationIdentifier}`;
       const headers: Record<string, string> = {
         'Accept': 'application/json',
         ...this.config.headers
@@ -334,7 +334,7 @@ export class RestDataStore implements DataStore {
         }
       }
     } catch (error) {
-      console.warn(`Could not infer columns for table ${table}:`, error);
+      console.warn(`Could not infer columns for relationIdentifier ${relationIdentifier}:`, error);
     }
 
     return [];

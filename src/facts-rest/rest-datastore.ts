@@ -5,6 +5,7 @@ import type {
   DataRow,
   RestDataStoreConfig
 } from "../facts-abstract/types.ts";
+import type { RestRelationOptions } from "./types.ts";
 
 /**
  * REST API implementation of DataStore
@@ -39,13 +40,19 @@ export class RestDataStore implements DataStore {
   }
 
   async executeQuery(params: QueryParams): Promise<DataRow[]> {
+    // Type assertion: treat relationOptions as RestRelationOptions for REST
+    const restParams = {
+      ...params,
+      relationOptions: params.relationOptions as RestRelationOptions
+    };
+
     // Handle IN operations that don't support comma-separated values
     if (!this.config.features.supportsInOperator) {
-      return await this.executeQueryWithoutInOperator(params);
+      return await this.executeQueryWithoutInOperator(restParams);
     }
 
     // Build URL - check for primary key in path
-    const { baseUrl, primaryKeyCondition, otherConditions } = this.buildUrl(params);
+    const { baseUrl, primaryKeyCondition, otherConditions } = this.buildUrl(restParams);
     const url = new URL(baseUrl);
 
     // Add non-primary-key WHERE conditions as query parameters
@@ -133,14 +140,39 @@ export class RestDataStore implements DataStore {
     primaryKeyCondition: WhereCondition | null;
     otherConditions: WhereCondition[];
   } {
-    let primaryKeyCondition: WhereCondition | null = null;
-    let otherConditions: WhereCondition[] = [];
+    // --- Flexible path template logic ---
+    function fillPathTemplate(template: string, whereConditions: WhereCondition[]): { path: string, usedColumns: Set<string> } {
+      const usedColumns = new Set<string>();
+      let path = template.replace(/:([a-zA-Z0-9_]+)\??/g, (_, key) => {
+        const cond = whereConditions.find(c => c.column === key && c.operator === 'eq');
+        if (cond && cond.value !== undefined && cond.value !== null) {
+          usedColumns.add(key);
+          return encodeURIComponent(cond.value);
+        }
+        // If optional (ends with ?), remove segment if not present
+        return '';
+      });
+      // Remove double slashes from missing optional params
+      path = path.replace(/\/+/g, '/').replace(/\/$/, '');
+      return {
+        path,
+        usedColumns 
+      };
+    }
 
-    // Check if we have primary key in path configuration
-    if (this.config.features.primaryKeyInPath) {
+    let path = '';
+    let usedColumns = new Set<string>();
+    // Use RestRelationOptions for pathTemplate
+    const relationOptions = params.relationOptions as RestRelationOptions | undefined;
+    if (relationOptions?.pathTemplate) {
+      const filled = fillPathTemplate(relationOptions.pathTemplate, params.whereConditions);
+      path = filled.path;
+      usedColumns = filled.usedColumns;
+    } else if (this.config.features.primaryKeyInPath) {
       // Look for primary key condition using relation options
       const primaryKeyColumn = params.relationOptions?.restPrimaryKey || params.relationOptions?.primaryKey;
-      
+      let primaryKeyCondition: WhereCondition | null = null;
+      let otherConditions: WhereCondition[] = [];
       if (primaryKeyColumn) {
         // Find condition that matches the primary key column
         primaryKeyCondition = params.whereConditions.find(c => 
@@ -152,29 +184,25 @@ export class RestDataStore implements DataStore {
         } else {
           otherConditions = params.whereConditions;
         }
+      } else {
+        otherConditions = params.whereConditions;
+      }
+      if (primaryKeyCondition) {
+        path = `/${params.table}/${primaryKeyCondition.value}`;
+        usedColumns.add(primaryKeyColumn);
+      } else {
+        path = `/${params.table}`;
       }
     } else {
-      otherConditions = params.whereConditions;
+      path = `/${params.table}`;
     }
-
-    // Build base URL
-    let baseUrl: string;
-    if (this.config.features.urlBuilder) {
-      baseUrl = this.config.features.urlBuilder(
-        params.table,
-        primaryKeyCondition?.column,
-        primaryKeyCondition?.value
-      );
-    } else if (primaryKeyCondition) {
-      baseUrl = `${this.config.baseUrl}/${params.table}/${primaryKeyCondition.value}`;
-    } else {
-      baseUrl = `${this.config.baseUrl}/${params.table}`;
-    }
-
+    // Remove used columns from query params
+    const otherConditions = params.whereConditions.filter(c => !usedColumns.has(c.column));
+    const baseUrl = `${this.config.baseUrl}${path}`;
     return {
       baseUrl,
-      primaryKeyCondition,
-      otherConditions 
+      primaryKeyCondition: null, // Not used with pathTemplate
+      otherConditions
     };
   }
 
@@ -236,10 +264,14 @@ export class RestDataStore implements DataStore {
     if (params.logQuery) {
       const goalPrefix = params.goalId ? `G:${params.goalId}` : 'REST';
       const headersStr = Object.keys(headers).length > 2 ? 
-        ` Headers: ${JSON.stringify(headers)}` : '';
+        ` Headers: ${JSON.stringify({
+          ...headers,
+          Authorization: undefined 
+        })}` : '';
       params.logQuery(`${goalPrefix} - GET ${url}${headersStr}`);
     }
 
+    console.log("FETCHING", url);
     // Execute the request
     const response = await fetch(url, {
       method: 'GET',
@@ -248,10 +280,11 @@ export class RestDataStore implements DataStore {
     });
 
     if (!response.ok) {
-      throw new Error(`REST API error: ${response.status} ${response.statusText}`);
+      throw new Error(`REST API error: ${response.status} ${response.statusText} @${url}`);
     }
 
     const data = await response.json();
+    console.log("RESPONSE", response.status, url)
 
     // Handle different response formats
     if (Array.isArray(data)) {
@@ -266,6 +299,7 @@ export class RestDataStore implements DataStore {
       // Handle single object responses (like Pokemon API individual records)
       return [data];
     } else {
+      console.error("UNEXPECTED FORMAT");
       throw new Error(`Unexpected REST API response format: ${JSON.stringify(data)}`);
     }
   }
@@ -285,6 +319,7 @@ export class RestDataStore implements DataStore {
       }
 
       // Try to get first record to infer schema
+      console.log("FETCH COLUMNS", url);
       const response = await fetch(`${url}?limit=1`, {
         method: 'GET',
         headers,

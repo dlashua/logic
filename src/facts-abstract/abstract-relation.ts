@@ -299,13 +299,20 @@ export class AbstractRelation<TOptions extends RelationOptions = RelationOptions
     // Convert to data store format
     const whereConditions = this.buildWhereConditions(whereClauses);
     
+    const mergeCompatibleGoalIds = mergeCompatibleGoals.map(x => x.goalId).join(",");
+    const cacheCompatibleGoalIds = cacheCompatibleGoals.map(x => x.goalId).join(",");
+    const iffmt = (v, fn) => v ? fn(v) : "";
+    const annotatedLogQuery = (queryString: string) => this.goalManager.addQuery(
+      `G:${goalId}${iffmt(mergeCompatibleGoalIds, (v) => ` M:${v}`)}${iffmt(cacheCompatibleGoalIds, (v) => ` C:${v}`)} - ${queryString}`
+    )
+
     const queryParams: QueryParams = {
       relationIdentifier: this.relationIdentifier,
       selectColumns: columns.columns,
       whereConditions,
       relationOptions: this._options,
       goalId,
-      logQuery: (queryString: string) => this.goalManager.addQuery(queryString)
+      logQuery: annotatedLogQuery,
     };
 
     // Execute via data store (it will handle query logging)
@@ -330,7 +337,8 @@ export class AbstractRelation<TOptions extends RelationOptions = RelationOptions
     const innerGroupGoals = s.get(GOAL_GROUP_CONJ_GOALS) as Goal[] || [];
     const outerGroupGoals = s.get(GOAL_GROUP_ALL_GOALS) as Goal[] || [];
     
-    const goalsForCaching = outerGroupGoals.length > 0 ? outerGroupGoals : innerGroupGoals;
+    // const goalsForCaching = outerGroupGoals.length > 0 ? outerGroupGoals : innerGroupGoals;
+    const goalsForCaching = outerGroupGoals;
     
     if (goalsForCaching.length === 0) {
       return [];
@@ -495,7 +503,9 @@ export class AbstractRelation<TOptions extends RelationOptions = RelationOptions
           if (this.config.enableCaching) {
             for (const otherGoal of cacheCompatibleGoals) {
               if (otherGoal.goalId !== goalId) {
-                this.cacheManager.set(otherGoal.goalId, unifiedSubst, rows);
+                this.cacheManager.set(otherGoal.goalId, unifiedSubst, rows, {
+                  fromGoalId: goalId 
+                });
                 this.logger.log("CACHED_FOR_OTHER_GOAL", {
                   myGoalId: goalId,
                   otherGoalId: otherGoal.goalId,

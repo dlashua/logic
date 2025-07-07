@@ -11,7 +11,7 @@ export class SqlDataStore implements DataStore {
   constructor(private db: Knex) {}
 
   async executeQuery(params: QueryParams): Promise<DataRow[]> {
-    let query = this.db(params.table);
+    let query = this.db(params.relationIdentifier);
 
     // Apply WHERE conditions
     for (const condition of params.whereConditions) {
@@ -52,8 +52,8 @@ export class SqlDataStore implements DataStore {
     return await query;
   }
 
-  async getColumns(table: string): Promise<string[]> {
-    const result = await this.db(table).columnInfo();
+  async getColumns(relationIdentifier: string): Promise<string[]> {
+    const result = await this.db(relationIdentifier).columnInfo();
     return Object.keys(result);
   }
 

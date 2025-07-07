@@ -33,7 +33,7 @@ export const makeRelDB = async (
   };
   
   // Create the abstract relation system
-  const relationSystem = await createAbstractRelationSystem(dataStore, logger, config);
+  const relationSystem = createAbstractRelationSystem(dataStore, logger, config);
   
   return {
     rel: relationSystem.rel,

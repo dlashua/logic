@@ -9,7 +9,8 @@ import { AbstractRelation } from "./abstract-relation.ts";
  * Factory for creating abstract relation systems
  * This is the main entry point for the abstract data layer
  */
-export class AbstractRelationFactory {
+// Make AbstractRelationFactory generic over options type
+export class AbstractRelationFactory<TOptions extends RelationOptions = RelationOptions> {
   private goalManager: GoalManager;
   private logger: Logger;
   private config: AbstractRelationConfig;
@@ -25,13 +26,32 @@ export class AbstractRelationFactory {
   }
 
   /**
+   * Get the appropriate relation identifier based on datastore type and options
+   */
+  private getRelationIdentifier(table: string, options?: TOptions): string {
+    // For REST APIs, prefer pathTemplate as the identifier since it's more meaningful
+    if (this.dataStore.type === 'rest') {
+      const restOptions = options as any;
+      if (restOptions?.pathTemplate) {
+        return restOptions.pathTemplate;
+      }
+    }
+    // For SQL or when no pathTemplate, use table name
+    return table;
+  }
+
+  /**
    * Create a regular relation for a table
    */
-  createRelation(table: string, options?: RelationOptions) {
-    const relation = new AbstractRelation(
+  createRelation(table: string, options?: TOptions) {
+    // For REST APIs, use pathTemplate as identifier if available, otherwise use table name
+    // For SQL APIs, always use table name
+    const relationIdentifier = this.getRelationIdentifier(table, options);
+    
+    const relation = new AbstractRelation<TOptions>(
       this.dataStore,
       this.goalManager,
-      table,
+      relationIdentifier,
       this.logger,
       options,
       this.config
@@ -46,10 +66,12 @@ export class AbstractRelationFactory {
    * Create a symmetric relation for bidirectional queries
    */
   createSymmetricRelation(table: string, keys: [string, string], options?: RelationOptions) {
+    const relationIdentifier = this.getRelationIdentifier(table, options as TOptions);
+    
     const relation = new AbstractRelation(
       this.dataStore,
       this.goalManager,
-      table,
+      relationIdentifier,
       this.logger,
       options,
       this.config
@@ -104,16 +126,16 @@ export class AbstractRelationFactory {
 /**
  * Main factory function - creates an abstract relation system
  */
-export async function createAbstractRelationSystem(
+export function createAbstractRelationSystem<TOptions extends RelationOptions = RelationOptions>(
   dataStore: DataStore,
   logger?: Logger,
   config?: AbstractRelationConfig
 ) {
-  const factory = new AbstractRelationFactory(dataStore, logger, config);
+  const factory = new AbstractRelationFactory<TOptions>(dataStore, logger, config);
   
   return {
     rel: factory.createRelation.bind(factory),
-    relSym: factory.createSymmetricRelation.bind(factory),
+    relSym: factory.createSymmetricRelation?.bind(factory),
     getQueries: factory.getQueries.bind(factory),
     clearQueries: factory.clearQueries.bind(factory),
     getQueryCount: factory.getQueryCount.bind(factory),

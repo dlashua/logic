@@ -1,4 +1,3 @@
-import { nextTick } from "process";
 import type { Term, Subst, Goal, Observable } from "../core/types.ts";
 import { isVar, walk, GOAL_GROUP_CONJ_GOALS, GOAL_GROUP_ALL_GOALS } from "../core/kernel.ts"
 import { Logger, getDefaultLogger } from "../shared/logger.ts";
@@ -21,7 +20,6 @@ import {
   collectWhereClausesFromSubstitutions,
   collectColumnsFromGoals,
   buildWhereConditions,
-  formatQueryForLog,
   unifyRowWithQuery
 } from "./abstract-relation-helpers.ts";
 
@@ -36,7 +34,8 @@ const DEFAULT_DEBOUNCE_MS = 50;
  * Abstract relation engine that handles batching, caching, and query optimization
  * Works with any DataStore implementation
  */
-export class AbstractRelation {
+// Make AbstractRelation generic over options type
+export class AbstractRelation<TOptions extends RelationOptions = RelationOptions> {
   private logger: Logger;
   private cacheManager: CacheManager;
   private config: Required<AbstractRelationConfig>;
@@ -44,9 +43,9 @@ export class AbstractRelation {
   constructor(
     private dataStore: DataStore,
     private goalManager: GoalManager,
-    private table: string,
+    private relationIdentifier: string,
     logger?: Logger,
-    private _options?: RelationOptions,
+    private _options?: TOptions,
     config?: AbstractRelationConfig
   ) {
     this.logger = logger ?? getDefaultLogger();
@@ -70,13 +69,13 @@ export class AbstractRelation {
     
     this.logger.log("GOAL_CREATED", {
       goalId,
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       queryObj,
       dataStore: this.dataStore.type
     });
 
     // Register goal
-    this.goalManager.addGoal(goalId, this.table, queryObj, undefined);
+    this.goalManager.addGoal(goalId, this.relationIdentifier, queryObj, undefined, this._options);
     
     // Create the goal function
     const goalFunction = (input$: Observable<Subst>) => {
@@ -87,7 +86,7 @@ export class AbstractRelation {
 
         this.logger.log("GOAL_STARTED", {
           goalId,
-          table: this.table,
+          relationIdentifier: this.relationIdentifier,
           queryObj,
           dataStore: this.dataStore.type
         });
@@ -126,9 +125,12 @@ export class AbstractRelation {
         });
 
         // Subscribe to input stream
+        let active = 0;
+        let completed = false;
         const subscription = input$.subscribe({
           next: async (subst: Subst) => {
             if (cancelled) return;
+            active++;
 
             this.logger.log("GOAL_NEXT", {
               goalId,
@@ -144,12 +146,15 @@ export class AbstractRelation {
                 this.logger.log("CACHE_HIT_IMMEDIATE", {
                   goalId,
                   rowCount: cachedRows.length,
-                  table: this.table,
+                  relationIdentifier: this.relationIdentifier,
                   dataStore: this.dataStore.type
                 });
                 
                 await this.processCachedRows(goalId, queryObj, cachedRows, subst, observer);
-                return;
+                active--;
+                if (completed && active === 0) observer.complete?.();
+
+                return; // Don't add to batch if we had a cache hit
               }
             }
 
@@ -160,6 +165,9 @@ export class AbstractRelation {
               inputComplete,
               dataStore: this.dataStore.type
             });
+            active--;
+            if (completed && active === 0) observer.complete?.();
+
           },
           error: (err: any) => {
             if (!cancelled) observer.error?.(err);
@@ -182,7 +190,14 @@ export class AbstractRelation {
                 cancelled,
                 dataStore: this.dataStore.type
               });
-              observer.complete?.();
+              
+              completed = true;
+              if (completed && active === 0) observer.complete?.();
+            }).catch((e) => {
+              console.error(e);
+              // Silently handle completion errors to prevent unhandled rejections
+              completed = true;
+              if (completed && active === 0) observer.complete?.();
             });
           }
         });
@@ -203,7 +218,7 @@ export class AbstractRelation {
     };
 
     // Set up goal metadata
-    const displayName = `${this.dataStore.type.toUpperCase()}_${this.table}_${goalId}`;
+    const displayName = `${this.dataStore.type.toUpperCase()}_${this.relationIdentifier}_${goalId}`;
     goalFunction.displayName = displayName;
     observableToGoalId.set(goalFunction as unknown as Observable<any>, goalId);
 
@@ -223,7 +238,7 @@ export class AbstractRelation {
     this.logger.log("EXECUTING_UNIFIED_QUERY", {
       goalId,
       substitutionCount: substitutions.length,
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       dataStore: this.dataStore.type
     });
 
@@ -285,7 +300,7 @@ export class AbstractRelation {
     const whereConditions = this.buildWhereConditions(whereClauses);
     
     const queryParams: QueryParams = {
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       selectColumns: columns.columns,
       whereConditions,
       relationOptions: this._options,
@@ -298,7 +313,7 @@ export class AbstractRelation {
 
     this.logger.log("DB_QUERY_EXECUTED", {
       goalId,
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       rowCount: rows.length,
       queryParams,
       dataStore: this.dataStore.type
@@ -337,7 +352,7 @@ export class AbstractRelation {
       foundOtherGoalIds: otherGoalIds,
       relatedGoals: otherGoals.map(g => ({
         goalId: g.goalId,
-        table: g.table,
+        relationIdentifier: g.relationIdentifier,
         queryObj: g.queryObj
       })),
       dataStore: this.dataStore.type
@@ -355,7 +370,7 @@ export class AbstractRelation {
   private findMergeCompatibleGoals(myGoal: GoalRecord, relatedGoals: { goal: GoalRecord, matchingIds: string[] }[]): GoalRecord[] {
     const compatibleGoals: GoalRecord[] = [];
     for (const { goal } of relatedGoals) {
-      if (goal.table === myGoal.table && this.canMergeQueries(myGoal, goal)) {
+      if (goal.relationIdentifier === myGoal.relationIdentifier && this.canMergeQueries(myGoal, goal)) {
         compatibleGoals.push(goal);
       }
     }
@@ -367,7 +382,7 @@ export class AbstractRelation {
         queryObj: g.goal.queryObj
       })),
       mergeCompatibleGoalIds: compatibleGoals.map(g => g.goalId),
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       dataStore: this.dataStore.type
     });
     
@@ -400,7 +415,7 @@ export class AbstractRelation {
       myGoalQueryObj: myGoal.queryObj,
       candidateGoals: candidateGoalsWithCompatibility,
       cacheCompatibleGoalIds: cacheBeneficiaryGoals.map(g => g.goalId),
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       dataStore: this.dataStore.type
     });
     
@@ -432,7 +447,7 @@ export class AbstractRelation {
       goalId,
       originalCount: cachedRows.length,
       filteredCount: filteredRows.length,
-      table: this.table,
+      relationIdentifier: this.relationIdentifier,
       dataStore: this.dataStore.type
     });
 
@@ -440,8 +455,8 @@ export class AbstractRelation {
       const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
       if (unifiedSubst) {
         observer.next(unifiedSubst);
-        await new Promise(resolve => nextTick(resolve));
       }
+      await new Promise(resolve => setTimeout(() => resolve(undefined), 0));
     }
   }
 
@@ -462,6 +477,17 @@ export class AbstractRelation {
         this.cacheManager.clear(goalId);
       }
 
+      if (rows.length === 0) {
+        this.logger.log("DB_NO_ROWS", {
+          goalId,
+          queryObj,
+          wasFromCache: false,
+          relationIdentifier: this.relationIdentifier,
+          dataStore: this.dataStore.type
+        });
+        continue;
+      }
+
       for (const row of rows) {
         const unifiedSubst = this.unifyRowWithQuery(row, queryObj, new Map(subst));
         if (unifiedSubst) {
@@ -480,8 +506,26 @@ export class AbstractRelation {
             }
           }
 
+          this.logger.log("UNIFY_SUCCESS", {
+            goalId,
+            queryObj,
+            row,
+            wasFromCache: false,
+            relationIdentifier: this.relationIdentifier,
+            dataStore: this.dataStore.type
+          });
+
           observer.next(unifiedSubst);
-          await new Promise(resolve => nextTick(resolve));
+          await new Promise(resolve => setTimeout(resolve, 0));
+        } else {
+          this.logger.log("UNIFY_FAILURE", {
+            goalId,
+            queryObj,
+            row,
+            wasFromCache: false,
+            relationIdentifier: this.relationIdentifier,
+            dataStore: this.dataStore.type
+          });
         }
       }
     }
@@ -494,7 +538,6 @@ export class AbstractRelation {
   private collectAllWhereClauses = collectAllWhereClauses;
   private collectColumnsFromGoals = collectColumnsFromGoals;
   private buildWhereConditions = buildWhereConditions;
-  private formatQueryForLog = formatQueryForLog;
   private unifyRowWithQuery = unifyRowWithQuery;
 
   /**
@@ -521,7 +564,7 @@ export class AbstractRelation {
       }
     };
 
-    const flushBatch = async (): Promise<void> => {
+    const flushBatch = (): Promise<void> => {
       clearDebounce();
       if (flushingPromise) return flushingPromise;
       if (batch.length === 0 || cancelled) return Promise.resolve();
@@ -535,7 +578,7 @@ export class AbstractRelation {
     };
 
     const addItem = (item: T): void => {
-      if (cancelled) return;
+      // if (cancelled) return;
       batch.push(item);
       if (batch.length >= options.batchSize) {
         flushBatch();

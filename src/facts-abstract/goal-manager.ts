@@ -14,12 +14,13 @@ export class DefaultGoalManager implements GoalManager {
     return ++this.nextGoalId;
   }
 
-  addGoal(goalId: number, table: string, queryObj: Record<string, Term>, batchKey?: string): void {
+  addGoal(goalId: number, relationIdentifier: string, queryObj: Record<string, Term>, batchKey?: string, relationOptions?: any): void {
     this.goals.push({
       goalId,
-      table,
+      relationIdentifier,
       queryObj,
-      batchKey
+      batchKey,
+      relationOptions
     });
   }
 

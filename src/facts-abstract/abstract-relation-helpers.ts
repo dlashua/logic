@@ -12,9 +12,23 @@ import type { GoalRecord, WhereCondition, QueryParams, DataRow } from "./types.t
  * Check if one goal could benefit from cached data of another goal
  */
 export function couldBenefitFromCache(myGoal: GoalRecord, otherGoal: GoalRecord, subst: Subst): string {
-  if (myGoal.table !== otherGoal.table) {
-    return "wrong_table";
+  if (myGoal.relationIdentifier !== otherGoal.relationIdentifier) {
+    return "different_relation";
   }
+
+  // // Check if relation options are compatible for caching
+  // // For REST APIs, different pathTemplates mean different endpoints
+  // const myOptions = myGoal.relationOptions as any;
+  // const otherOptions = otherGoal.relationOptions as any;
+  
+  // if (myOptions?.pathTemplate !== otherOptions?.pathTemplate) {
+  //   return "different_path_template";
+  // }
+  
+  // // Add other option compatibility checks as needed
+  // if (JSON.stringify(myOptions) !== JSON.stringify(otherOptions)) {
+  //   return "incompatible_options";
+  // }
 
   const myColumns = Object.keys(myGoal.queryObj);
   const otherColumns = Object.keys(otherGoal.queryObj);
@@ -186,8 +200,8 @@ export function buildWhereConditions(whereClauses: Record<string, Set<any>>): Wh
 /**
  * Format query parameters for logging
  */
-export function formatQueryForLog(params: QueryParams): string {
-  let query = `SELECT ${params.selectColumns.join(', ')} FROM ${params.table}`;
+export function sssformatQueryForLog(params: QueryParams): string {
+  let query = `SELECT ${params.selectColumns.join(', ')} FROM ${params.relationIdentifier}`;
   
   if (params.whereConditions.length > 0) {
     const whereClause = params.whereConditions.map(cond => {

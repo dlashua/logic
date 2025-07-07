@@ -5,9 +5,10 @@ import type { Term, Subst } from "../core/types.ts";
  */
 export interface GoalRecord {
   goalId: number;
-  table: string;
+  relationIdentifier: string; // Generic identifier - table name for SQL, path template for REST
   queryObj: Record<string, Term>;
   batchKey?: string;
+  relationOptions?: RelationOptions;
 }
 
 /**
@@ -24,12 +25,12 @@ export interface WhereCondition {
  * Query parameters passed to data store implementations
  */
 export interface QueryParams {
-  table: string;
+  relationIdentifier: string;
   selectColumns: string[];
   whereConditions: WhereCondition[];
   limit?: number;
   offset?: number;
-  relationOptions?: RelationOptions;
+  relationOptions?: RelationOptions; // Will be typed as RestRelationOptions for REST
   goalId?: number;
   logQuery?: (queryString: string) => void;
 }
@@ -89,7 +90,7 @@ export interface DataStore {
 export interface GoalManager {
   getNextGoalId(): number;
   
-  addGoal(goalId: number, table: string, queryObj: Record<string, Term>, batchKey?: string): void;
+  addGoal(goalId: number, relationIdentifier: string, queryObj: Record<string, Term>, batchKey?: string, relationOptions?: RelationOptions): void;
   getGoalById(id: number): GoalRecord | undefined;
   getGoalsByBatchKey(batchKey: string): GoalRecord[];
   getGoals(): GoalRecord[];
@@ -147,14 +148,19 @@ export interface RestDataStoreConfig {
   };
   // New generic features
   features?: {
+
     /** Whether to include primary key in URL path instead of query params */
     primaryKeyInPath?: boolean;
+
     /** Whether API supports comma-separated values for IN operations */
     supportsInOperator?: boolean;
+
     /** Whether API supports field selection via query params */
     supportsFieldSelection?: boolean;
+
     /** Custom URL builder for different API patterns */
     urlBuilder?: (table: string, primaryKey?: string, primaryKeyValue?: any) => string;
+
     /** Custom query parameter formatter */
     queryParamFormatter?: (column: string, operator: string, value: any) => { key: string; value: string };
   };

@@ -8,7 +8,7 @@
     "test": "vitest run",
     "test:ui": "vitest --ui",
     "test:watch": "vitest",
-    "quick-test": "tsx ./src/test/quick-test.ts"
+    "quick-test": "tsx --watch ./src/test/quick-test.ts"
   },
   "keywords": [],
   "author": "",

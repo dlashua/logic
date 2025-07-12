@@ -9,6 +9,7 @@ import {
   Goal,
 } from "./types.ts";
 import { SimpleObservable } from "./observable.ts";
+import { SUSPENDED_CONSTRAINTS, wakeUpConstraints } from "./subst-constraints.ts";
 
 // Well-known symbols for SQL query coordination
 export const GOAL_GROUP_ID = Symbol('goal-group-id');
@@ -114,7 +115,7 @@ function occursCheck(v: Var, x: Term, s: Subst): boolean {
  * The core unification algorithm. It attempts to make two terms structurally equivalent.
  * Optimized with fast paths for common cases.
  */
-export function unify(u: Term, v: Term, s: Subst | null): Subst | null {
+export function baseUnify(u: Term, v: Term, s: Subst | null): Subst | null {
   if (s === null) {
     return null;
   }
@@ -170,6 +171,40 @@ export function unify(u: Term, v: Term, s: Subst | null): Subst | null {
 
   return null;
 }
+
+/**
+ * Constraint-aware unify that wakes up suspended constraints when variables are bound
+ */
+
+export function unifyWithConstraints(u: Term, v: Term, s: Subst | null): Subst | null {
+  const result = baseUnify(u, v, s);
+
+  
+  if (result !== null && s !== null) {
+    // Fast path: if no constraints exist, skip constraint logic
+    if (!result.has(SUSPENDED_CONSTRAINTS)) {
+      return result;
+    }
+    
+    // Check what new variables were bound
+    const newlyBoundVars: string[] = [];
+    for (const [key, value] of result) {
+      if (!s.has(key) && typeof key === 'string') {
+        newlyBoundVars.push(key);
+      }
+    }
+
+    // Wake up constraints for newly bound variables (if any)
+    if (newlyBoundVars.length > 0) {
+      return wakeUpConstraints(result, newlyBoundVars);
+    }
+  }
+
+  return result;
+}
+
+export const unify = unifyWithConstraints;
+// export const unify = baseUnify;
 
 /**
  * Type guard to check if a term is a logic variable.
@@ -350,3 +385,5 @@ export function enrichGroupInput(
   newInput$.displayName = `${type}`;
   return newInput$;
 }
+
+

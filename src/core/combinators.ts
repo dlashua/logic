@@ -14,7 +14,8 @@ import {
   isVar,
   liftGoal,
   enrichGroupInput,
-  createEnrichedSubst
+  createEnrichedSubst,
+  unifyWithConstraints
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
 

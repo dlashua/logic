@@ -4,12 +4,12 @@ import { eq, or, and } from '../core/combinators.ts';
 import { query } from '../query.ts';
 import { } from '../relations/lists.ts';
 import {
-  collecto,
+  group_by_collecto,
+  group_by_counto,
   collect_distincto,
   counto,
-  group_by_collecto,
-  group_by_counto
-} from './aggregates.ts';
+  collecto
+} from "./aggregates-subqueries.ts"
 
 describe('Aggregation Relations', () => {
   beforeEach(() => {

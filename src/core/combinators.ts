@@ -1,4 +1,5 @@
 import jsonata from "jsonata";
+import { extract } from "../relations/objects.ts";
 import {
   Goal,
   Subst,
@@ -6,6 +7,8 @@ import {
   Var,
   LiftedArgs,
   Observable,
+  Subscription,
+  Observer,
 } from "./types.ts";
 import {
   unify,
@@ -559,3 +562,37 @@ export function Subquery(
   );
 }
 
+export function branch(
+  goal: Goal,
+  aggregator: (observer: Observer<Subst>, substs: Subst[], originalSubst: Subst) => void
+): Goal {
+  return enrichGroupInput("branch", [], [goal], (input$) =>
+    new SimpleObservable<Subst>((observer) => {
+      const goalSubs: Subscription[] = [];
+      const inputSub = input$.subscribe({
+        error: observer.error,
+        complete: observer.complete,
+        next: (inputSubst) => {
+          const collectedSubsts: Subst[] = [];
+          const goalSub = goal(SimpleObservable.of(inputSubst)).subscribe({
+            error: observer.error,
+            complete: () => {
+              aggregator(observer, collectedSubsts, inputSubst);
+              // observer.complete?.();
+              collectedSubsts.length = 0;
+            },
+            next: (goalSubst) => {
+              collectedSubsts.push(goalSubst);
+            }
+          });
+          goalSubs.push(goalSub);
+        }
+      });
+
+      return () => {
+        goalSubs.forEach(goalSub => goalSub.unsubscribe());
+        inputSub.unsubscribe();
+      }
+    })
+  );
+}

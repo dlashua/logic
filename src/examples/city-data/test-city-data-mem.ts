@@ -2,7 +2,7 @@ import { query } from "../../query.ts";
 import { and } from "../../core/combinators.ts";
 import { gto } from "../../relations/numeric.ts";
 import { lengtho } from "../../relations/lists.ts";
-import { group_by_collecto } from "../../relations/aggregates.ts";
+import { group_by_collecto } from "../../relations/aggregates-subqueries.ts";
 import {
   loadData,
   acquireData,

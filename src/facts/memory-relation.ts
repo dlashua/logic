@@ -47,7 +47,7 @@ export class MemoryRelation {
         }
       );
 
-      const processAll = async () => {
+      const processAll = () => {
         try {
           // For each incoming substitution, process as before
           const subs: Subst[] = [];
@@ -57,7 +57,7 @@ export class MemoryRelation {
               for (const s of subs) {
                 if (cancelled) break;
                 
-                const walkedQuery = await queryUtils.walkAllArray(query, s);
+                const walkedQuery = queryUtils.walkAllArray(query, s);
                 
                 // Try to use indexes for optimization
                 const indexedPositions: number[] = [];

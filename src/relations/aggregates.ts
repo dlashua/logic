@@ -5,153 +5,10 @@ import type {
   Var,
   Observable
 } from "../core/types.ts"
-import {
-  walk,
-  arrayToLogicList,
-  enrichGroupInput,
-  unify,
-  lvar,
-  logicListToArray
-} from "../core/kernel.ts"
-import { and, eq, lift, Subquery } from "../core/combinators.ts";
+import { walk, arrayToLogicList, enrichGroupInput, unify } from "../core/kernel.ts"
+import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 import { collect_and_process_base, group_by_streamo_base } from "./aggregates-base.ts";
-
-/**
- * Helper: deduplicate an array of items using JSON.stringify for deep equality.
- */
-function deduplicate<T>(items: T[]): T[] {
-  const seen = new Set<string>();
-  const result: T[] = [];
-  for (const item of items) {
-    const k = JSON.stringify(item);
-    if (!seen.has(k)) {
-      seen.add(k);
-      result.push(item);
-    }
-  }
-  return result;
-}
-
-/**
- * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.
- * - x: variable to collect
- * - goal: logic goal
- * - out: output variable
- * - aggFn: aggregation function (receives array of results)
- * - dedup: if true, deduplicate results
- */
-export function aggregateRelFactory(
-  aggFn: (results: Term[]) => any,
-  dedup = false,
-) {
-  return (x: Term, goal: Goal, out: Term): Goal => {
-    return Subquery(
-      goal,
-      x, // extract x from each subgoal result
-      out, // bind the aggregated result to this variable
-      (extractedValues, _) => {
-        const values = dedup ? deduplicate(extractedValues) : extractedValues;
-        return aggFn(values);
-      }
-    );
-  };
-}
-
-// export function aggregateRelFactory(
-//   aggFn: (results: Term[]) => any,
-//   dedup = false,
-// ) {
-//   return (x: Term, goal: Goal, out: Term): Goal => {
-//     const ToutAgg = lvar("ToutAgg");
-//     const collect_rel = dedup ? collect_distinct_streamo : collect_streamo
-//     return and(
-//       goal,
-//       collect_rel(x, ToutAgg, false),
-//       lift(aggFn)(ToutAgg, out), 
-//     )
-//   };
-// }
-
-/**
- * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
- * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg, dedup?) => Goal
- * Example: const group_by_collecto = groupAggregateRelFactory(arrayToLogicList)
- */
-export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
-  return (
-    keyVar: Term,
-    valueVar: Term,
-    goal: Goal,
-    outKey: Term,
-    outAgg: Term,
-    dedup = false,
-  ): Goal => {
-    const ToutAgg = lvar("ToutAgg");
-    const group_by_rel = dedup ? group_by_collect_distinct_streamo : group_by_collect_streamo
-    return and(
-      goal,
-      group_by_rel(keyVar,valueVar, ToutAgg, true),
-      lift(aggFn)(ToutAgg, outAgg), 
-      eq(keyVar, outKey),
-    )
-  }
-}
-
-export const group_by_collecto = groupAggregateRelFactory((x) => x);
-export const group_by_counto = groupAggregateRelFactory(
-  (items: any[]) => {return (logicListToArray(items).length)},
-);
-
-/**
- * collecto(x, goal, xs): xs is the list of all values x can take under goal (logic relation version)
- * Usage: collecto(x, membero(x, ...), xs)
- */
-export const collecto = aggregateRelFactory(function collecto (arr) { return arrayToLogicList(arr)});
-
-/**
- * collect_distincto(x, goal, xs): xs is the list of distinct values of x under goal.
- * Usage: collect_distincto(x, goal, xs)
- */
-export const collect_distincto = aggregateRelFactory(
-  function collecto_distincto (arr) { return arrayToLogicList(arr)},
-  true,
-);
-
-/**
- * counto(x, goal, n): n is the number of (distinct) values of x under goal.
- * Usage: counto(x, goal, n)
- */
-export const counto = aggregateRelFactory((arr) => arr.length);
-
-/**
- * count_valueo(x, goal, value, count):
- *   count is the number of times x == value in the stream of substitutions from goal.
- *   (Canonical, goal-wrapping version: aggregates over all solutions to goal.)
- *   
- *   This is implemented using Subquery with a custom aggregator that counts
- *   how many times the extracted value equals the target value (walked in context).
- */
-export function count_valueo(
-  x: Term,
-  goal: Goal,
-  value: Term,
-  count: Term
-): Goal {
-  return Subquery(
-    goal,
-    x, // extract x from each subgoal result
-    count, // bind the count to this variable
-    (extractedValues, originalSubst) => {
-      // Walk the value in the original substitution context
-      const targetValue = walk(value, originalSubst);
-      // Count how many extracted values match the target value
-      return extractedValues.filter(val => 
-        JSON.stringify(val) === JSON.stringify(targetValue)
-      ).length;
-    }
-  );
-}
 
 /**
  * count_value_streamo(x, value, count):
@@ -325,10 +182,10 @@ export function take_streamo(n: number): Goal {
  *   - drop=false: emits x=A,y=1,list=[1,2]; x=A,y=2,list=[1,2]; x=B,y=3,list=[3]
  *   - drop=true: emits x=A,list=[1,2]; x=B,list=[3]
  */
-export function group_by_collect_streamo(
+export function group_by_collect_streamo<T>(
   keyVar: Term,
-  valueVar: Term,
-  outList: Term,
+  valueVar: Term<T>,
+  outList: Term<T[]>,
   drop = false
 ): Goal {
   return group_by_streamo_base(
@@ -342,10 +199,10 @@ export function group_by_collect_streamo(
 
 
 
-export function group_by_collect_distinct_streamo(
+export function group_by_collect_distinct_streamo<T>(
   keyVar: Term,
-  valueVar: Term,
-  outList: Term,
+  valueVar: Term<T>,
+  outList: Term<T[]>,
   drop = false
 ): Goal {
   return group_by_streamo_base(
@@ -357,30 +214,27 @@ export function group_by_collect_distinct_streamo(
   );
 }
 
-// export function collect_streamo(
-//   valueVar: Term,
-//   outList: Term,
-//   drop = false,
-// ): Goal {
-//   return collect_and_process_base(
-//     (buffer, observer) => {
-//       const results = buffer.map(x => walk(valueVar, x));
-//       console.log("CAPB", {
-//         results 
-//       })
-//       let s;
-//       if(drop) {
-//         s = new Map() as Subst;
-//       } else {
-//         s = buffer[0];
-//       }
-//       const newSubst = unify(results, outList, s);
-//       if(newSubst) {
-//         observer.next(newSubst);
-//       }
-//     }
-//   )
-// }
+export function collect_streamo(
+  valueVar: Term,
+  outList: Term,
+  drop = false,
+): Goal {
+  return collect_and_process_base(
+    (buffer, observer) => {
+      const results = buffer.map(x => walk(valueVar, x));
+      let s;
+      if(drop) {
+        s = new Map() as Subst;
+      } else {
+        s = buffer[0] ?? new Map();
+      }
+      const newSubst = unify(results, outList, s);
+      if(newSubst) {
+        observer.next(newSubst);
+      }
+    }
+  )
+}
 
 
 // export function collect_distinct_streamo(

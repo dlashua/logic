@@ -67,15 +67,16 @@ function makeQuery() {
       // fail(),
       familytree.person($.person),
       familytree.parentAgg($.person, $.parents),
+      // substLog("bottom"),
 
       familytree.stepParentAgg($.person, $.step_parents),
       familytree.grandparentAgg($.person, $.grand_parents),
-      familytree.greatgrandparentAgg($.person, $.great_grand_parents),
+      // familytree.greatgrandparentAgg($.person, $.great_grand_parents),
       // familytree.uncleAgg($.person, $.uncle, 1),
   
       familytree.siblingsAgg($.person, $.siblings),
       familytree.cousinsAgg($.person, $.cousins_1, 1),
-      familytree.cousinsAgg($.person, $.cousins_2, 2),
+      // familytree.cousinsAgg($.person, $.cousins_2, 2),
       // familytree.cousinsAgg($.person, $.cousins_3, 3),
 
       // familytree.cousinsAgg($.person, $.cousins_1_1o, 1, 1),

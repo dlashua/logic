@@ -22,14 +22,8 @@ import {
   or,
   Subquery
 } from "../core/combinators.ts";
-import {
-  collect_distincto,
-  group_by_collect_streamo,
-  group_by_collecto,
-  group_by_count_streamo,
-  sort_by_streamo,
-  take_streamo
-} from "../relations/aggregates.ts"
+import { group_by_collect_streamo, group_by_count_streamo, sort_by_streamo, take_streamo } from "../relations/aggregates.ts"
+import { group_by_collecto , collect_distincto } from "../relations/aggregates-subqueries.ts";
 import { SqlRelationCache } from "../facts-rest/relation-cache.ts";
 import { substLog } from "../relations/control.ts";
 

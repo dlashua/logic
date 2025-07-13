@@ -374,7 +374,7 @@ export function enrichGroupInput(
   disjGoals: Goal[],
   fn: (enrichedInput$: SimpleObservable<Subst>) => SimpleObservable<Subst>
 ) {
-  const newInput$ = (input$: SimpleObservable<Subst>) => {
+  function newInput$ (input$: SimpleObservable<Subst>) {
     const enrichedInput$ = input$.map(s => 
       createEnrichedSubst(s, type, conjGoals, disjGoals)
     );
@@ -382,7 +382,9 @@ export function enrichGroupInput(
   };
   (newInput$ as any).conjGoals = conjGoals;
   (newInput$ as any).disjGoals = disjGoals;
-  newInput$.displayName = `${type}`;
+  Object.defineProperty(newInput$, 'name', {
+    value: type 
+  })
   return newInput$;
 }
 

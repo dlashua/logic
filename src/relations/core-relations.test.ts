@@ -3,7 +3,7 @@ import { lvar, resetVarCounter, logicList, logicListToArray } from '../core/kern
 import { eq, and, or } from '../core/combinators.ts';
 import { query } from '../query.ts';
 import { membero } from './lists.ts';
-import { collecto } from './aggregates.ts';
+import { collecto } from "./aggregates-subqueries.ts";
 import { not } from './control.ts';
 
 describe('Core Relations', () => {

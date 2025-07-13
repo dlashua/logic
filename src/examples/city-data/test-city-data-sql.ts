@@ -3,7 +3,7 @@ import { query } from "../../query.ts";
 import { and, eq } from "../../core/combinators.ts";
 import { gto } from "../../relations/numeric.ts";
 import { lengtho } from "../../relations/lists.ts";
-import { group_by_collecto } from "../../relations/aggregates.ts";
+import { group_by_collecto } from "../../relations/aggregates-subqueries.ts";
 import { city, relDB } from "./city-data-sql.ts"
 
 const timeit = async (name: string, fn: () => any) => {

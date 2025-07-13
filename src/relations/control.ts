@@ -1,4 +1,5 @@
 import util from "node:util";
+import { K } from "vitest/dist/chunks/reporters.d.BFLkQcL6.js";
 import { ConsNode, Goal, Subst, Term } from "../core/types.ts"
 import { walk, isVar, enrichGroupInput } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
@@ -124,12 +125,15 @@ export function nonGroundo(term: Term): Goal {
 /**
  * A goal that logs each substitution it sees along with a message.
  */
-export function substLog(msg: string): Goal {
-  return (input$: SimpleObservable<Subst>) =>
+export function substLog(msg: string, onlyVars = false): Goal {
+  return enrichGroupInput("substLog", [], [], (input$: SimpleObservable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       const sub = input$.subscribe({
         next: (s) => {
-          console.log(`[substLog] ${msg}:`, util.inspect(s, {
+          const ns = onlyVars 
+            ? Object.fromEntries([...s.entries()].filter(([k,v]) => typeof k === "string"))
+            : s;
+          console.log(`[substLog] ${msg}:`, util.inspect(ns, {
             depth: null,
             colors: true
           }));
@@ -139,7 +143,7 @@ export function substLog(msg: string): Goal {
         complete: observer.complete,
       });
       return () => sub.unsubscribe();
-    });
+    }));
 }
 
 export function fail(): Goal {

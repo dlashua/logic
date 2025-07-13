@@ -100,12 +100,12 @@ export const unificationUtils = {
   /**
    * Unify all selectCols in a row with walkedQ and subst
    */
-  async unifyRowWithWalkedQ(
+  unifyRowWithWalkedQ(
     selectCols: string[],
     walkedQ: Record<string, Term>,
     row: Record<string, any>,
     subst: Subst,
-  ): Promise<Subst | null> {
+  ): Subst | null {
     let s2: Subst = subst;
     let needsClone = true;
     
@@ -121,7 +121,7 @@ export const unificationUtils = {
           needsClone = false;
         }
         
-        const unified = await unify(walkedQ[col], row[col], s2);
+        const unified = unify(walkedQ[col], row[col], s2);
         if (unified) {
           s2 = unified;
         } else {
@@ -136,11 +136,11 @@ export const unificationUtils = {
   /**
    * Unify arrays element by element
    */
-  async unifyArrays(
+  unifyArrays(
     queryArray: Term[],
     factArray: Term[],
     subst: Subst
-  ): Promise<Subst | null> {
+  ): Subst | null {
     if (queryArray.length !== factArray.length) {
       return null;
     }

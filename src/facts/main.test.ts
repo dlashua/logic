@@ -7,7 +7,7 @@ import {
 } from 'vitest'
 import { isLogicList, logicListToArray, lvar, resetVarCounter } from '../core/kernel.ts';
 import { eq, and, or } from '../core/combinators.ts';
-import { collecto } from '../relations/aggregates.ts';
+import { collecto } from "../relations/aggregates-subqueries.ts";
 import { not } from '../relations/control.ts';
 import { query } from '../query.ts';
 import { makeFactsObj, makeFacts } from './facts-memory.ts';

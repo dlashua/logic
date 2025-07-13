@@ -6,8 +6,9 @@ import type {
   Observable
 } from "../core/types.ts"
 import { walk, arrayToLogicList, enrichGroupInput, unify } from "../core/kernel.ts";
-import { eq } from "../core/combinators.ts";
+import { eq, Subquery } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
+import { collect_and_process_base, group_by_streamo_base } from "./aggregates-base.ts";
 
 /**
  * @deprecated Avoid using toSimple. Use native Observable/subscribe patterns instead.
@@ -269,6 +270,9 @@ export const counto = aggregateRelFactory((arr) => arr.length);
  * count_valueo(x, goal, value, count):
  *   count is the number of times x == value in the stream of substitutions from goal.
  *   (Canonical, goal-wrapping version: aggregates over all solutions to goal.)
+ *   
+ *   This is implemented using Subquery with a custom aggregator that counts
+ *   how many times the extracted value equals the target value (walked in context).
  */
 export function count_valueo(
   x: Term,
@@ -276,28 +280,19 @@ export function count_valueo(
   value: Term,
   count: Term
 ): Goal {
-  return (input$: Observable<Subst>) =>
-    new SimpleObservable<Subst>((observer) => {
-      const inputSub = input$.subscribe({
-        next: (s: Subst) => {
-          // For each input substitution, run the goal, then count in that stream
-          count_value_streamo(x, value, count)(goal(SimpleObservable.of(s))).subscribe({
-            next: (sCount) => {
-              // Merge the count result with the original substitution
-              // sCount may only bind 'count', so unify with s
-              const merged = new Map(s);
-              for (const [k, v] of sCount) merged.set(k, v);
-              observer.next(merged);
-            },
-            error: observer.error,
-            complete: observer.complete,
-          });
-        },
-        error: observer.error,
-        complete: observer.complete,
-      });
-      return () => inputSub.unsubscribe();
-    });
+  return Subquery(
+    goal,
+    x, // extract x from each subgoal result
+    count, // bind the count to this variable
+    (extractedValues, originalSubst) => {
+      // Walk the value in the original substitution context
+      const targetValue = walk(value, originalSubst);
+      // Count how many extracted values match the target value
+      return extractedValues.filter(val => 
+        JSON.stringify(val) === JSON.stringify(targetValue)
+      ).length;
+    }
+  );
 }
 
 /**
@@ -352,56 +347,27 @@ export function count_value_streamo(
 }
 
 /**
- * group_by_count_streamo(x, count):
- *   For each unique value of x in the current stream, emit a substitution with x and its count.
- *   Example: if stream is x=A,x=A,x=B,x=A,x=B,x=C, emits x=A,count=3; x=B,count=2; x=C,count=1
- *   (Stream-based group-by-count, canonical in Datalog/logic aggregation.)
+ * group_by_count_streamo(x, count, drop?):
+ *   Groups the input stream by values of x and counts each group.
+ *   - If drop=false (default): Preserves all variables from original substitutions,
+ *     emitting one result for EACH substitution in each group with the count added.
+ *   - If drop=true: Creates fresh substitutions with ONLY x and count variables.
+ *   Example: if stream is x=A,y=1; x=A,y=2; x=B,y=3
+ *   - drop=false: emits x=A,y=1,count=2; x=A,y=2,count=2; x=B,y=3,count=1
+ *   - drop=true: emits x=A,count=2; x=B,count=1
  */
 export function group_by_count_streamo(
   x: Term,
-  count: Term
+  count: Term,
+  drop = false
 ): Goal {
-  return (input$: Observable<Subst>) =>
-    new SimpleObservable<Subst>((observer) => {
-      // Map from value key to array of substitutions
-      const valueMap = new Map<string, { value: any, substitutions: Subst[] }>();
-      
-      const subscription = input$.subscribe({
-        next: (s) => {
-          const val = walk(x, s);
-          const k = JSON.stringify(val);
-          if (!valueMap.has(k)) valueMap.set(k, {
-            value: val,
-            substitutions: []
-          });
-          valueMap.get(k)!.substitutions.push(s);
-        },
-        error: (error) => {
-          // Clean up valueMap on error
-          valueMap.clear();
-          observer.error?.(error);
-        },
-        complete: () => {
-          for (const { value, substitutions } of valueMap.values()) {
-            const subst = new Map(substitutions[0]);
-            const subst1 = unify(x, value, subst);
-            if (subst1 === null) continue;
-            const subst2 = unify(count, substitutions.length, subst1);
-            if (subst2 === null) continue;
-            observer.next(subst2 as Subst);
-          }
-          // Clean up valueMap after processing
-          valueMap.clear();
-          observer.complete?.();
-        },
-      });
-      
-      // Return cleanup function to handle early unsubscription
-      return () => {
-        subscription.unsubscribe?.();
-        valueMap.clear(); // Clean up valueMap on unsubscribe
-      };
-    });
+  return group_by_streamo_base(
+    x, // keyVar
+    null, // valueVar (not needed for counting)
+    count, // outVar
+    drop, // drop
+    (_, substitutions) => substitutions.length // aggregator: count substitutions
+  );
 }
 
 /**
@@ -417,57 +383,39 @@ export function sort_by_streamo(
   x: Term,
   orderOrFn?: 'asc' | 'desc' | ((a: any, b: any) => number)
 ): Goal {
-  return (input$: Observable<Subst>) =>
-    new SimpleObservable<Subst>((observer) => {
-      const buffer: { value: any, subst: Subst }[] = [];
+  return collect_and_process_base(
+    (buffer: Subst[], observer: { next: (s: Subst) => void }) => {
+      // Extract values and create sortable pairs
+      const pairs = buffer.map(subst => ({
+        value: walk(x, subst),
+        subst
+      }));
       
-      const subscription = input$.subscribe({
-        next: (s) => {
-          const val = walk(x, s);
-          buffer.push({
-            value: val,
-            subst: s
-          });
-        },
-        error: (error) => {
-          // Clean up buffer on error
-          buffer.length = 0;
-          observer.error?.(error);
-        },
-        complete: () => {
-          let comparator: (a: { value: any }, b: { value: any }) => number;
-          if (typeof orderOrFn === 'function') {
-            comparator = (a, b) => orderOrFn(a.value, b.value);
-          } else if (orderOrFn === 'desc') {
-            comparator = (a, b) => {
-              if (a.value < b.value) return 1;
-              if (a.value > b.value) return -1;
-              return 0;
-            };
-          } else { // 'asc' or undefined
-            comparator = (a, b) => {
-              if (a.value < b.value) return -1;
-              if (a.value > b.value) return 1;
-              return 0;
-            };
-          }
-          
-          buffer.sort(comparator);
-          for (const { subst } of buffer) {
-            observer.next(subst);
-          }
-          // Clean up buffer after emitting all values
-          buffer.length = 0;
-          observer.complete?.();
-        },
-      });
+      // Create comparator
+      let comparator: (a: { value: any }, b: { value: any }) => number;
+      if (typeof orderOrFn === 'function') {
+        comparator = (a, b) => orderOrFn(a.value, b.value);
+      } else if (orderOrFn === 'desc') {
+        comparator = (a, b) => {
+          if (a.value < b.value) return 1;
+          if (a.value > b.value) return -1;
+          return 0;
+        };
+      } else { // 'asc' or undefined
+        comparator = (a, b) => {
+          if (a.value < b.value) return -1;
+          if (a.value > b.value) return 1;
+          return 0;
+        };
+      }
       
-      // Return cleanup function to handle early unsubscription
-      return () => {
-        subscription.unsubscribe?.();
-        buffer.length = 0; // Clean up buffer on unsubscribe
-      };
-    });
+      // Sort and emit
+      pairs.sort(comparator);
+      for (const { subst } of pairs) {
+        observer.next(subst);
+      }
+    }
+  );
 }
 
 /**
@@ -479,20 +427,53 @@ export function take_streamo(n: number): Goal {
   return (input$: Observable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       let count = 0;
-      const sub = input$.subscribe({
-        next: (s) => {
+      
+      const subscription = input$.subscribe({
+        next: (item) => {
           if (count < n) {
-            observer.next(s);
+            observer.next(item);
             count++;
             if (count === n) {
               observer.complete?.();
-              sub.unsubscribe();
+              subscription.unsubscribe?.();
             }
           }
         },
         error: observer.error,
         complete: observer.complete,
       });
-      return () => sub.unsubscribe();
+      
+      return () => subscription.unsubscribe?.();
     });
 }
+
+/**
+ * group_by_collect_streamo(keyVar, valueVar, outList, drop?):
+ *   Groups the input stream by keyVar and collects valueVar values into lists.
+ *   The keyVar is preserved in the output (no need for separate outKey parameter).
+ *   - If drop=false (default): Preserves all variables from original substitutions,
+ *     emitting one result for EACH substitution in each group with the collected list added.
+ *   - If drop=true: Creates fresh substitutions with ONLY keyVar and outList variables.
+ *   Example: if stream is x=A,y=1; x=A,y=2; x=B,y=3
+ *   - drop=false: emits x=A,y=1,list=[1,2]; x=A,y=2,list=[1,2]; x=B,y=3,list=[3]
+ *   - drop=true: emits x=A,list=[1,2]; x=B,list=[3]
+ */
+export function group_by_collect_streamo(
+  keyVar: Term,
+  valueVar: Term,
+  outList: Term,
+  drop = false
+): Goal {
+  return group_by_streamo_base(
+    keyVar, // keyVar
+    valueVar, // valueVar
+    outList, // outVar
+    drop, // drop
+    (values, _) => arrayToLogicList(values) // aggregator: collect into list
+  );
+}
+
+
+
+
+

@@ -51,7 +51,8 @@ export function groupByGoal(
   return toSimple(input$).flatMap((s: Subst) =>
     new SimpleObservable<Subst>((observer) => {
       const pairs: { key: any; value: any }[] = [];
-      toSimple(goal(SimpleObservable.of(s))).subscribe({
+      
+      const subscription = toSimple(goal(SimpleObservable.of(s))).subscribe({
         next: (s1) => {
           const key = walk(keyVar, s1);
           const value = walk(valueVar, s1);
@@ -72,12 +73,17 @@ export function groupByGoal(
             const group = grouped.get(k);
             if (group) group.items.push(value);
           }
+          
           let completedGroups = 0;
           const totalGroups = grouped.size;
           if (totalGroups === 0) {
+            // Clean up on early completion
+            pairs.length = 0;
+            grouped.clear();
             observer.complete?.();
             return;
           }
+          
           for (const { key, items } of grouped.values()) {
             cb(s, key, items).subscribe({
               next: observer.next,
@@ -85,14 +91,27 @@ export function groupByGoal(
               complete: () => {
                 completedGroups++;
                 if (completedGroups === totalGroups) {
+                  // Clean up after all groups completed
+                  pairs.length = 0;
+                  grouped.clear();
                   observer.complete?.();
                 }
               }
             });
           }
         },
-        error: observer.error
+        error: (error) => {
+          // Clean up on error
+          pairs.length = 0;
+          observer.error?.(error);
+        }
       });
+      
+      // Return cleanup function to handle early unsubscription
+      return () => {
+        subscription.unsubscribe?.();
+        pairs.length = 0; // Clean up pairs on unsubscribe
+      };
     })
   );
 }
@@ -116,7 +135,8 @@ export function aggregateRelFactory(
       toSimple(input$).flatMap((s: Subst) =>
         new SimpleObservable<Subst>((observer) => {
           const results: Term[] = [];
-          toSimple(goal(SimpleObservable.of(s))).subscribe({
+          
+          const subscription = toSimple(goal(SimpleObservable.of(s))).subscribe({
             next: (s1) => {
               const val = walk(x, s1);
               results.push(val);
@@ -126,11 +146,25 @@ export function aggregateRelFactory(
               toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
                 next: observer.next,
                 error: observer.error,
-                complete: observer.complete
+                complete: () => {
+                  // Clean up results after processing
+                  results.length = 0;
+                  observer.complete?.();
+                }
               });
             },
-            error: observer.error
+            error: (error) => {
+              // Clean up results on error
+              results.length = 0;
+              observer.error?.(error);
+            }
           });
+          
+          // Return cleanup function to handle early unsubscription
+          return () => {
+            subscription.unsubscribe?.();
+            results.length = 0; // Clean up results on unsubscribe
+          };
         })
       )
     );
@@ -281,9 +315,14 @@ export function count_value_streamo(
   return (input$: Observable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       const substitutions: Subst[] = [];
-      input$.subscribe({
+      
+      const subscription = input$.subscribe({
         next: (s) => substitutions.push(s),
-        error: observer.error,
+        error: (error) => {
+          // Clean up substitutions on error
+          substitutions.length = 0;
+          observer.error?.(error);
+        },
         complete: () => {
           let n = 0;
           for (const s of substitutions) {
@@ -291,13 +330,24 @@ export function count_value_streamo(
             const target = walk(value, s);
             if (JSON.stringify(val) === JSON.stringify(target)) n++;
           }
+          
           eq(count, n)(SimpleObservable.of(new Map())).subscribe({
             next: observer.next,
             error: observer.error,
-            complete: observer.complete,
+            complete: () => {
+              // Clean up substitutions after processing
+              substitutions.length = 0;
+              observer.complete?.();
+            },
           });
         },
       });
+      
+      // Return cleanup function to handle early unsubscription
+      return () => {
+        subscription.unsubscribe?.();
+        substitutions.length = 0; // Clean up substitutions on unsubscribe
+      };
     });
 }
 
@@ -315,7 +365,8 @@ export function group_by_count_streamo(
     new SimpleObservable<Subst>((observer) => {
       // Map from value key to array of substitutions
       const valueMap = new Map<string, { value: any, substitutions: Subst[] }>();
-      input$.subscribe({
+      
+      const subscription = input$.subscribe({
         next: (s) => {
           const val = walk(x, s);
           const k = JSON.stringify(val);
@@ -325,7 +376,11 @@ export function group_by_count_streamo(
           });
           valueMap.get(k)!.substitutions.push(s);
         },
-        error: observer.error,
+        error: (error) => {
+          // Clean up valueMap on error
+          valueMap.clear();
+          observer.error?.(error);
+        },
         complete: () => {
           for (const { value, substitutions } of valueMap.values()) {
             const subst = new Map(substitutions[0]);
@@ -335,9 +390,17 @@ export function group_by_count_streamo(
             if (subst2 === null) continue;
             observer.next(subst2 as Subst);
           }
+          // Clean up valueMap after processing
+          valueMap.clear();
           observer.complete?.();
         },
       });
+      
+      // Return cleanup function to handle early unsubscription
+      return () => {
+        subscription.unsubscribe?.();
+        valueMap.clear(); // Clean up valueMap on unsubscribe
+      };
     });
 }
 
@@ -357,7 +420,8 @@ export function sort_by_streamo(
   return (input$: Observable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       const buffer: { value: any, subst: Subst }[] = [];
-      input$.subscribe({
+      
+      const subscription = input$.subscribe({
         next: (s) => {
           const val = walk(x, s);
           buffer.push({
@@ -365,7 +429,11 @@ export function sort_by_streamo(
             subst: s
           });
         },
-        error: observer.error,
+        error: (error) => {
+          // Clean up buffer on error
+          buffer.length = 0;
+          observer.error?.(error);
+        },
         complete: () => {
           let comparator: (a: { value: any }, b: { value: any }) => number;
           if (typeof orderOrFn === 'function') {
@@ -383,13 +451,22 @@ export function sort_by_streamo(
               return 0;
             };
           }
+          
           buffer.sort(comparator);
           for (const { subst } of buffer) {
             observer.next(subst);
           }
+          // Clean up buffer after emitting all values
+          buffer.length = 0;
           observer.complete?.();
         },
       });
+      
+      // Return cleanup function to handle early unsubscription
+      return () => {
+        subscription.unsubscribe?.();
+        buffer.length = 0; // Clean up buffer on unsubscribe
+      };
     });
 }
 

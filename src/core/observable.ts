@@ -239,14 +239,18 @@ export class SimpleObservable<T> implements Observable<T> {
     });
   }
 
-  share(): SimpleObservable<T> {
+  share(bufferSize: number = Number.POSITIVE_INFINITY): SimpleObservable<T> {
     let observers: Observer<T>[] = [];
     let subscription: Subscription | null = null;
     let refCount = 0;
     let completed = false;
     let lastError: any = null;
+    const buffer: T[] = [];
 
     return new SimpleObservable<T>((observer) => {
+      // Replay all buffered values to new subscribers (logic programming needs deterministic behavior)
+      buffer.forEach(value => observer.next?.(value));
+      
       if (completed) {
         if (lastError !== null) {
           observer.error?.(lastError);
@@ -262,6 +266,11 @@ export class SimpleObservable<T> implements Observable<T> {
       if (subscription === null) {
         subscription = this.subscribe({
           next: (value) => {
+            buffer.push(value);
+            // Limit buffer size if specified (for memory optimization)
+            if (buffer.length > bufferSize) {
+              buffer.shift();
+            }
             observers.slice().forEach(o => o.next?.(value));
           },
           error: (err) => {
@@ -284,6 +293,9 @@ export class SimpleObservable<T> implements Observable<T> {
         if (refCount === 0 && subscription) {
           subscription.unsubscribe();
           subscription = null;
+          completed = false;
+          lastError = null;
+          buffer.length = 0; // Clean up buffer when no more subscribers
         }
       };
     });

@@ -28,6 +28,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@dotenvx/dotenvx": "^1.47.5",
     "better-sqlite3": "^12.1.1",
     "eslint-plugin-import": "^2.32.0",
     "jsonata": "^2.0.6",

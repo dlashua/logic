@@ -1,3 +1,4 @@
+import "@dotenvx/dotenvx/config";
 import { inspect } from "node:util";
 import { resolve } from "path";
 import { fileURLToPath } from 'url';
@@ -14,9 +15,16 @@ import {
   lteo
 } from "../relations/index.ts"
 import { Term } from "../core/types.ts";
-import { and, eq, fresh, or } from "../core/combinators.ts";
+import {
+  and,
+  eq,
+  fresh,
+  or,
+  Subquery
+} from "../core/combinators.ts";
 import {
   collect_distincto,
+  group_by_collect_streamo,
   group_by_collecto,
   group_by_count_streamo,
   sort_by_streamo,
@@ -108,54 +116,33 @@ const results = await query()
       popularity: $.movie_popularity,
       // release_date: $.release_date,
       limit: 1000,
-    }),  
-    // sort_by_streamo($.movie_popularity, "desc"),
+    }),
+    sort_by_streamo($.movie_popularity, "desc"),
+    take_streamo(30),
 
+    movie_credits({
+      id: $.id,
+      cast: $._cast,
+    }),
+    extractEach($._cast, {
+      name: $.actor_name,
+      popularity: $.actor_popularity,
+      order: $.actor_movie_order,
+    }),
+    lteo($.actor_movie_order, 9),
+    gteo($.actor_popularity, 3),
 
-    // group_by_collecto(
-    //   $.actor_name,
-    //   $.title,
-    //   and(
-    //     // membero($.release_year, ["1990", "1991", "1992", "1993", "1994", "1995", "1996", "1997", "1998", "1999"]),
-    //     discover_movie({
-    //       with_genres: SCIFI_GENRE,
-    //       sort_by: "popularity.desc",
-    //       region: "United States",
-    //       id: $.id,
-    //       title: $.title,
-    //       // primary_release_year: $.release_year,
-    //       "primary_release_date.gte": "1990-01-01",
-    //       "primary_release_date.lte": "1999-12-31",
-    //       popularity: $.movie_popularity,
-    //       // release_date: $.release_date,
-    //       limit: 1000,
-    //     }),  
-    //     // sort_by_streamo($.movie_popularity, "desc"),
-    //     // take_streamo(500),
-    //     movie_credits({
-    //       id: $.id,
-    //       cast: $._cast,
-    //     }),
-    //     extractEach($._cast, {
-    //       name: $.actor_name,
-    //       popularity: $.actor_popularity,
-    //       // order: $.actor_movie_order,
-    //     }),
-    //     // lteo($.actor_movie_order, 9),
-    //     gteo($.actor_popularity, 3),
-    //   ),
-    //   $.title_actor,
-    //   $.titles,
-    // ),
-    // lengtho($.titles, $.titles_count),
-    // sort_by_streamo($.titles_count, "desc"),
-    // take_streamo(10),
+    group_by_collect_streamo($.actor_name, $.title, $.titles, true),
+    lengtho($.titles, $.titles_count),
+
+    sort_by_streamo($.titles_count, "desc"),
+
   ])
   // .select(
   //   $ => ({
-  //     title_actor: $.title_actor,
+  //     title_actor: $.actor_name,
   //     count: $.titles_count,
-  //     titles: $.titles,
+  //     // titles: $.titles,
   //   })
   // )
   .toArray();
@@ -164,5 +151,6 @@ console.log("Results:", inspect(results, {
   depth: null,
   colors: true 
 }));
-console.log("Queries", tmdbApi.getQueries().filter(x => x.startsWith("G:")));
 // console.log("Queries", tmdbApi.getQueries());
+process.exit();
+

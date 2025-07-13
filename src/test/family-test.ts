@@ -20,8 +20,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-// const BACKEND = "sql";
-const BACKEND = "mem";
+const BACKEND = "sql";
+// const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];

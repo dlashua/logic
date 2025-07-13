@@ -18,10 +18,10 @@ import { pluso } from "../relations/numeric.ts";
 
 const results = await query()
   .where($ => [
-    pluso($.y, 100, $.z),
-    pluso($.x, 10, $.y),
-    membero($.x, [1,2]),
-    membero($.y, [11,20]),
+    or(
+      eq($.x,1),
+      eq($.x,2),
+    )
   ]).toArray();
 
 console.log(results);

@@ -392,22 +392,19 @@ export function sort_by_streamo(
       }));
       
       // Create comparator
-      let comparator: (a: { value: any }, b: { value: any }) => number;
-      if (typeof orderOrFn === 'function') {
-        comparator = (a, b) => orderOrFn(a.value, b.value);
-      } else if (orderOrFn === 'desc') {
-        comparator = (a, b) => {
-          if (a.value < b.value) return 1;
-          if (a.value > b.value) return -1;
-          return 0;
-        };
-      } else { // 'asc' or undefined
-        comparator = (a, b) => {
-          if (a.value < b.value) return -1;
-          if (a.value > b.value) return 1;
-          return 0;
-        };
-      }
+      const orderFn = (() => {
+        if(typeof orderOrFn === "function") {
+          return orderOrFn;
+        }
+        if(typeof orderOrFn === "string") {
+          if (orderOrFn === "desc") {
+            return descComparator;
+          } 
+        } 
+        return ascComparator;
+      })();
+
+      const comparator = (a: {value: any}, b: {value: any}) => orderFn(a.value, b.value);
       
       // Sort and emit
       pairs.sort(comparator);
@@ -417,6 +414,18 @@ export function sort_by_streamo(
     }
   );
 }
+
+const descComparator = <T>(a: T, b: T) => {
+  if (a < b) return 1;
+  if (a > b) return -1;
+  return 0;
+}
+
+const ascComparator = <T>(a: T, b: T) => {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+};
 
 /**
  * take_streamo(n):

@@ -8,7 +8,6 @@ import {
 import { query } from "../query.ts";
 import { fail, not, substLog } from "../relations/control.ts";
 import { membero } from "../relations/lists.ts";
-import { addConstraint } from "../core/constraint-helpers.ts";
 
 console.log("START quick-test");
 
@@ -54,14 +53,6 @@ const start = Date.now();
 function makeQuery() {
   return query()
     .where($ => [
-
-
-      addConstraint($.x,$.y,$.z),
-      addConstraint($.x,10, $.y),
-      eq($.x, 10),
-      // eq($.y, 20),
-      // eq($.z, 40),
-      // substLog("top"),
 
       membero($.person, ["celeste"]),
       // membero($.person, ["emerson", "louis", "celeste", "daniel", "jason", "brooke"]),

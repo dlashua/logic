@@ -9,7 +9,7 @@ import {
   Goal,
 } from "./types.ts";
 import { SimpleObservable } from "./observable.ts";
-import { SUSPENDED_CONSTRAINTS, wakeUpConstraints } from "./subst-constraints.ts";
+import { SUSPENDED_CONSTRAINTS, wakeUpSuspends } from "./subst-suspends.ts";
 
 // Well-known symbols for SQL query coordination
 export const GOAL_GROUP_ID = Symbol('goal-group-id');
@@ -196,7 +196,7 @@ export function unifyWithConstraints(u: Term, v: Term, s: Subst | null): Subst |
 
     // Wake up constraints for newly bound variables (if any)
     if (newlyBoundVars.length > 0) {
-      return wakeUpConstraints(result, newlyBoundVars);
+      return wakeUpSuspends(result, newlyBoundVars);
     }
   }
 

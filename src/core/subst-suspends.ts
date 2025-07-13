@@ -5,54 +5,54 @@ export const SUSPENDED_CONSTRAINTS = Symbol('suspended-constraints');
 
 export interface SuspendedConstraint {
   id: string;
-  constraint: (subst: Subst) => Subst | null;
+  resumeFn: (subst: Subst) => Subst | null;
   watchedVars: string[];
 }
 
 /**
  * Add a constraint to a substitution
  */
-export function addConstraintToSubst(
+export function addSuspendToSubst(
   subst: Subst,
-  constraint: (subst: Subst) => Subst | null,
+  resumeFn: (subst: Subst) => Subst | null,
   watchedVars: string[]
 ): Subst {
-  const constraints = (subst.get(SUSPENDED_CONSTRAINTS) as SuspendedConstraint[]) || [];
-  const newConstraint: SuspendedConstraint = {
+  const suspends = (subst.get(SUSPENDED_CONSTRAINTS) as SuspendedConstraint[]) || [];
+  const newSuspends: SuspendedConstraint = {
     id: `constraint_${Date.now()}_${Math.random()}`,
-    constraint,
+    resumeFn,
     watchedVars
   };
   
   const newSubst = new Map(subst);
-  newSubst.set(SUSPENDED_CONSTRAINTS, [...constraints, newConstraint]);
+  newSubst.set(SUSPENDED_CONSTRAINTS, [...suspends, newSuspends]);
   return newSubst;
 }
 
 /**
  * Get constraints from a substitution
  */
-function getConstraintsFromSubst(subst: Subst): SuspendedConstraint[] {
+function getSuspendsFromSubst(subst: Subst): SuspendedConstraint[] {
   return (subst.get(SUSPENDED_CONSTRAINTS) as SuspendedConstraint[]) || [];
 }
 
 /**
  * Remove constraints from a substitution
  */
-function removeConstraintsFromSubst(
+function removeSuspendFromSubst(
   subst: Subst, 
-  constraintIds: string[]
+  suspendIds: string[]
 ): Subst {
-  const constraints = getConstraintsFromSubst(subst);
-  const filteredConstraints = constraints.filter(c => !constraintIds.includes(c.id));
+  const suspends = getSuspendsFromSubst(subst);
+  const filteredSuspends = suspends.filter(c => !suspendIds.includes(c.id));
   
-  if (filteredConstraints.length === 0) {
+  if (filteredSuspends.length === 0) {
     const newSubst = new Map(subst);
     newSubst.delete(SUSPENDED_CONSTRAINTS);
     return newSubst;
   } else {
     const newSubst = new Map(subst);
-    newSubst.set(SUSPENDED_CONSTRAINTS, filteredConstraints);
+    newSubst.set(SUSPENDED_CONSTRAINTS, filteredSuspends);
     return newSubst;
   }
 }
@@ -60,31 +60,31 @@ function removeConstraintsFromSubst(
 /**
  * Check if any constraints can be woken up by newly bound variables
  */
-export function wakeUpConstraints(subst: Subst, newlyBoundVars: string[]): Subst {
-  const constraints = getConstraintsFromSubst(subst);
-  if (constraints.length === 0) return subst;
+export function wakeUpSuspends(subst: Subst, newlyBoundVars: string[]): Subst {
+  const suspends = getSuspendsFromSubst(subst);
+  if (suspends.length === 0) return subst;
   
   let currentSubst = subst;
-  const constraintsToRemove: string[] = [];
+  const suspendsToRemove: string[] = [];
   
-  for (const constraint of constraints) {
+  for (const suspend of suspends) {
     // Check if any watched variables were newly bound
-    const hasNewBinding = constraint.watchedVars.some(varId => 
+    const hasNewBinding = suspend.watchedVars.some(varId => 
       newlyBoundVars.includes(varId)
     );
     
     if (hasNewBinding) {
       // Remove this constraint from the current substitution before evaluating
-      const substWithoutThisConstraint = removeConstraintsFromSubst(
+      const substWithoutThisSuspend = removeSuspendFromSubst(
         currentSubst, 
-        [constraint.id]
+        [suspend.id]
       );
       
       // Try to evaluate the constraint
-      const result = constraint.constraint(substWithoutThisConstraint);
+      const result = suspend.resumeFn(substWithoutThisSuspend);
       if (result !== null) {
         currentSubst = result;
-        constraintsToRemove.push(constraint.id);
+        suspendsToRemove.push(suspend.id);
       } else {
         // Keep the constraint in the substitution
       }
@@ -92,8 +92,8 @@ export function wakeUpConstraints(subst: Subst, newlyBoundVars: string[]): Subst
   }
   
   // Remove successfully evaluated constraints
-  if (constraintsToRemove.length > 0) {
-    currentSubst = removeConstraintsFromSubst(currentSubst, constraintsToRemove);
+  if (suspendsToRemove.length > 0) {
+    currentSubst = removeSuspendFromSubst(currentSubst, suspendsToRemove);
   }
   
   return currentSubst;

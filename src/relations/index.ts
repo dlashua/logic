@@ -23,7 +23,7 @@ export {
   group_by_counto,
   aggregateRelFactory,
   groupAggregateRelFactory
-} from './aggregates.ts';
+} from './aggregates-subqueries.ts';
 
 // Numeric operations
 export {

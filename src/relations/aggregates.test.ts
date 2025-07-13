@@ -126,12 +126,11 @@ describe('Aggregation Relations', () => {
           and(eq(key, 'b'), eq(value, 3)),
           and(eq(key, 'b'), eq(value, 4))
         ),
-        outKey,
         outValues
       );
       const results = await query()
         .select($ => ({
-          outKey,
+          outKey: key,
           outValues 
         }))
         .where($ => goal)
@@ -158,7 +157,7 @@ describe('Aggregation Relations', () => {
     it('should group by key and count values', async () => {
       const results = await query()
         .select($ => ({
-          outKey: $.outKey,
+          outKey: $.key,
           outCount: $.outCount,
         }))
         .where($ => [
@@ -170,7 +169,6 @@ describe('Aggregation Relations', () => {
               and(eq($.key, 'a'), eq($.value, 2)),
               and(eq($.key, 'b'), eq($.value, 3))
             ),
-            $.outKey,
             $.outCount
           )
         ])

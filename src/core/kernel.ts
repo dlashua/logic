@@ -372,7 +372,7 @@ export function enrichGroupInput(
   type: string,
   conjGoals: Goal[],
   disjGoals: Goal[],
-  fn: (enrichedInput$: SimpleObservable<Subst>) => any
+  fn: (enrichedInput$: SimpleObservable<Subst>) => SimpleObservable<Subst>
 ) {
   const newInput$ = (input$: SimpleObservable<Subst>) => {
     const enrichedInput$ = input$.map(s => 

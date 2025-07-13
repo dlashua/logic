@@ -11,18 +11,6 @@ import { SimpleObservable } from "../core/observable.ts";
 import { collect_and_process_base, group_by_streamo_base } from "./aggregates-base.ts";
 
 /**
- * @deprecated Avoid using toSimple. Use native Observable/subscribe patterns instead.
- */
-function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
-  return (input$ instanceof SimpleObservable)
-    ? input$
-    : new SimpleObservable<T>(observer => {
-      const sub = input$.subscribe(observer);
-      return () => sub.unsubscribe();
-    });
-}
-
-/**
  * Helper: deduplicate an array of items using JSON.stringify for deep equality.
  */
 function deduplicate<T>(items: T[]): T[] {
@@ -39,85 +27,6 @@ function deduplicate<T>(items: T[]): T[] {
 }
 
 /**
- * Helper: group by key for logic goals, then apply a callback per group.
- * Calls cb(s, key, items) for each group, where key is the group key and items is the array of values.
- */
-export function groupByGoal(
-  keyVar: Term,
-  valueVar: Term,
-  goal: Goal,
-  input$: Observable<Subst>,
-  cb: (s: Subst, key: any, items: any[]) => SimpleObservable<Subst>,
-): SimpleObservable<Subst> {
-  return toSimple(input$).flatMap((s: Subst) =>
-    new SimpleObservable<Subst>((observer) => {
-      const pairs: { key: any; value: any }[] = [];
-      
-      const subscription = toSimple(goal(SimpleObservable.of(s))).subscribe({
-        next: (s1) => {
-          const key = walk(keyVar, s1);
-          const value = walk(valueVar, s1);
-          pairs.push({
-            key,
-            value 
-          });
-        },
-        complete: () => {
-          const grouped = new Map<string, { key: any; items: any }>();
-          for (const { key, value } of pairs) {
-            const k = JSON.stringify(key);
-            if (!grouped.has(k))
-              grouped.set(k, {
-                key,
-                items: []
-              });
-            const group = grouped.get(k);
-            if (group) group.items.push(value);
-          }
-          
-          let completedGroups = 0;
-          const totalGroups = grouped.size;
-          if (totalGroups === 0) {
-            // Clean up on early completion
-            pairs.length = 0;
-            grouped.clear();
-            observer.complete?.();
-            return;
-          }
-          
-          for (const { key, items } of grouped.values()) {
-            cb(s, key, items).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: () => {
-                completedGroups++;
-                if (completedGroups === totalGroups) {
-                  // Clean up after all groups completed
-                  pairs.length = 0;
-                  grouped.clear();
-                  observer.complete?.();
-                }
-              }
-            });
-          }
-        },
-        error: (error) => {
-          // Clean up on error
-          pairs.length = 0;
-          observer.error?.(error);
-        }
-      });
-      
-      // Return cleanup function to handle early unsubscription
-      return () => {
-        subscription.unsubscribe?.();
-        pairs.length = 0; // Clean up pairs on unsubscribe
-      };
-    })
-  );
-}
-
-/**
  * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.
  * - x: variable to collect
  * - goal: logic goal
@@ -129,68 +38,17 @@ export function aggregateRelFactory(
   aggFn: (results: Term[]) => any,
   dedup = false,
 ) {
-  // @ts-expect-error
-  const name = aggFn.name || aggFn.displayName || "aggregateRelFactory";
   return (x: Term, goal: Goal, out: Term): Goal => {
-    return enrichGroupInput(name, [], [goal], (input$) =>
-      toSimple(input$).flatMap((s: Subst) =>
-        new SimpleObservable<Subst>((observer) => {
-          const results: Term[] = [];
-          
-          const subscription = toSimple(goal(SimpleObservable.of(s))).subscribe({
-            next: (s1) => {
-              const val = walk(x, s1);
-              results.push(val);
-            },
-            complete: () => {
-              const agg = aggFn(dedup ? deduplicate(results) : results);
-              toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
-                next: observer.next,
-                error: observer.error,
-                complete: () => {
-                  // Clean up results after processing
-                  results.length = 0;
-                  observer.complete?.();
-                }
-              });
-            },
-            error: (error) => {
-              // Clean up results on error
-              results.length = 0;
-              observer.error?.(error);
-            }
-          });
-          
-          // Return cleanup function to handle early unsubscription
-          return () => {
-            subscription.unsubscribe?.();
-            results.length = 0; // Clean up results on unsubscribe
-          };
-        })
-      )
+    return Subquery(
+      goal,
+      x, // extract x from each subgoal result
+      out, // bind the aggregated result to this variable
+      (extractedValues, _) => {
+        const values = dedup ? deduplicate(extractedValues) : extractedValues;
+        return aggFn(values);
+      }
     );
-  }
-  //   return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
-  //     new SimpleObservable<Subst>((observer) => {
-  //       const results: Term[] = [];
-  //       toSimple(goal(SimpleObservable.of(s))).subscribe({
-  //         next: (s1) => {
-  //           const val = walk(x, s1);
-  //           results.push(val);
-  //         },
-  //         complete: () => {
-  //           const agg = aggFn(dedup ? deduplicate(results) : results);
-  //           toSimple(eq(out, agg)(SimpleObservable.of(s))).subscribe({
-  //             next: observer.next,
-  //             error: observer.error,
-  //             complete: observer.complete
-  //           });
-  //         },
-  //         error: observer.error
-  //       });
-  //     })
-  //   );
-  // };
+  };
 }
 
 /**
@@ -211,32 +69,56 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
       "groupAggregateRelFactory",
       [],
       [goal],
-      (input$: Observable<Subst>) =>
-        groupByGoal(
-          keyVar,
-          valueVar,
-          goal,
-          input$,
-          (s, key, items) => {
-            const groupItems = dedup ? deduplicate(items) : items;
-            const agg = aggFn(groupItems);
-            return new SimpleObservable<Subst>((observer) => {
-              toSimple(eq(outKey, key)(SimpleObservable.of(s))).subscribe({
-                next: (s2) => {
-                  toSimple(eq(outAgg, agg)(SimpleObservable.of(s2))).subscribe({
-                    next: observer.next,
-                    error: observer.error,
-                    complete: observer.complete
+      (input$: Observable<Subst>) => {
+        return (input$ as SimpleObservable<Subst>).flatMap((s: Subst) => {
+          // For each input substitution, run the goal and collect grouped results
+          const groups = new Map<string, { key: any, values: any[] }>();
+          
+          return new SimpleObservable<Subst>((observer) => {
+            const subscription = goal(SimpleObservable.of(s)).subscribe({
+              next: (s1) => {
+                const key = walk(keyVar, s1);
+                const value = walk(valueVar, s1);
+                const keyStr = JSON.stringify(key);
+                
+                if (!groups.has(keyStr)) {
+                  groups.set(keyStr, {
+                    key,
+                    values: []
                   });
-                },
-                error: observer.error,
-                complete: () => {
-                  observer.complete?.();
                 }
-              });
+                groups.get(keyStr)!.values.push(value);
+              },
+              error: (error) => {
+                groups.clear();
+                observer.error?.(error);
+              },
+              complete: () => {
+                // For each group, emit one result with outKey and outAgg bound
+                for (const { key, values } of groups.values()) {
+                  const groupItems = dedup ? deduplicate(values) : values;
+                  const agg = aggFn(groupItems);
+                  
+                  // Create a fresh substitution with just outKey and outAgg
+                  const subst = new Map();
+                  const subst1 = unify(outKey, key, subst);
+                  if (subst1 === null) continue;
+                  const subst2 = unify(outAgg, agg, subst1);
+                  if (subst2 === null) continue;
+                  observer.next(subst2 as Subst);
+                }
+                groups.clear();
+                observer.complete?.();
+              },
             });
-          },
-        )
+            
+            return () => {
+              subscription.unsubscribe?.();
+              groups.clear();
+            };
+          });
+        });
+      }
     );
 }
 

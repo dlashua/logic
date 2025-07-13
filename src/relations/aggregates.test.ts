@@ -156,42 +156,35 @@ describe('Aggregation Relations', () => {
 
   describe('group_by_counto', () => {
     it('should group by key and count values', async () => {
-      const key = lvar('key');
-      const value = lvar('value');
-      const outKey = lvar('outKey');
-      const outCount = lvar('outCount');
-      
-      const goal = group_by_counto(
-        key,
-        value,
-        or(
-          and(eq(key, 'a'), eq(value, 1)),
-          and(eq(key, 'a'), eq(value, 2)),
-          and(eq(key, 'b'), eq(value, 3))
-        ),
-        outKey,
-        outCount
-      );
       const results = await query()
         .select($ => ({
-          outKey,
-          outCount 
+          outKey: $.outKey,
+          outCount: $.outCount,
         }))
-        .where($ => goal)
+        .where($ => [
+          group_by_counto(
+            $.key,
+            $.value,
+            or(
+              and(eq($.key, 'a'), eq($.value, 1)),
+              and(eq($.key, 'a'), eq($.value, 2)),
+              and(eq($.key, 'b'), eq($.value, 3))
+            ),
+            $.outKey,
+            $.outCount
+          )
+        ])
         .toArray();
-      const mapped = results.map(r => ({
-        key: r.outKey,
-        count: r.outCount
-      }));
-      mapped.sort((a, b) => (a.key as string).localeCompare(b.key as string));
-      expect(mapped).toEqual([
+      console.log(results);
+      // results.sort((a, b) => (a.outKey as string).localeCompare(b.outKey as string));
+      expect(results).toEqual([
         {
-          key: 'a',
-          count: 2 
+          outCount: 2, 
+          outKey: 'a',
         },
         {
-          key: 'b',
-          count: 1 
+          outCount: 1, 
+          outKey: 'b',
         }
       ]);
     });

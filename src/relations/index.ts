@@ -21,7 +21,6 @@ export {
   counto,
   group_by_collecto,
   group_by_counto,
-  groupByGoal,
   aggregateRelFactory,
   groupAggregateRelFactory
 } from './aggregates.ts';

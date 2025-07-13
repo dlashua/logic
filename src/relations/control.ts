@@ -1,29 +1,14 @@
 import util from "node:util";
-import {
-  ConsNode,
-  Goal,
-  Subst,
-  Term,
-  Observable
-} from "../core/types.ts"
+import { ConsNode, Goal, Subst, Term } from "../core/types.ts"
 import { walk, isVar, enrichGroupInput } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 
-function toSimple<T>(input$: Observable<T>): SimpleObservable<T> {
-  return (input$ instanceof SimpleObservable)
-    ? input$
-    : new SimpleObservable<T>(observer => {
-      const sub = input$.subscribe(observer);
-      return () => sub.unsubscribe();
-    });
-}
-
 export const uniqueo = (t: Term, g: Goal): Goal =>
   enrichGroupInput("uniqueo", [g], [],
-    (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) => {
+    (input$: SimpleObservable<Subst>) => input$.flatMap((s: Subst) => {
       const seen = new Set();
-      return toSimple(g(SimpleObservable.of(s))).flatMap((s2: Subst) => {
+      return g(SimpleObservable.of(s)).flatMap((s2: Subst) => {
         const w_t = walk(t, s2);
         if (isVar(w_t)) {
           return SimpleObservable.of(s2);
@@ -36,8 +21,8 @@ export const uniqueo = (t: Term, g: Goal): Goal =>
     }));
 
 export function not(goal: Goal): Goal {
-  return enrichGroupInput("not", [], [goal], (input$: Observable<Subst>) =>
-    toSimple(input$).flatMap((s: Subst) => {
+  return enrichGroupInput("not", [], [goal], (input$: SimpleObservable<Subst>) =>
+    input$.flatMap((s: Subst) => {
       let found = false;
       return new SimpleObservable<Subst>((observer) => {
         goal(SimpleObservable.of(s)).subscribe({
@@ -71,7 +56,7 @@ export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));
  * Useful for cut-like behavior.
  */
 export function onceo(goal: Goal): Goal {
-  return (input$: Observable<Subst>) => toSimple(goal(toSimple(input$))).take(1);
+  return (input$: SimpleObservable<Subst>) => goal(input$).take(1);
 }
 
 /**
@@ -79,7 +64,7 @@ export function onceo(goal: Goal): Goal {
  * Useful as a base case or for testing.
  */
 export function succeedo(): Goal {
-  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+  return (input$: SimpleObservable<Subst>) => input$.flatMap((s: Subst) =>
     new SimpleObservable<Subst>((observer) => {
       observer.next(s);
       observer.complete?.();
@@ -92,14 +77,14 @@ export function succeedo(): Goal {
  * Useful for testing or as a base case.
  */
 export function failo(): Goal {
-  return (_input$: Observable<Subst>) => SimpleObservable.empty<Subst>();
+  return (_input$: SimpleObservable<Subst>) => SimpleObservable.empty<Subst>();
 }
 
 /**
  * A goal that succeeds if the term is ground (contains no unbound variables).
  */
 export function groundo(term: Term): Goal {
-  return (input$: Observable<Subst>) => toSimple(input$).flatMap((s: Subst) =>
+  return (input$: SimpleObservable<Subst>) => input$.flatMap((s: Subst) =>
     new SimpleObservable<Subst>((observer) => {
       const walked = walk(term, s);
       function isGround(t: Term): boolean {
@@ -140,7 +125,7 @@ export function nonGroundo(term: Term): Goal {
  * A goal that logs each substitution it sees along with a message.
  */
 export function substLog(msg: string): Goal {
-  return (input$: Observable<Subst>) =>
+  return (input$: SimpleObservable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       const sub = input$.subscribe({
         next: (s) => {
@@ -158,7 +143,7 @@ export function substLog(msg: string): Goal {
 }
 
 export function fail(): Goal {
-  return (input$: Observable<Subst>) =>
+  return (input$: SimpleObservable<Subst>) =>
     new SimpleObservable<Subst>((observer) => {
       const sub = input$.subscribe({
         next: (s) => {

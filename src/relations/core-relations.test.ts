@@ -201,28 +201,25 @@ describe('Core Relations', () => {
 
   describe('complex combinations', () => {
     it('should handle membero with collecto and not', async () => {
-      const x = lvar('x');
-      const evens = lvar('evens');
-      const goal = collecto(
-        x,
-        and(
-          membero(x, [1, 2, 3, 4, 5, 6]),
-          not(and(
-            membero(x, [1, 3, 5]) // Not odd numbers
-          ))
-        ),
-        evens
-      );
+
       const results = await query()
         .select($ => ({
-          evens 
+          evens: $.evens 
         }))
-        .where($ => goal)
+        .where($ => collecto(
+          $.x,
+          and(
+            membero($.x, [1, 2, 3, 4, 5, 6]),
+            not(and(
+              membero($.x, [1, 3, 5]) // Not odd numbers
+            ))
+          ),
+          $.evens
+        ))
         .toArray();
       const arr = results[0].evens;
-      const collected = Array.isArray(arr) ? arr.sort() : logicListToArray(arr).sort();
       expect(results).toHaveLength(1);
-      expect(collected).toEqual([2, 4, 6]);
+      expect(arr).toEqual([2, 4, 6]);
     });
   });
 });

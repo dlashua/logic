@@ -235,34 +235,6 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
   });
 }
 
-/**
- * Negation as failure - succeeds only if the goal fails
- */
-export function not(goal: Goal): Goal {
-  return enrichGroupInput("not", [], [], (enrichedInput$) => {
-    return new SimpleObservable<Subst>((observer) => {
-      enrichedInput$.subscribe({
-        next: (s) => {
-          let succeeded = false;
-          goal(SimpleObservable.of(s)).subscribe({
-            next: () => {
-              succeeded = true;
-            },
-            complete: () => {
-              if (!succeeded) {
-                observer.next(s); // Return enriched substitution unchanged
-              }
-              observer.complete?.();
-            },
-            error: observer.error
-          });
-        },
-        error: observer.error,
-        complete: observer.complete
-      });
-    });
-  });
-}
 
 /**
  * Succeeds exactly once with the given substitution (useful for cut-like behavior)
@@ -550,41 +522,40 @@ export function Subquery(
   bindVar: Term,
   aggregator: (results: any[], originalSubst: Subst) => any = (results, _) => arrayToLogicList(results)
 ): Goal {
-  return (input$: Observable<Subst>) =>
-    new SimpleObservable<Subst>((observer) => {
-      const subscription = input$.subscribe({
-        next: (s) => {
-          // For each input substitution, run the subgoal
-          const extracted: any[] = [];
-          
-          const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
-            next: (subResult) => {
-              // Extract the value from each subgoal result
-              const value = walk(extractVar, subResult);
-              extracted.push(value);
-            },
-            error: (error) => {
-              observer.error?.(error);
-            },
-            complete: () => {
-              // Aggregate all extracted values and bind to the target variable
-              // Pass the original substitution so aggregator can walk variables
-              const aggregated = aggregator(extracted, s);
-              const unified = unify(bindVar, aggregated, s);
-              if (unified !== null) {
-                observer.next(unified);
-              }
-            }
-          });
-          
-          // Note: We don't need to track subgoal subscription cleanup here
-          // because it completes synchronously in this flow
-        },
-        error: observer.error,
-        complete: observer.complete,
-      });
+  return enrichGroupInput("Subquery", [], [goal], (input$) =>
+    input$.flatMap((s: Subst) => {
+      const extracted: any[] = [];
       
-      return () => subscription.unsubscribe();
-    });
+      return new SimpleObservable<Subst>((observer) => {
+        const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
+          next: (subResult) => {
+            // Extract the value from each subgoal result
+            const value = walk(extractVar, subResult);
+            extracted.push(value);
+          },
+          error: (error) => {
+            extracted.length = 0;
+            observer.error?.(error);
+          },
+          complete: () => {
+            // Aggregate all extracted values and bind to the target variable
+            // Pass the original substitution so aggregator can walk variables
+            const aggregated = aggregator(extracted, s);
+            const unified = unify(bindVar, aggregated, s);
+            if (unified !== null) {
+              observer.next(unified);
+            }
+            extracted.length = 0;
+            observer.complete?.();
+          }
+        });
+        
+        return () => {
+          subgoalSubscription.unsubscribe?.();
+          extracted.length = 0;
+        };
+      });
+    })
+  );
 }
 

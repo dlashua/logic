@@ -6,7 +6,6 @@ import {
   Var,
   LiftedArgs,
   Observable,
-  Observer
 } from "./types.ts";
 import {
   unify,
@@ -15,8 +14,7 @@ import {
   isVar,
   liftGoal,
   enrichGroupInput,
-  createEnrichedSubst,
-  unifyWithConstraints
+  arrayToLogicList
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
 
@@ -530,5 +528,63 @@ export function projectJsonata(
     });
     return () => subscription.unsubscribe?.();
   });
+}
+
+/**
+ * Subquery: Run a subgoal and bind its results to a variable in the main stream.
+ * This is the universal bridge between goal-based and stream-based operations.
+ * 
+ * @param goal - The subgoal to run
+ * @param extractVar - Variable to extract from subgoal results  
+ * @param bindVar - Variable to bind the extracted results to in main stream
+ * @param aggregator - How to combine multiple results (receives results and original substitution)
+ * 
+ * Examples:
+ * - Subquery(membero(x, [1,2,3]), x, $.items) // binds $.items to [1,2,3]
+ * - Subquery(goal, x, $.count, (results, _) => results.length) // binds $.count to result count
+ * - Subquery(goal, x, $.count, (results, s) => results.filter(r => r === walk(target, s)).length) // count matches
+ */
+export function Subquery(
+  goal: Goal,
+  extractVar: Term,
+  bindVar: Term,
+  aggregator: (results: any[], originalSubst: Subst) => any = (results, _) => arrayToLogicList(results)
+): Goal {
+  return (input$: Observable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      const subscription = input$.subscribe({
+        next: (s) => {
+          // For each input substitution, run the subgoal
+          const extracted: any[] = [];
+          
+          const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
+            next: (subResult) => {
+              // Extract the value from each subgoal result
+              const value = walk(extractVar, subResult);
+              extracted.push(value);
+            },
+            error: (error) => {
+              observer.error?.(error);
+            },
+            complete: () => {
+              // Aggregate all extracted values and bind to the target variable
+              // Pass the original substitution so aggregator can walk variables
+              const aggregated = aggregator(extracted, s);
+              const unified = unify(bindVar, aggregated, s);
+              if (unified !== null) {
+                observer.next(unified);
+              }
+            }
+          });
+          
+          // Note: We don't need to track subgoal subscription cleanup here
+          // because it completes synchronously in this flow
+        },
+        error: observer.error,
+        complete: observer.complete,
+      });
+      
+      return () => subscription.unsubscribe();
+    });
 }
 

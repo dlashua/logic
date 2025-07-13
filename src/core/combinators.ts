@@ -5,7 +5,8 @@ import {
   Term,
   Var,
   LiftedArgs,
-  Observable
+  Observable,
+  Observer
 } from "./types.ts";
 import {
   unify,
@@ -115,46 +116,28 @@ export const or = (...goals: Goal[]): Goal => {
   
   return enrichGroupInput("or", [], goals, (input$: SimpleObservable<Subst>) => {
     return new SimpleObservable<Subst>((observer) => {
-      // Collect all input substitutions first
-      const inputSubsts: Subst[] = [];
+      // Use the improved share() method that replays values for logic programming
+      const sharedInput$ = input$.share();
       
-      const inputSubscription = input$.subscribe({
-        next: (s) => inputSubsts.push(s),
-        error: observer.error,
-        complete: () => {
-          // Now run each goal with each input substitution
-          let completedGoals = 0;
-          const subscriptions: any[] = [];
-          
-          for (const goal of goals) {
-            // Create fresh input stream for this goal
-            const goalInput$ = new SimpleObservable<Subst>((goalObserver) => {
-              inputSubsts.forEach(s => goalObserver.next(s));
-              goalObserver.complete?.();
-            });
-            
-            const goalSubscription = goal(goalInput$).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: () => {
-                completedGoals++;
-                if (completedGoals === goals.length) {
-                  observer.complete?.();
-                }
-              }
-            });
-            subscriptions.push(goalSubscription);
+      let completedGoals = 0;
+      const subscriptions: any[] = [];
+      
+      for (const goal of goals) {
+        const goalSubscription = goal(sharedInput$).subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: () => {
+            completedGoals++;
+            if (completedGoals === goals.length) {
+              observer.complete?.();
+            }
           }
-          
-          // Return cleanup function for goal subscriptions
-          return () => {
-            subscriptions.forEach(sub => sub.unsubscribe?.());
-          };
-        }
-      });
+        });
+        subscriptions.push(goalSubscription);
+      }
       
       return () => {
-        inputSubscription.unsubscribe?.();
+        subscriptions.forEach(sub => sub.unsubscribe?.());
       };
     });
   });

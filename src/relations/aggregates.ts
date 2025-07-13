@@ -5,8 +5,15 @@ import type {
   Var,
   Observable
 } from "../core/types.ts"
-import { walk, arrayToLogicList, enrichGroupInput, unify } from "../core/kernel.ts";
-import { eq, Subquery } from "../core/combinators.ts";
+import {
+  walk,
+  arrayToLogicList,
+  enrichGroupInput,
+  unify,
+  lvar,
+  logicListToArray
+} from "../core/kernel.ts"
+import { and, eq, lift, Subquery } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 import { collect_and_process_base, group_by_streamo_base } from "./aggregates-base.ts";
 
@@ -51,6 +58,21 @@ export function aggregateRelFactory(
   };
 }
 
+// export function aggregateRelFactory(
+//   aggFn: (results: Term[]) => any,
+//   dedup = false,
+// ) {
+//   return (x: Term, goal: Goal, out: Term): Goal => {
+//     const ToutAgg = lvar("ToutAgg");
+//     const collect_rel = dedup ? collect_distinct_streamo : collect_streamo
+//     return and(
+//       goal,
+//       collect_rel(x, ToutAgg, false),
+//       lift(aggFn)(ToutAgg, out), 
+//     )
+//   };
+// }
+
 /**
  * groupAggregateRelFactory(aggFn): returns a group-by aggregation goal constructor.
  * The returned function has signature (keyVar, valueVar, goal, outKey, outAgg, dedup?) => Goal
@@ -64,67 +86,21 @@ export function groupAggregateRelFactory(aggFn: (items: any[]) => any) {
     outKey: Term,
     outAgg: Term,
     dedup = false,
-  ): Goal =>
-    enrichGroupInput(
-      "groupAggregateRelFactory",
-      [],
-      [goal],
-      (input$: Observable<Subst>) => {
-        return (input$ as SimpleObservable<Subst>).flatMap((s: Subst) => {
-          // For each input substitution, run the goal and collect grouped results
-          const groups = new Map<string, { key: any, values: any[] }>();
-          
-          return new SimpleObservable<Subst>((observer) => {
-            const subscription = goal(SimpleObservable.of(s)).subscribe({
-              next: (s1) => {
-                const key = walk(keyVar, s1);
-                const value = walk(valueVar, s1);
-                const keyStr = JSON.stringify(key);
-                
-                if (!groups.has(keyStr)) {
-                  groups.set(keyStr, {
-                    key,
-                    values: []
-                  });
-                }
-                groups.get(keyStr)!.values.push(value);
-              },
-              error: (error) => {
-                groups.clear();
-                observer.error?.(error);
-              },
-              complete: () => {
-                // For each group, emit one result with outKey and outAgg bound
-                for (const { key, values } of groups.values()) {
-                  const groupItems = dedup ? deduplicate(values) : values;
-                  const agg = aggFn(groupItems);
-                  
-                  // Create a fresh substitution with just outKey and outAgg
-                  const subst = new Map();
-                  const subst1 = unify(outKey, key, subst);
-                  if (subst1 === null) continue;
-                  const subst2 = unify(outAgg, agg, subst1);
-                  if (subst2 === null) continue;
-                  observer.next(subst2 as Subst);
-                }
-                groups.clear();
-                observer.complete?.();
-              },
-            });
-            
-            return () => {
-              subscription.unsubscribe?.();
-              groups.clear();
-            };
-          });
-        });
-      }
-    );
+  ): Goal => {
+    const ToutAgg = lvar("ToutAgg");
+    const group_by_rel = dedup ? group_by_collect_distinct_streamo : group_by_collect_streamo
+    return and(
+      goal,
+      group_by_rel(keyVar,valueVar, ToutAgg, true),
+      lift(aggFn)(ToutAgg, outAgg), 
+      eq(keyVar, outKey),
+    )
+  }
 }
 
-export const group_by_collecto = groupAggregateRelFactory(arrayToLogicList);
+export const group_by_collecto = groupAggregateRelFactory((x) => x);
 export const group_by_counto = groupAggregateRelFactory(
-  (items: any[]) => items.length,
+  (items: any[]) => {return (logicListToArray(items).length)},
 );
 
 /**
@@ -364,6 +340,71 @@ export function group_by_collect_streamo(
   );
 }
 
+
+
+export function group_by_collect_distinct_streamo(
+  keyVar: Term,
+  valueVar: Term,
+  outList: Term,
+  drop = false
+): Goal {
+  return group_by_streamo_base(
+    keyVar, // keyVar
+    valueVar, // valueVar
+    outList, // outVar
+    drop, // drop
+    (values, _) => arrayToLogicList([...new Set(values)]) // aggregator: collect into list
+  );
+}
+
+// export function collect_streamo(
+//   valueVar: Term,
+//   outList: Term,
+//   drop = false,
+// ): Goal {
+//   return collect_and_process_base(
+//     (buffer, observer) => {
+//       const results = buffer.map(x => walk(valueVar, x));
+//       console.log("CAPB", {
+//         results 
+//       })
+//       let s;
+//       if(drop) {
+//         s = new Map() as Subst;
+//       } else {
+//         s = buffer[0];
+//       }
+//       const newSubst = unify(results, outList, s);
+//       if(newSubst) {
+//         observer.next(newSubst);
+//       }
+//     }
+//   )
+// }
+
+
+// export function collect_distinct_streamo(
+//   valueVar: Term,
+//   outList: Term,
+//   drop = false,
+// ): Goal {
+//   return collect_and_process_base(
+//     (buffer, observer) => {
+//       const resultsRaw = buffer.map(x => walk(valueVar, x));
+//       const results = [...new Set(resultsRaw)];
+//       let s;
+//       if(drop) {
+//         s = new Map() as Subst;
+//       } else {
+//         s = buffer[0];
+//       }
+//       const newSubst = unify(results, outList, s);
+//       if(newSubst) {
+//         observer.next(newSubst);
+//       }
+//     }
+//   )
+// }
 
 
 

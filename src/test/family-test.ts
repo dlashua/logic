@@ -20,8 +20,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
-const BACKEND = "sql";
-// const BACKEND = "mem";
+// const BACKEND = "sql";
+const BACKEND = "mem";
 
 /**********************************************************/
 const closeFns: (() => void)[] = [];
@@ -54,8 +54,8 @@ function makeQuery() {
   return query()
     .where($ => [
 
-      membero($.person, ["celeste"]),
-      // membero($.person, ["emerson", "louis", "celeste", "daniel", "jason", "brooke"]),
+      // membero($.person, ["celeste"]),
+      membero($.person, ["emerson", "louis", "celeste", "daniel", "jason", "brooke"]),
       // familytree.parent_kid($.parent, $.person),
       // not(eq($.parent, "daniel")),
       // ifte(

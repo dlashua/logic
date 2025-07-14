@@ -114,7 +114,6 @@ describe('Aggregation Relations', () => {
     it('should group by key and collect values', async () => {
       const key = lvar('key');
       const value = lvar('value');
-      const outKey = lvar('outKey');
       const outValues = lvar('outValues');
       
       const goal = group_by_collecto(

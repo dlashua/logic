@@ -3,6 +3,8 @@
 
 import { Observable, Observer, Subscription } from './types.ts';
 
+const isPromise = (v: any): v is Promise<any> => !!v && typeof v.then === 'function';
+
 /**
  * Simple observable implementation focused on the needs of logic programming
  */
@@ -15,12 +17,16 @@ export class SimpleObservable<T> implements Observable<T> {
 
   subscribe(observer: Observer<T>): Subscription {
     let closed = false;
-    let cleanup: (() => void) | void;
+    let cleanup: (() => void) | void = () => console.log("I HAVE NO CLEANUP");
 
     const safeObserver = {
       next: (value: T) => {
         if (!closed && observer.next) {
-          observer.next(value);
+          if (isPromise(value)) {
+            value.then(v => observer.next(v));
+          } else {
+            observer.next(value);
+          }
         }
       },
       error: (error: any) => {
@@ -40,20 +46,16 @@ export class SimpleObservable<T> implements Observable<T> {
     try {
       const result = this.producer(safeObserver);
       
-      // Handle both sync and async producers
       if (result && typeof result === 'object' && 'then' in result) {
-        // Async producer
         result.then(asyncCleanup => {
-          if (!closed) {
-            cleanup = asyncCleanup;
+          cleanup = asyncCleanup;
+          if(unsubbed && cleanup) {
+            cleanup();
           }
         }).catch(error => {
-          if (!closed) {
-            safeObserver.error(error);
-          }
+          safeObserver.error(error);
         });
       } else {
-        // Sync producer
         cleanup = result as (() => void) | void;
       }
     } catch (error) {
@@ -62,10 +64,12 @@ export class SimpleObservable<T> implements Observable<T> {
       }
     }
 
+    let unsubbed = false;
     return {
       unsubscribe: () => {
-        if (!closed) {
+        if (!unsubbed) {
           closed = true;
+          unsubbed = true;
           if (cleanup) {
             cleanup();
           }
@@ -153,13 +157,15 @@ export class SimpleObservable<T> implements Observable<T> {
       let outerCompleted = false;
       let activeInnerCount = 0;
       let scheduledCompletion = false;
+      let fullyComplete = false;
 
       const checkCompletion = () => {
         if (outerCompleted && activeInnerCount === 0 && !scheduledCompletion) {
           scheduledCompletion = true;
-          Promise.resolve().then(() => {
+          setTimeout(() => {
             observer.complete?.();
-          });
+            fullyComplete = true;
+          }, 0);
         }
       };
 
@@ -181,19 +187,21 @@ export class SimpleObservable<T> implements Observable<T> {
         complete: () => {
           outerCompleted = true;
           // Always defer completion check to next microtask
-          Promise.resolve().then(checkCompletion);
+          setTimeout(() => checkCompletion(), 0);
         }
       });
 
       subscriptions.push(outerSubscription);
 
       return () => {
-        subscriptions.forEach(sub => sub.unsubscribe());
+        if(!fullyComplete) {
+          subscriptions.forEach(sub => sub.unsubscribe());
+        }
       };
     });
   }
 
-  filter(predicate: (value: T) => boolean): Observable<T> {
+  filter(predicate: (value: T) => boolean): SimpleObservable<T> {
     return new SimpleObservable<T>((observer) => {
       const subscription = this.subscribe({
         next: (value) => {
@@ -219,8 +227,7 @@ export class SimpleObservable<T> implements Observable<T> {
             taken++;
             if (taken >= count) {
               observer.complete?.();
-              subscription.unsubscribe();
-              upstreamUnsubscribed = true;
+              setTimeout(() => {subscription.unsubscribe(); upstreamUnsubscribed = true;}, 0);
             }
           }
         },
@@ -235,6 +242,7 @@ export class SimpleObservable<T> implements Observable<T> {
         if (!upstreamUnsubscribed) {
           subscription.unsubscribe();
         }
+        upstreamUnsubscribed = true;
       };
     });
   }
@@ -339,12 +347,18 @@ export class SimpleObservable<T> implements Observable<T> {
 
   // Utility to collect all values into an array
   toArray(): Promise<T[]> {
-    return new Promise((resolve, reject) => {
+    let sub: Subscription;
+    return new Promise<T[]>((resolve, reject) => {
+      let complete = false;
       const values: T[] = [];
-      this.subscribe({
+      sub = this.subscribe({
         next: (value) => values.push(value),
         error: reject,
-        complete: () => resolve(values)
+        complete: () => {
+          setTimeout(() => sub.unsubscribe(), 0);
+          resolve(values)
+          complete = true;
+        }
       });
     });
   }

@@ -24,7 +24,7 @@ export function extract(
 ): Goal {
   return (input$: SimpleObservable<Subst>) => 
     input$.flatMap((s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const inputValue = walk(inputVar, s);
+      const inputValue: Term<any> = walk(inputVar, s);
       
       // Input must be resolved to an object
       if (typeof inputValue !== 'object' || inputValue === null) {

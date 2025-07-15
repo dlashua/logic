@@ -1,3 +1,4 @@
+import { subscribe } from "diagnostics_channel";
 import jsonata from "jsonata";
 import { extract } from "../relations/objects.ts";
 import {
@@ -20,25 +21,70 @@ import {
   arrayToLogicList
 } from "./kernel.ts"
 import { SimpleObservable } from "./observable.ts";
+import { suspendable } from "./suspend-helper.ts";
 
 /**
  * A goal that succeeds if two terms can be unified.
  */
-export function eq(u: Term, v: Term): Goal {
-  return liftGoal(function eq (s: Subst){
-    return new SimpleObservable<Subst>((observer) => {
-      try {
-        const result = unify(u, v, s);
-        if (result !== null) {
-          observer.next(result);
+// export function eq(u: Term, v: Term): Goal {
+//   return liftGoal(function eq (s: Subst){
+//     return new SimpleObservable<Subst>((observer) => {
+//       try {
+//         const result = unify(u, v, s);
+//         if (result !== null) {
+//           observer.next(result);
+//         }
+//         observer.complete?.();
+//       } catch (error) {
+//         observer.error?.(error);
+//       }
+//     });
+//   });
+// }
+export function eq (x: Term, y: Term): Goal {
+  return enrichGroupInput("eq", [], [], (input$) => 
+    new SimpleObservable((observer) => {
+      const sub = input$.subscribe({
+        complete: observer.complete,
+        error: observer.error,
+        next: (subst) => {
+          const s2 = unify(x,y,subst);
+          if (s2) {
+            observer.next(s2);
+          }
         }
-        observer.complete?.();
-      } catch (error) {
-        observer.error?.(error);
-      }
-    });
-  });
+      })
+
+      return () => sub.unsubscribe();
+    })
+  )
 }
+// export function eq(x: Term<any>, y: Term<any>): Goal {
+//   return suspendable([x, y], (values, subst) => {
+//     const [xVal, yVal] = values;
+//     const xGrounded = !isVar(xVal);
+//     const yGrounded = !isVar(yVal);
+
+//     // All grounded - check constraint
+//     if (xGrounded && yGrounded) {
+//       return (xVal === yVal) ? subst : null;
+//     }
+
+//     if(xGrounded) {
+//       const s2 = unify(xVal, yVal, subst);
+//       if(s2) return s2;
+//       return null;
+//     }
+
+//     if(yGrounded) {
+//       const s2 = unify(yVal, xVal, subst);
+//       if(s2) return s2;
+//       return null;
+//     }
+    
+//     return CHECK_LATER; // Still not enough variables bound
+//   });
+// }
 
 /**
  * Introduces new (fresh) logic variables into a sub-goal.
@@ -50,9 +96,7 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
     const subscription = input$.subscribe({
       next: (s) => {
         active++;
-        const freshVars = Array.from({
-          length: f.length 
-        }, () => lvar());
+        const freshVars = Array.from({ length: f.length }, () => lvar());
         const subGoal = f(...freshVars);
         subGoal(SimpleObservable.of(s)).subscribe({
           next: observer.next,

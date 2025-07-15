@@ -1,9 +1,10 @@
 import util from "node:util";
 import { K } from "vitest/dist/chunks/reporters.d.BFLkQcL6.js";
 import { ConsNode, Goal, Subst, Term } from "../core/types.ts"
-import { walk, isVar, enrichGroupInput } from "../core/kernel.ts";
+import { walk, isVar, enrichGroupInput, unify } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
+import { CHECK_LATER, suspendable } from "../core/suspend-helper.ts";
 
 export const uniqueo = (t: Term, g: Goal): Goal =>
   enrichGroupInput("uniqueo", [g], [],
@@ -22,6 +23,29 @@ export const uniqueo = (t: Term, g: Goal): Goal =>
     }));
 
 export function not(goal: Goal): Goal {
+  return enrichGroupInput("not", [], [goal], (input$: SimpleObservable<Subst>) =>
+    input$.flatMap((s: Subst) => {
+      return new SimpleObservable<Subst>((observer) => {
+        let hasSolutions = false;
+        const sub = goal(SimpleObservable.of(s)).subscribe({
+          next: () => {
+            hasSolutions = true; // Any solution means the goal succeeds, so not fails
+          },
+          error: (err) => observer.error?.(err),
+          complete: () => {
+            if (!hasSolutions) {
+              observer.next(s); // No solutions means not succeeds
+            }
+            observer.complete?.();
+          }
+        });
+        return () => sub.unsubscribe();
+      });
+    })
+  );
+}
+
+export function old_not(goal: Goal): Goal {
   return enrichGroupInput("not", [], [goal], (input$: SimpleObservable<Subst>) =>
     input$.flatMap((s: Subst) => {
       let found = false;
@@ -50,7 +74,57 @@ export function not(goal: Goal): Goal {
   );
 }
 
-export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));
+export function neqo(x: Term<any>, y: Term<any>): Goal {
+  return suspendable([x, y], (values, subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    if (xGrounded && yGrounded) {
+      // Both terms are ground, check inequality
+      return xVal !== yVal ? subst : null;
+    } else if (xGrounded) {
+      // x is ground, try unifying with y
+      const unified = unify(yVal, xVal, subst);
+      return unified === null ? subst : CHECK_LATER;
+    } else if (yGrounded) {
+      // y is ground, try unifying with x
+      const unified = unify(xVal, yVal, subst);
+      return unified === null ? subst : CHECK_LATER;
+    } else {
+      // Neither term is ground, suspend
+      return CHECK_LATER;
+    }
+  }, 0);
+}
+
+// export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));
+export function old_neqo(x: Term<any>, y: Term<any>): Goal {
+  return suspendable([x, y], (values, subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    // All grounded - check constraint
+    if (xGrounded && yGrounded) {
+      return (xVal !== yVal) ? subst : null;
+    }
+
+    // if(xGrounded) {
+    //   const s2 = unify(xVal, yVal, subst);
+    //   if(s2) return CHECK_LATER;
+    //   return subst;
+    // }
+
+    // if(yGrounded) {
+    //   const s2 = unify(yVal, xVal, subst);
+    //   if(s2) return CHECK_LATER;
+    //   return subst;
+    // }
+    
+    return CHECK_LATER; // Still not enough variables bound
+  }, 0);
+}
 
 /**
  * A goal that succeeds if the given goal succeeds exactly once.

@@ -20,8 +20,7 @@ import { SimpleObservable } from "../core/observable.ts";
  */
 
 export function membero(x: Term, list: Term): Goal {
-  // @ts-expect-error
-  return enrichGroupInput("membero", [membero], [], (input$) =>
+  return enrichGroupInput("membero", [], [], (input$) =>
     new SimpleObservable<Subst>((observer) => {
       const subscriptions: any[] = [];
       let cancelled = false;

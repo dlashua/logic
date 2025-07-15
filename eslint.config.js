@@ -21,8 +21,8 @@ export default defineConfig(
     extends: [importPlugin.flatConfigs.recommended, importPlugin.flatConfigs.typescript],
     settings: {
       "import/parsers": {
-        "@typescript-eslint/parser": [".ts", ".tsx"],
-      },
+        "@typescript-eslint/parser": [".ts", ".tsx"]
+      }
     },
     languageOptions: {
       parserOptions: {
@@ -68,15 +68,15 @@ export default defineConfig(
         {
           ObjectExpression: {
             multiline: true,
-            minProperties: 1,
+            minProperties: 4,
           },
         },
       ],
       "object-property-newline": [
         "error",
-        // {
-        //   allowAllPropertiesOnSameLine: false,
-        // },
+        {
+          allowAllPropertiesOnSameLine: true,
+        },
       ],
       "import/consistent-type-specifier-style": ["error"],
       // "import/exports-last": ["error"],

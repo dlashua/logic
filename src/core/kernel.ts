@@ -216,9 +216,7 @@ export function isVar(x: Term): x is Var {
 /**
  * The canonical `nil` value, representing an empty logic list.
  */
-export const nil: NilNode = {
-  tag: "nil"
-};
+export const nil: NilNode = { tag: "nil" };
 
 /**
  * Creates a `cons` cell (a node in a logic list).
@@ -324,9 +322,7 @@ export function createEnrichedSubst(
   const newPath = [...parentPath, {
     type: Symbol(type),
     id: groupId,
-    ...(branch !== undefined ? {
-      branch 
-    } : {})
+    ...(branch !== undefined ? { branch } : {})
   }];
   const parentOuterGoals = (s.get(GOAL_GROUP_ALL_GOALS) as Goal[]) || [];
   // Recursively collect all innerGoals from the combined goals array
@@ -382,9 +378,7 @@ export function enrichGroupInput(
   };
   (newInput$ as any).conjGoals = conjGoals;
   (newInput$ as any).disjGoals = disjGoals;
-  Object.defineProperty(newInput$, 'name', {
-    value: type 
-  })
+  Object.defineProperty(newInput$, 'name', { value: type })
   return newInput$;
 }
 

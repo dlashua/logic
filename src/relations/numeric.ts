@@ -7,84 +7,77 @@ import { suspendable, CHECK_LATER } from "../core/suspend-helper.ts";
  * A goal that succeeds if the numeric value in the first term is greater than
  * the numeric value in the second term.
  */
-export function gto(x: Term, y: Term): Goal {
-  return (input$: SimpleObservable<Subst>) => 
-    input$.flatMap((s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const xWalked = walk(x, s);
-      const yWalked = walk(y, s);
-      
-      // Both must be grounded to numeric values
-      if (typeof xWalked === 'number' && typeof yWalked === 'number') {
-        if (xWalked > yWalked) {
-          observer.next(s);
-        }
-      }
-      // If either is ungrounded, this constraint cannot be satisfied
-      observer.complete?.();
-    }));
+export function gto(x: Term<number>, y: Term<number>): Goal {
+  return suspendable([x, y], (values: Term<any>[], subst: Subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    // All grounded - check constraint
+    if (xGrounded && yGrounded) {
+      return (xVal > yVal) ? subst : null;
+    }
+    
+    return CHECK_LATER; // Still not enough variables bound
+  }, 2);
 }
 
 /**
  * A goal that succeeds if the numeric value in the first term is less than
  * the numeric value in the second term.
  */
-export function lto(x: Term, y: Term): Goal {
-  return (input$: SimpleObservable<Subst>) => 
-    input$.flatMap((s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const xWalked = walk(x, s);
-      const yWalked = walk(y, s);
-      
-      // Both must be grounded to numeric values
-      if (typeof xWalked === 'number' && typeof yWalked === 'number') {
-        if (xWalked < yWalked) {
-          observer.next(s);
-        }
-      }
-      // If either is ungrounded, this constraint cannot be satisfied
-      observer.complete?.();
-    }));
+export function lto(x: Term<number>, y: Term<number>): Goal {
+  return suspendable([x, y], (values: Term<any>[], subst: Subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    // All grounded - check constraint
+    if (xGrounded && yGrounded) {
+      return (xVal < yVal) ? subst : null;
+    }
+    
+    return CHECK_LATER; // Still not enough variables bound
+  }, 2);
 }
 
 /**
  * A goal that succeeds if the numeric value in the first term is greater than or equal to
  * the numeric value in the second term.
  */
-export function gteo(x: Term, y: Term): Goal {
-  return (input$: SimpleObservable<Subst>) => 
-    input$.flatMap((s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const xWalked = walk(x, s);
-      const yWalked = walk(y, s);
-      
-      // Both must be grounded to numeric values
-      if (typeof xWalked === 'number' && typeof yWalked === 'number') {
-        if (xWalked >= yWalked) {
-          observer.next(s);
-        }
-      }
-      // If either is ungrounded, this constraint cannot be satisfied
-      observer.complete?.();
-    }));
+export function gteo(x: Term<number>, y: Term<number>): Goal {
+  return suspendable([x, y], (values: Term<any>[], subst: Subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    // All grounded - check constraint
+    if (xGrounded && yGrounded) {
+      return (xVal >= yVal) ? subst : null;
+    }
+    
+    return CHECK_LATER; // Still not enough variables bound
+  }, 2);
 }
+
 
 /**
  * A goal that succeeds if the numeric value in the first term is less than or equal to
  * the numeric value in the second term.
  */
-export function lteo(x: Term, y: Term): Goal {
-  return (input$: SimpleObservable<Subst>) => 
-    input$.flatMap((s: Subst) => new SimpleObservable<Subst>((observer) => {
-      const xWalked = walk(x, s);
-      const yWalked = walk(y, s);
-      
-      // Both must be grounded to numeric values
-      if (typeof xWalked === 'number' && typeof yWalked === 'number') {
-        if (xWalked <= yWalked) {
-          observer.next(s);
-        }
-      }
-      // If either is ungrounded, this constraint cannot be satisfied
-      observer.complete?.();
-    }));
+export function lteo(x: Term<number>, y: Term<number>): Goal {
+  return suspendable([x, y], (values: Term<any>[], subst: Subst) => {
+    const [xVal, yVal] = values;
+    const xGrounded = !isVar(xVal);
+    const yGrounded = !isVar(yVal);
+
+    // All grounded - check constraint
+    if (xGrounded && yGrounded) {
+      return (xVal <= yVal) ? subst : null;
+    }
+    
+    return CHECK_LATER; // Still not enough variables bound
+  }, 2);
 }
 
 /**
@@ -92,7 +85,7 @@ export function lteo(x: Term, y: Term): Goal {
  * Can work in multiple directions if some variables are grounded.
  */
 export function pluso(x: Term<number>, y: Term<number>, z: Term<number>): Goal {
-  return suspendable([x, y, z], (values, subst) => {
+  return suspendable([x, y, z], (values: Term<any>[], subst: Subst) => {
     const [xVal, yVal, zVal] = values;
     const xGrounded = !isVar(xVal);
     const yGrounded = !isVar(yVal);
@@ -123,7 +116,7 @@ export const minuso = (x: Term<number>, y: Term<number>, z: Term<number>): Goal 
  * Can work in multiple directions if some variables are grounded.
  */
 export function multo(x: Term<number>, y: Term<number>, z: Term<number>): Goal {
-  return suspendable([x, y, z], (values, subst) => {
+  return suspendable([x, y, z], (values: Term<any>[], subst: Subst) => {
     const [xVal, yVal, zVal] = values;
     const xGrounded = !isVar(xVal);
     const yGrounded = !isVar(yVal);

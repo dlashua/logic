@@ -135,6 +135,129 @@ export function conj(g1: Goal, g2: Goal): Goal {
  * Helper for combining multiple goals with logical AND.
  * Creates a single group containing all goals for optimal SQL merging.
  */
+
+// g4_and
+export const g4_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("and", goals, [], (enrichedInput$) => {
+    // console.log("and: Starting with", goals.length, "goals");
+    const prioritizedGoals = [...goals].sort((a, b) => {
+      const aName = a.name || 'unnamed';
+      const bName = b.name || 'unnamed';
+      const bindingGoals = ['eq', 'membero'];
+      const aIsBinding = bindingGoals.includes(aName);
+      const bIsBinding = bindingGoals.includes(bName);
+      return aIsBinding && !bIsBinding ? -1 : bIsBinding && !aIsBinding ? 1 : 0;
+    });
+    return prioritizedGoals.reduce((acc, goal, index) => 
+      acc.flatMap(s => {
+        // console.log(`and: Processing goal ${index + 1} (${goal.name || 'unnamed'})`);
+        const result$ = goal(SimpleObservable.of(s));
+        return result$.map(s2 => {
+          // console.log(`and: Emitted from goal ${index + 1} (${goal.name || 'unnamed'})`);
+          return s2;
+        });
+      }), enrichedInput$);
+  });
+};
+
+
+export const g3_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("and", goals, [], (enrichedInput$) => {
+    // console.log("and: Starting with", goals.length, "goals");
+    const prioritizedGoals = [...goals].sort((a, b) => {
+      const aName = a.name || 'unnamed';
+      const bName = b.name || 'unnamed';
+      const bindingGoals = ['eq', 'membero'];
+      const aIsBinding = bindingGoals.includes(aName);
+      const bIsBinding = bindingGoals.includes(bName);
+      return aIsBinding && !bIsBinding ? -1 : bIsBinding && !aIsBinding ? 1 : 0;
+    });
+    return prioritizedGoals.reduce((acc, goal, index) => 
+      acc.flatMap(s => {
+        // console.log(`and: Processing goal ${index + 1} (${goal.name || 'unnamed'}) with subst`, s);
+        const result$ = goal(SimpleObservable.of(s));
+        return new SimpleObservable<Subst>((observer) => {
+          let hasEmitted = false;
+          console.log(goal);
+          const sub = result$.subscribe({
+            next: (s2) => {
+              // console.log(`and: Emitting subst from goal ${index + 1} (${goal.name || 'unnamed'})`, s2);
+              hasEmitted = true;
+              observer.next(s2);
+            },
+            error: observer.error,
+            complete: () => {
+              console.log(`and: Goal ${index + 1} (${goal.name || 'unnamed'}) completed, emitted:`, hasEmitted);
+              if (!hasEmitted) {
+                observer.next(s); // Pass through input substitution if no output
+              }
+              observer.complete?.();
+            }
+          });
+          return () => sub.unsubscribe?.();
+        });
+      }), enrichedInput$);
+  });
+};
+
+export const g2_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("and", goals, [], (enrichedInput$) => {
+    console.log("and: Starting with", goals.length, "goals");
+    const prioritizedGoals = goals.sort((a, b) => {
+      const aName = a.name || '';
+      const bName = b.name || '';
+      const bindingGoals = ['eq', 'membero'];
+      const aIsBinding = bindingGoals.includes(aName);
+      const bIsBinding = bindingGoals.includes(bName);
+      return aIsBinding && !bIsBinding ? -1 : bIsBinding && !aIsBinding ? 1 : 0;
+    });
+    return prioritizedGoals.reduce((acc, goal, index) => 
+      acc.flatMap(s => {
+        console.log(`and: Processing goal ${index + 1} (${goal.name || 'unnamed'}) with subst`, s);
+        const result$ = goal(SimpleObservable.of(s));
+        return result$.map(s2 => {
+          console.log(`and: Emitting subst from goal ${index + 1}`, s2);
+          return s2;
+        });
+      }), enrichedInput$);
+  });
+};
+
+export const g1_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("and", goals, [], (enrichedInput$) =>
+    goals.reduce((acc, goal) => 
+      acc.flatMap(s => {
+        const result$ = goal(SimpleObservable.of(s));
+        return result$.map(s2 => s2); // Ensure all substitutions, including suspended ones, are propagated
+      }), enrichedInput$)
+  );
+};
+
+// old_and
 export const and = (...goals: Goal[]): Goal => {
   if (goals.length === 0) {
     return (input$) => input$;
@@ -147,10 +270,261 @@ export const and = (...goals: Goal[]): Goal => {
   );
 };
 
+
+/**
+ * Sequential AND combinator that runs each goal entirely before sending results to the next goal.
+ * Unlike the standard and() which uses flatMap to interleave results, this version collects
+ * all results from each goal before proceeding to the next one.
+ */
+// sequential and
+export const sequential_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  
+  return enrichGroupInput("sequential_and", goals, [], (enrichedInput$) => {
+    return new SimpleObservable<Subst>((observer) => {
+      const processGoalsSequentially = (goalIndex: number, currentResults: Subst[]) => {
+        if (goalIndex >= goals.length) {
+          // All goals processed, emit all final results
+          currentResults.forEach(result => observer.next(result));
+          observer.complete?.();
+          return;
+        }
+
+        const currentGoal = goals[goalIndex];
+        const nextResults: Subst[] = [];
+        let completedInputs = 0;
+        const totalInputs = currentResults.length;
+
+        if (totalInputs === 0) {
+          // No inputs to process, move to completion
+          observer.complete?.();
+          return;
+        }
+
+        // Process each current result through the current goal
+        currentResults.forEach((inputSubst) => {
+          currentGoal(SimpleObservable.of(inputSubst)).subscribe({
+            next: (resultSubst) => {
+              nextResults.push(resultSubst);
+            },
+            error: (error) => {
+              observer.error?.(error);
+            },
+            complete: () => {
+              completedInputs++;
+              if (completedInputs === totalInputs) {
+                // This goal has processed all inputs, move to next goal
+                processGoalsSequentially(goalIndex + 1, nextResults);
+              }
+            }
+          });
+        });
+      };
+
+      // Start by collecting all results from the input stream
+      const initialResults: Subst[] = [];
+      const inputSubscription = enrichedInput$.subscribe({
+        next: (subst) => {
+          initialResults.push(subst);
+        },
+        error: observer.error,
+        complete: () => {
+          // Input stream is complete, start processing goals sequentially
+          processGoalsSequentially(0, initialResults);
+        }
+      });
+
+      return () => {
+        inputSubscription.unsubscribe?.();
+      };
+    });
+  });
+};
+
+/**
+ * Batch AND combinator that collects all results from each goal before proceeding.
+ * This is a more functional version that processes goals one at a time.
+ */
+// batch and
+export const batch_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+
+  return enrichGroupInput("batch_and", goals, [], (enrichedInput$) => {
+    // Helper function to collect all results from an observable
+    const collectResults = (obs$: SimpleObservable<Subst>): Promise<Subst[]> => {
+      return new Promise((resolve, reject) => {
+        const results: Subst[] = [];
+        obs$.subscribe({
+          next: (subst) => results.push(subst),
+          error: reject,
+          complete: () => resolve(results)
+        });
+      });
+    };
+
+    // Helper function to run a goal on multiple inputs and collect all results
+    const runGoalOnInputs = async (goal: Goal, inputs: Subst[]): Promise<Subst[]> => {
+      const allResults: Subst[] = [];
+      
+      for (const input of inputs) {
+        const goalResults = await collectResults(goal(SimpleObservable.of(input)));
+        allResults.push(...goalResults);
+      }
+      
+      return allResults;
+    };
+
+    return new SimpleObservable<Subst>((observer) => {
+      // First collect all initial inputs
+      collectResults(enrichedInput$)
+        .then(async (initialInputs) => {
+          try {
+            let currentResults = initialInputs;
+            
+            // Process each goal sequentially
+            for (const goal of goals) {
+              currentResults = await runGoalOnInputs(goal, currentResults);
+            }
+            
+            // Emit all final results
+            currentResults.forEach(result => observer.next(result));
+            observer.complete?.();
+            
+          } catch (error) {
+            observer.error?.(error);
+          }
+        })
+        .catch(error => observer.error?.(error));
+    });
+  });
+};
+
+/**
+ * Buffered AND combinator that processes goals in sequence with full buffering.
+ * Each goal receives all results from the previous goal at once.
+ */
+// buffered_and
+export const buffered_and = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return (input$) => input$;
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+
+  return enrichGroupInput("buffered_and", goals, [], (enrichedInput$) => {
+    return new SimpleObservable<Subst>((observer) => {
+      let currentBuffer: Subst[] = [];
+      let goalIndex = 0;
+
+      const processNextGoal = () => {
+        if (goalIndex >= goals.length) {
+          // All goals processed, emit buffered results
+          currentBuffer.forEach(subst => observer.next(subst));
+          observer.complete?.();
+          return;
+        }
+
+        const goal = goals[goalIndex];
+        const inputBuffer = [...currentBuffer]; // Copy current buffer
+        currentBuffer = []; // Reset for next goal's results
+        goalIndex++;
+
+        if (inputBuffer.length === 0) {
+          // No inputs to process
+          observer.complete?.();
+          return;
+        }
+
+        let completedCount = 0;
+        
+        // Run goal on each input in the buffer
+        inputBuffer.forEach(inputSubst => {
+          goal(SimpleObservable.of(inputSubst)).subscribe({
+            next: (resultSubst) => {
+              currentBuffer.push(resultSubst);
+            },
+            error: observer.error,
+            complete: () => {
+              completedCount++;
+              if (completedCount === inputBuffer.length) {
+                // All inputs for this goal are complete
+                processNextGoal();
+              }
+            }
+          });
+        });
+      };
+
+      // Collect initial inputs first
+      enrichedInput$.subscribe({
+        next: (subst) => {
+          currentBuffer.push(subst);
+        },
+        error: observer.error,
+        complete: () => {
+          // Initial input complete, start processing goals
+          processNextGoal();
+        }
+      });
+    });
+  });
+};
+
+
+
 /**
  * Helper for combining multiple goals with logical OR.
  * Creates a single group containing all goals for optimal SQL merging.
  */
+
+// g1_or
+export const g1_or = (...goals: Goal[]): Goal => {
+  if (goals.length === 0) {
+    return () => SimpleObservable.empty<Subst>();
+  }
+  if (goals.length === 1) {
+    return goals[0];
+  }
+  return enrichGroupInput("or", [], goals, (input$: SimpleObservable<Subst>) => {
+    return new SimpleObservable<Subst>((observer) => {
+      const sharedInput$ = input$.share();
+      let completedGoals = 0;
+      const subscriptions: any[] = [];
+      for (const goal of goals) {
+        const goalSubscription = goal(sharedInput$).subscribe({
+          next: (s2) => {
+            // console.log(`or: Emitting subst from goal (${goal.name || 'unnamed'})`, s2);
+            observer.next(s2);
+          },
+          error: observer.error,
+          complete: () => {
+            // console.log(`or: Goal (${goal.name || 'unnamed'}) completed`);
+            completedGoals++;
+            if (completedGoals === goals.length) {
+              observer.complete?.();
+            }
+          }
+        });
+        subscriptions.push(goalSubscription);
+      }
+      return () => {
+        subscriptions.forEach(sub => sub.unsubscribe?.());
+      };
+    });
+  });
+};
+
 export const or = (...goals: Goal[]): Goal => {
   if (goals.length === 0) {
     return () => SimpleObservable.empty<Subst>();

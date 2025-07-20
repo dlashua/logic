@@ -1,7 +1,7 @@
 import { Term, Subst, Goal , Var } from "./types.ts";
 import { SimpleObservable } from "./observable.ts";
 import { isVar, walk } from "./kernel.ts";
-import { addSuspendToSubst } from "./subst-suspends.ts";
+import { addSuspendToSubst, SUSPENDED_CONSTRAINTS } from "./subst-suspends.ts";
 
 export const CHECK_LATER = Symbol.for("constraint-check-later");
 
@@ -9,14 +9,8 @@ export const CHECK_LATER = Symbol.for("constraint-check-later");
  * Generic constraint helper that handles suspension automatically
  */
 
-
-
-export function suspendable<T extends Term[]>(
-  vars: T,
-  evaluator: (values: Term[], subst: Subst) => Subst | null | typeof CHECK_LATER,
-  minGrounded = vars.length - 1
-): Goal {
-  function handleSuspend(subst: Subst): Subst | null {
+export function makeSuspendHandler (vars, evaluator, minGrounded) {
+  return function handleSuspend(subst: Subst): Subst | null {
     const values = vars.map(v => walk(v, subst));
     const groundedCount = values.filter(v => !isVar(v)).length;
 
@@ -28,10 +22,11 @@ export function suspendable<T extends Term[]>(
       if (result !== CHECK_LATER) {
         return result;
       }
+      // If we get here, result === CHECK_LATER, so fall through to suspension logic
     }
 
     // Only suspend if there are variables to watch
-    const watchedVars: string[] = values
+    const watchedVars: string[] = vars
       .filter(v => isVar(v))
       .map(v => (v as Var).id); // Type-safe access to Var.id
     if (watchedVars.length > 0) {
@@ -39,7 +34,15 @@ export function suspendable<T extends Term[]>(
     }
     return null; // No variables to watch and CHECK_LATER returned, fail
   }
+}
 
+export function suspendable<T extends Term[]>(
+  vars: T,
+  evaluator: (values: Term[], subst: Subst) => Subst | null | typeof CHECK_LATER,
+  minGrounded = vars.length - 1
+): Goal {
+  const handleSuspend = makeSuspendHandler(vars, evaluator, minGrounded);
+  // console.log("VARS", vars);
   return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
     const sub = input$.subscribe({
       next: (subst) => {
@@ -47,7 +50,9 @@ export function suspendable<T extends Term[]>(
           const result = handleSuspend(subst);
           if (result !== null) {
             observer.next(result);
+            return;
           }
+          // console.log("SUSPEND DIED");
         } catch (error) {
           observer.error?.(error);
         }

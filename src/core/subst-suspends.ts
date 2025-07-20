@@ -1,25 +1,47 @@
+import { inspect } from "util";
 import { Subst } from "./types.ts";
+import { walk, isVar } from "./kernel.ts";
+import { CHECK_LATER } from "./suspend-helper.ts";
 
 export const SUSPENDED_CONSTRAINTS = Symbol('suspended-constraints');
 
 export interface SuspendedConstraint {
   id: string;
-  resumeFn: (subst: Subst) => Subst | null;
+  resumeFn: (subst: Subst) => Subst | null | typeof CHECK_LATER;
   watchedVars: string[];
 }
 
 let constraintCounter = 0;
+const MAX_COUNTER = 1000000; // Reset after 1M constraints to prevent overflow
 
 export function addSuspendToSubst(
   subst: Subst,
-  resumeFn: (subst: Subst) => Subst | null,
+  resumeFn: (subst: Subst) => Subst | null | typeof CHECK_LATER,
   watchedVars: string[]
 ): Subst {
   const suspends = (subst.get(SUSPENDED_CONSTRAINTS) as SuspendedConstraint[]) || [];
+  
+  // **Issue #3: Automatic pruning** - Check if constraint is already irrelevant
+  const stillRelevantVars = watchedVars.filter(varId => {
+    const value = walk({ tag: "var", id: varId }, subst);
+    return isVar(value); // Only keep if variable is still unbound
+  });
+  
+  // If no variables left to watch, don't add the constraint
+  if (stillRelevantVars.length === 0) {
+    return subst;
+  }
+  
+  // Reset counter periodically to prevent unbounded growth
+  if (constraintCounter >= MAX_COUNTER) {
+    constraintCounter = 0;
+  }
+  
   const newSuspend: SuspendedConstraint = {
     id: `constraint_${constraintCounter++}`,
     resumeFn,
-    watchedVars
+    // watchedVars: stillRelevantVars // Use pruned list
+    watchedVars,
   };
   
   const newSubst = new Map(subst);
@@ -47,54 +69,48 @@ export function removeSuspendFromSubst(
   return newSubst;
 }
 
-export function wakeUpSuspends(subst: Subst, newlyBoundVars: string[]): Subst {
+export function wakeUpSuspends(subst: Subst, newlyBoundVars: string[]): Subst | null {
+  const suspends = getSuspendsFromSubst(subst);
+  if (suspends.length === 0) {
+    return subst;
+  }
+
+  // Partition suspends: those to wake up, and those to keep
+  const [toWake, toKeep] = suspends.reduce<[SuspendedConstraint[], SuspendedConstraint[]]>(
+    ([wake, keep], s) =>
+      s.watchedVars.some(v => newlyBoundVars.includes(v))
+        ? [[...wake, s], keep]
+        : [wake, [...keep, s]],
+    [[], []]
+  );
+
+  // Remove only the suspends to be woken up
+  // let currentSubst = removeSuspendFromSubst(subst, toWake.map(x => x.id));
   let currentSubst = subst;
-  let changed = true;
 
-  // Iterate until no new bindings are made (fixpoint)
-  while (changed) {
-    const suspends = getSuspendsFromSubst(currentSubst);
-    if (suspends.length === 0) break;
+  for (const suspend of toWake) {
+    const result = suspend.resumeFn(currentSubst);
+    if (result === null) {
+      return null;
+    } else if (result === CHECK_LATER) {
+      // If still needs to be suspended, add back to suspends
+      toKeep.push(suspend);
+      continue;
+    } else {
+      toKeep.push(suspend);
 
-    changed = false;
-    const suspendsToRemove: string[] = [];
-
-    for (const suspend of suspends) {
-      const hasNewBinding = suspend.watchedVars.some(varId => 
-        newlyBoundVars.includes(varId)
-      );
-
-      if (hasNewBinding) {
-        const substWithoutThisSuspend = removeSuspendFromSubst(currentSubst, [suspend.id]);
-        try {
-          const result = suspend.resumeFn(substWithoutThisSuspend);
-          if (result !== null) {
-            // Check for new bindings to trigger further wake-ups
-            const newBindings = [...result.keys()].filter(
-              k => typeof k === 'string' && !currentSubst.has(k)
-            );
-            if (newBindings.length > 0) {
-              newlyBoundVars.push(...newBindings);
-              changed = true;
-            }
-            currentSubst = result;
-            suspendsToRemove.push(suspend.id);
-          } else {
-            // Re-add the constraint if it fails to resolve
-            currentSubst = addSuspendToSubst(substWithoutThisSuspend, suspend.resumeFn, suspend.watchedVars);
-          }
-        } catch (error) {
-          console.error(`Error resuming constraint ${suspend.id}:`, error);
-          // Continue processing other constraints
-        }
-      }
-    }
-
-    if (suspendsToRemove.length > 0) {
-      currentSubst = removeSuspendFromSubst(currentSubst, suspendsToRemove);
-      changed = true;
+      currentSubst = result;
     }
   }
 
+  currentSubst = removeSuspendFromSubst(subst, toWake.map(x => x.id));
+
+
+  // Restore any suspends that remain (not woken, or still suspended)
+  if (toKeep.length > 0) {
+    const newSubst = new Map(currentSubst);
+    newSubst.set(SUSPENDED_CONSTRAINTS, toKeep);
+    return newSubst;
+  }
   return currentSubst;
 }

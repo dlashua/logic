@@ -5,6 +5,7 @@ import { walk, isVar, enrichGroupInput, unify } from "../core/kernel.ts";
 import { eq } from "../core/combinators.ts";
 import { SimpleObservable } from "../core/observable.ts";
 import { CHECK_LATER, suspendable } from "../core/suspend-helper.ts";
+import { getSuspendsFromSubst, SUSPENDED_CONSTRAINTS } from "../core/subst-suspends.ts";
 
 export const uniqueo = (t: Term, g: Goal): Goal =>
   enrichGroupInput("uniqueo", [g], [],
@@ -23,6 +24,33 @@ export const uniqueo = (t: Term, g: Goal): Goal =>
     }));
 
 export function not(goal: Goal): Goal {
+  return enrichGroupInput("not", [], [goal], (input$) =>
+    input$.flatMap((s: Subst) => {
+      return new SimpleObservable<Subst>((observer) => {
+        let hasSolutions = false;
+        const sub = goal(SimpleObservable.of(s)).subscribe({
+          next: (subst) => {
+            console.log("Not goal received subst:", subst.has(SUSPENDED_CONSTRAINTS) ? "suspended" : "valid", subst);
+            if (!subst.has(SUSPENDED_CONSTRAINTS)) {
+              hasSolutions = true;
+            }
+          },
+          error: (err) => observer.error?.(err),
+          complete: () => {
+            console.log("Not goal completed, hasSolutions:", hasSolutions);
+            if (!hasSolutions) {
+              observer.next(s);
+            }
+            observer.complete?.();
+          }
+        });
+        return () => sub.unsubscribe();
+      });
+    })
+  );
+}
+
+export function gv1_not(goal: Goal): Goal {
   return enrichGroupInput("not", [], [goal], (input$: SimpleObservable<Subst>) =>
     input$.flatMap((s: Subst) => {
       return new SimpleObservable<Subst>((observer) => {
@@ -83,24 +111,35 @@ export function neqo(x: Term<any>, y: Term<any>): Goal {
     if (xGrounded && yGrounded) {
       // Both terms are ground, check inequality
       return xVal !== yVal ? subst : null;
-    } else if (xGrounded) {
-      // x is ground, try unifying with y
-      const unified = unify(yVal, xVal, subst);
-      return unified === null ? subst : CHECK_LATER;
-    } else if (yGrounded) {
-      // y is ground, try unifying with x
-      const unified = unify(xVal, yVal, subst);
-      return unified === null ? subst : CHECK_LATER;
-    } else {
-      // Neither term is ground, suspend
-      return CHECK_LATER;
+    } 
+
+    if(!xGrounded && !yGrounded) {
+      if (xVal.id === yVal.id) {
+        return null;
+      }
     }
+
+    // if(xGrounded) {
+    //   const newsubst = unify(yVal, xVal, subst)
+    //   console.log(newsubst);
+    //   if(newsubst === null) return subst;
+    //   return CHECK_LATER; 
+    // }
+
+    // if(yGrounded) {
+    //   const newsubst = unify(xVal, yVal, subst)
+    //   console.log(newsubst);
+    //   if(newsubst === null) return subst;
+    //   return CHECK_LATER;
+    // }
+    return CHECK_LATER;
   }, 0);
 }
 
 // export const neqo = (x: Term, y: Term): Goal => not(eq(x, y));
 export function old_neqo(x: Term<any>, y: Term<any>): Goal {
   return suspendable([x, y], (values, subst) => {
+    return CHECK_LATER;
     const [xVal, yVal] = values;
     const xGrounded = !isVar(xVal);
     const yGrounded = !isVar(yVal);
@@ -215,6 +254,46 @@ export function substLog(msg: string, onlyVars = false): Goal {
         },
         error: observer.error,
         complete: observer.complete,
+      });
+      return () => sub.unsubscribe();
+    }));
+}
+
+
+let thruCountId = 0;
+export function thruCount(msg: string, level = 1000): Goal {
+  const id = ++thruCountId;
+  return enrichGroupInput("thruCount", [], [], (input$: SimpleObservable<Subst>) =>
+    new SimpleObservable<Subst>((observer) => {
+      let cnt = 0;
+      const sub = input$.subscribe({
+        next: (s) => {
+          cnt++;
+          
+
+          // Determine current level based on count
+          let currentLevel = 1;
+          if (cnt >= 10) currentLevel = 10;
+          if (cnt >= 100) currentLevel = 100;
+          if (cnt >= 1000) currentLevel = 1000;
+          if (cnt >= 10000) currentLevel = 10000;
+          // if (cnt >= 100000) currentLevel = 100000;
+          
+          if ((cnt) % currentLevel === 0) {
+            let nonSymbolKeyCount = 0;
+            for (const key of s.keys()) {
+              if (typeof key !== "symbol") nonSymbolKeyCount++;
+            }
+            const suspendedCount = getSuspendsFromSubst(s).length;
+            console.log("THRU", id, msg, cnt, { nonSymbolKeyCount, suspendedCount });
+          }
+          observer.next(s);
+        },
+        error: observer.error,
+        complete: () => {
+          console.log("THRU COMPLETE", id, msg, cnt);
+          observer.complete?.();
+        },
       });
       return () => sub.unsubscribe();
     }));

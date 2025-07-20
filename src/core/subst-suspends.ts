@@ -103,14 +103,14 @@ export function wakeUpSuspends(subst: Subst, newlyBoundVars: string[]): Subst | 
     }
   }
 
-  currentSubst = removeSuspendFromSubst(subst, toWake.map(x => x.id));
+  // currentSubst = removeSuspendFromSubst(subst, toWake.map(x => x.id));
 
 
   // Restore any suspends that remain (not woken, or still suspended)
-  if (toKeep.length > 0) {
-    const newSubst = new Map(currentSubst);
-    newSubst.set(SUSPENDED_CONSTRAINTS, toKeep);
-    return newSubst;
-  }
+  // if (toKeep.length > 0) {
+  //   const newSubst = new Map(currentSubst);
+  //   newSubst.set(SUSPENDED_CONSTRAINTS, toKeep);
+  //   return newSubst;
+  // }
   return currentSubst;
 }

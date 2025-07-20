@@ -417,92 +417,6 @@ export function make(piles, keyVals, keyBy, numArrays) {
     return and(...constraints);
   }
 
-
-
-  function old_link ($,obj) {
-    const goals = [];
-    const things = Object.keys(keyVals);
-    const keys = Object.keys(obj);
-    for (const lkey of keys) {
-      if(isVar(obj[lkey])) continue;
-      for (const rkey of keys) {
-        if (lkey === rkey) continue;
-
-        const leftSide = $[`${lkey}_${obj[lkey]}_${rkey}`];
-        if(leftSide !== obj[rkey]) {
-          console.log("LINK EQ 1", obj, [leftSide, obj[rkey]])
-          goals.push(eq(leftSide, obj[rkey]));
-          // goals.push(eq(obj[rkey], leftSide));
-        }
-        if(!isVar(obj[rkey])) {
-          for (const thing of things) {
-            if (lkey === thing) continue;
-            if (rkey === thing) continue;
-            console.log("LINK EQ 2", obj, [$[`${lkey}_${obj[lkey]}_${thing}`], $[`${rkey}_${obj[rkey]}_${thing}`]])
-            goals.push(eq($[`${lkey}_${obj[lkey]}_${thing}`], $[`${rkey}_${obj[rkey]}_${thing}`]));
-            // goals.push(eq($[`${rkey}_${obj[rkey]}_${thing}`], $[`${lkey}_${obj[lkey]}_${thing}`]));
-
-          }
-        }
-      }
-    }
-    for (const lkey of keys) {
-      if(isVar(obj[lkey])) continue;
-      for (const rkey of keys) {
-        if (lkey === rkey) continue;
-        for(const lval of keyVals[lkey]) {
-          if (lval === obj[lkey]) continue;
-          const varName = `${lkey}_${lval}_${rkey}`;
-          console.log("LINK NEQO 1", obj, [varName, obj[rkey]])
-
-          goals.push(neqo($[varName], obj[rkey]));
-        }
-      }
-    }
-
-
-
-    // for (const oneKey of Object.keys(obj)) {
-    //   if(isVar(obj[oneKey])) {
-    //     const vars = things.map(key => obj[key] ?? lvar());
-    //     console.log("MEMBERO", [...vars])
-    //     goals.push(membero([...vars], piles));
-    //   } else {
-    //     const vars = things.map(key => obj[key] ?? $[`${oneKey}_${obj[oneKey]}_${key}`]);
-    //     console.log("MEMBERO", [...vars])
-    //     goals.push(membero([...vars], piles));
-    //   }
-    // }
-
-    // if(Object.values(obj).some(isVar)) {
-    // const vars = things.map(key => obj[key] ?? lvar());
-    // console.log("MEMBERO", [...vars])
-    // goals.push(membero([...vars], piles));
-    // }
-
-    return and(...goals);
-  }
-
-  function old_unlink($, objA: Record<string, any>, objB: Record<string, any>) {
-    const constraints = [];
-
-    for (const [keyA, valueA] of Object.entries(objA)) {
-      for (const [keyB, valueB] of Object.entries(objB)) {
-        
-        // Create a logic variable with the format {keyA}_{valueA}_{keyB}
-        const varNameA2B = `${keyA}_${valueA}_${keyB}`;
-        // console.log("NEQO",[$[varNameA2B], valueB]);
-        constraints.push(neqo($[varNameA2B], valueB));
-        const varNameB2A = `${keyB}_${valueB}_${keyA}`;
-        // console.log("NEQO",[$[varNameB2A], valueA])
-        constraints.push(neqo($[varNameB2A], valueA));
-        // constraints.push(link($, { [keyA]: valueA, [keyB]: $[varName] }));
-      }
-    }
-
-    return and(...constraints);
-  }
-
   function distincto(vars: Term[]): Goal {
     return suspendable(vars, (values, subst) => {
       const groundedValues = values.filter(v => !isVar(v));
@@ -542,32 +456,6 @@ export function make(piles, keyVals, keyBy, numArrays) {
 }
 
 
-
-
-export function old_distincto(vars: Term[]): Goal {
-  return suspendable(vars, (values, subst) => {
-    const groundedValues = values.filter(v => !isVar(v));
-    if (groundedValues.length > 0) {
-      const uniqueValues = new Set(groundedValues.map(v => JSON.stringify(v)));
-      if (uniqueValues.size !== groundedValues.length) {
-        return null; // Conflict found
-      }
-      // Extract field from variable ID (e.g., 'q_p1_n_6' -> 'n')
-      const fieldMatch = vars[0].id.match(/q_p\d+_([^_]+)_/);
-      const field = fieldMatch ? fieldMatch[1] : null;
-      if (field && keyVals[field as keyof typeof keyVals]) {
-        const domain = keyVals[field as keyof typeof keyVals];
-        const usedValues = new Set(groundedValues);
-        const remainingVars = vars.length - groundedValues.length;
-        if (domain.length - usedValues.size < remainingVars) {
-          console.log(`Distincto failed for ${field}: only ${domain.length - usedValues.size} values left for ${remainingVars} variables`);
-          return null; // Not enough unique values left
-        }
-      }
-    }
-    return groundedValues.length === vars.length ? subst : CHECK_LATER;
-  }, 1);
-}
 export function collectThenGo() {
   return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
     const substs: Subst[] = [];

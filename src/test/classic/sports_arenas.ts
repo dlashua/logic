@@ -66,7 +66,7 @@ function collectThenGo() {
     })
 }
 
-const { constrainArrays, enforceConsistency, link, unlink } = make(arenas, keyVals, "name", 7);
+const { constrainArrays, enforceConsistency, link, unlink, smartMemberoAll } = make(arenas, keyVals, "name", 7);
 
 const start = Date.now();
 const results = query()
@@ -327,33 +327,10 @@ const results = query()
     //   ))
     // ),
 
-    // Assign all populations for each name first
-    and(
-      ...keyVals.name.map(name =>
-        and(
-          membero($[`name_${name}_pop`], pops),
-          thruCount(`membero ${name} pop`),
-          collectThenGo(),
-          membero($[`name_${name}_town`], towns),
-          thruCount(`membero ${name} town`),
-          collectThenGo(),
-          membero($[`name_${name}_sport`], sports),
-          thruCount(`membero ${name} sport`),
-          collectThenGo(),
-        )
-      ),
-      // // Then assign all towns for each name
-      // ...keyVals.name.map(name =>
-      //   and(
-      //   )
-      // ),
-      // // Then assign all sports for each name
-      // ...keyVals.name.map(name =>
-      //   and(
-      //   )
-      // )
-    ),
-
+    // Assign all populations, towns, and sports using smartMemberoAll
+    smartMemberoAll($),
+    thruCount("smartMemberoAll"),
+    collectThenGo(),
 
     // substLog("top", true),
     // enforceConsistency($),

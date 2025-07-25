@@ -18,6 +18,66 @@ export function make(piles, keyVals, keyBy, numArrays) {
 
   const fields = Object.keys(keyVals);
 
+  // Smarter membero: assigns each variable to a value not already taken in subst, pure (not suspendable)
+  function smartMembero($, field) {
+    return (input$: SimpleObservable<Subst>) => new SimpleObservable<Subst>((observer) => {
+      const sub = input$.subscribe({
+        complete: observer.complete,
+        error: observer.error,
+        next: (subst) => {
+          const avail = new Set(keyVals[field]);
+          const unbound = [];
+          for(const primaryValue of keyVals[keyBy]) {
+            const otherVar = $[`${keyBy}_${primaryValue}_${field}`];
+            const otherValue = walk(otherVar, subst);
+            // const otherValue = otherVar;
+            if(!isVar(otherValue)) {
+              if(!avail.has(otherValue)) {
+                return
+              }
+              avail.delete(otherValue);
+            } else {
+              unbound.push(otherVar);
+            }
+          }
+          if(avail.size !== unbound.length) {
+            return;
+          }
+
+          for(const oneVal of avail) {
+            for (const oneVar of unbound) {
+              const nextSubst = unify(oneVar, oneVal, subst);
+              if(nextSubst === null) continue;
+              observer.next(nextSubst)
+            }
+          }
+        }
+      });
+
+      return () => sub.unsubscribe();
+    });
+  }
+
+  function smartMemberoAll($) {
+    return and(
+      ...fields.filter(x => x !== keyBy).map(field => and(
+        ...keyVals[keyBy].map(primaryValue => and(
+          membero($[`${keyBy}_${primaryValue}_${field}`], keyVals[field]),
+          thruCount(`membero ${primaryValue} ${field}`),
+          // collectThenGo(),
+        ))
+      ))
+    )
+
+    // return and(
+    //   ...fields.filter(x => x !== keyBy).map(field => and(
+    //     smartMembero($, field),
+    //     thruCount(`smartMembero ${field}`),
+    //     collectThenGo(),
+    //   ))
+    // )
+  }
+
   function getVar($, primaryValue, varName) {
     return $[`${keyBy}_${primaryValue}_${varName}`];
   }
@@ -452,6 +512,8 @@ export function make(piles, keyVals, keyBy, numArrays) {
     unlink,
     distincto,
     getVar,
+    smartMembero,
+    smartMemberoAll,
   }
 }
 

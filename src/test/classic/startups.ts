@@ -49,7 +49,7 @@ const keyVals = {
   ]
 };
 
-const { constrainArrays, enforceConsistency, link, unlink } = make(startups, keyVals, 4);
+const { constrainArrays, enforceConsistency, link, unlink, smartMemberoAll } = make(startups, keyVals, "name", 4);
 
 function exists($: any, key: string, items: any[]) {
   return and(
@@ -111,7 +111,8 @@ const results = await query()
     // pluso($.founders_addie_abrams_investment, 2000000, $.name_gofro_com_investment),
 
 
-    enforceConsistency($),
+    // enforceConsistency($),
+    smartMemberoAll($),
     thruCount("OUT"),
   ]).toArray();
 

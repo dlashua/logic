@@ -1,39 +1,26 @@
 {
-  "name": "newlogic",
-  "version": "1.0.0",
+  "name": "logicroot",
+  "version": "0.0.1",
   "description": "",
-  "main": "index.js",
   "type": "module",
-  "scripts": {
-    "test": "vitest run",
-    "test:ui": "vitest --ui",
-    "test:watch": "vitest",
-    "quick-test": "tsx --watch ./src/test/quick-test.ts"
-  },
+  "scripts": {},
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.10.0",
+  "dependencies": {
+    "@types/node": "^22.16.5",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
   "devDependencies": {
     "@eslint/js": "^9.30.0",
     "@stylistic/eslint-plugin": "^5.0.0",
-    "@types/lodash": "^4.17.19",
-    "@types/node": "^24.0.7",
-    "@vitest/ui": "^3.2.4",
     "eslint": "^9.30.0",
+    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-import-newlines": "^1.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.0",
     "vitest": "^3.2.4"
-  },
-  "dependencies": {
-    "@dotenvx/dotenvx": "^1.47.5",
-    "better-sqlite3": "^12.1.1",
-    "eslint-plugin-import": "^2.32.0",
-    "jsonata": "^2.0.6",
-    "knex": "^3.1.0",
-    "lodash": "^4.17.21",
-    "tsx": "^4.20.3"
   }
 }

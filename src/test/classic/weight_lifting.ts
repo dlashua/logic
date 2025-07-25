@@ -45,7 +45,7 @@ const keyVals = {
 // Much more efficient: Use suspendable constraints that only validate when grounded
 
 
-const { constrainArrays, enforceConsistency, link, unlink, distinctValidateAll, getVar } = make(lifters, keyVals, "name", 4);
+const { constrainArrays, enforceConsistency, link, unlink, distinctValidateAll, getVar, smartMemberoAll } = make(lifters, keyVals, "name", 4);
 
 const start = Date.now();
 const results = await query()
@@ -98,17 +98,28 @@ const results = await query()
       )),
     ),
 
-    ...keyVals.name.map(person => 
-      or(
-        ...keyVals.from.map(place => eq(getVar($, person, "from"), place))
-      ),
-    ),
+    // ...keyVals.name.map(person => 
+    //   or(
+    //     ...keyVals.from.map(place => eq(getVar($, person, "from"), place))
+    //   ),
+    // ),
 
-    ...keyVals.name.map(person => 
-      or(
-        ...keyVals.weight.map(weight => eq(getVar($, person, "weight"), weight))
-      ),
-    ),
+    // ...keyVals.name.map(person => 
+    //   or(
+    //     ...keyVals.weight.map(weight => eq(getVar($, person, "weight"), weight))
+    //   ),
+    // ),
+
+    // ...keyVals.name.map(person =>
+    //   membero(getVar($, person, "from"), keyVals.from) 
+    // ),
+
+    // ...keyVals.name.map(person => 
+    //   membero(getVar($, person, "weight"), keyVals.weight) 
+    // ),
+
+
+    smartMemberoAll($),
 
   ]).toArray();
 

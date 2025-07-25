@@ -48,7 +48,7 @@ const keyVals = {
   temp: [325, 340, 350, 375, 400, 410, 425]
 };
 
-const { constrainArrays, enforceConsistency, link, unlink, distinctValidateAll, getVar } = make(recipes, keyVals, "name", 7);
+const { constrainArrays, enforceConsistency, link, unlink, distinctValidateAll, getVar, smartMemberoAll } = make(recipes, keyVals, "name", 7);
 
 const start = Date.now();
 
@@ -260,23 +260,25 @@ const results = await query()
     thruCount("constraint 13"),
 
 
-    and(
-      ...(Object.keys(keyVals).filter(x => x !== "name").map(field => 
-        and(
-          ...(keyVals[field].map(fieldVal => 
-            or(
-              ...(keyVals.name.map(name => 
-                and(
-                  eq($[`name_${name}_${field}`], fieldVal), 
-                  thruCount(`final ${name} ${field} ${fieldVal}`),
-                  // collectThenGo(),
-                )
-              ))
-            )
-          ))
-        )
-      ))
-    ),
+    // and(
+    //   ...(Object.keys(keyVals).filter(x => x !== "name").map(field => 
+    //     and(
+    //       ...(keyVals[field].map(fieldVal => 
+    //         or(
+    //           ...(keyVals.name.map(name => 
+    //             and(
+    //               eq($[`name_${name}_${field}`], fieldVal), 
+    //               thruCount(`final ${name} ${field} ${fieldVal}`),
+    //               // collectThenGo(),
+    //             )
+    //           ))
+    //         )
+    //       ))
+    //     )
+    //   ))
+    // ),
+
+    smartMemberoAll($),
 
 
 

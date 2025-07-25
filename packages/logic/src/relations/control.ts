@@ -29,14 +29,12 @@ export function not(goal: Goal): Goal {
         let hasSolutions = false;
         const sub = goal(SimpleObservable.of(s)).subscribe({
           next: (subst) => {
-            console.log("Not goal received subst:", subst.has(SUSPENDED_CONSTRAINTS) ? "suspended" : "valid", subst);
             if (!subst.has(SUSPENDED_CONSTRAINTS)) {
               hasSolutions = true;
             }
           },
           error: (err) => observer.error?.(err),
           complete: () => {
-            console.log("Not goal completed, hasSolutions:", hasSolutions);
             if (!hasSolutions) {
               observer.next(s);
             }

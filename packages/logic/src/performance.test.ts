@@ -6,11 +6,11 @@ import {
   unify,
   logicList,
   arrayToLogicList
-} from './core/kernel.ts'
-import { eq, and, or } from './core/combinators.ts'
-import { query } from './query.ts';
-import { membero } from './relations/lists.ts';
-import { benchmark, formatBenchmarkResult, compareBenchmarks } from './benchmark.ts';
+} from './core/kernel.js'
+import { eq, and, or } from './core/combinators.js'
+import { query } from './core/query.js';
+import { membero } from './relations/lists.js';
+import { benchmark, formatBenchmarkResult, compareBenchmarks } from './benchmark.js';
 
 describe('Performance Tests', () => {
   beforeEach(() => {

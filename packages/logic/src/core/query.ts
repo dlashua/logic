@@ -1,13 +1,12 @@
 import { and } from "./combinators.js";
 import { isLogicList, isVar, logicListToArray, lvar, walk } from "./kernel.js";
 import { SimpleObservable } from "./observable.js";
-import {
-	type Goal,
-	type Observable,
-	type RunResult,
-	type Subst,
-	Term,
-	type Var,
+import type {
+	Goal,
+	Observable,
+	RunResult,
+	Subst,
+	Var,
 } from "./types.js";
 
 /**
@@ -38,13 +37,13 @@ export function createLogicVarProxy<K extends string | symbol = string>(
 ): { proxy: Record<K, Var>; varMap: Map<K, Var> } {
 	const varMap = new Map<K, Var>();
 	const proxy = new Proxy({} as Record<K, Var>, {
-		get(target, prop: K) {
+		get(_target, prop: K) {
 			if (typeof prop !== "string") return undefined;
 			if (prop === "_") return lvar();
 			if (!varMap.has(prop)) {
 				varMap.set(prop, lvar(`${prefix}${String(prop)}`));
 			}
-			return varMap.get(prop)!;
+			return varMap.get(prop);
 		},
 		has: () => true,
 		ownKeys: () => Array.from(varMap.keys()),
@@ -262,7 +261,10 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
 					await nextPromise();
 				}
 				while (queue.length > 0) {
-					yield queue.shift()!;
+					const item = queue.shift();
+					if (item !== undefined) {
+						yield item;
+					}
 				}
 				if (error) throw error;
 			}

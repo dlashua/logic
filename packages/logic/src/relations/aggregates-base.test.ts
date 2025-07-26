@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "../core/combinators.js";
+import { eq } from "../core/combinators.js";
 import {
 	arrayToLogicList,
-	lvar,
 	resetVarCounter,
 	unify,
 	walk,
@@ -164,7 +163,7 @@ describe("Aggregates Base Functions", () => {
 
 		it("should repeat each substitution with counter", async () => {
 			// Goal that repeats each substitution N times and adds a counter
-			const repeatGoal = (timesTerm: Term<number>, counterTerm: Term<number>) =>
+			const repeatGoal = (_timesTerm: Term<number>, counterTerm: Term<number>) =>
 				collect_and_process_base((buffer, observer) => {
 					const timesToRepeat = 3; // Repeat each 3 times
 					for (const subst of buffer) {
@@ -232,7 +231,7 @@ describe("Aggregates Base Functions", () => {
 					valueTerm, // valueVar
 					countTerm, // outVar
 					false, // drop=false (preserve mode)
-					(values, substitutions) => values.length, // aggregator: count values per group
+					(values, _substitutions) => values.length, // aggregator: count values per group
 				);
 			const results = await query()
 				.select(($) => ({
@@ -283,7 +282,7 @@ describe("Aggregates Base Functions", () => {
 					valueTerm, // valueVar
 					countTerm, // outVar
 					true, // drop=true (drop mode)
-					(values, substitutions) => values.length, // aggregator: count values per group
+					(values, _substitutions) => values.length, // aggregator: count values per group
 				);
 			const results = await query()
 				.select(($) => ({
@@ -318,7 +317,7 @@ describe("Aggregates Base Functions", () => {
 					null, // valueVar (null for count-only)
 					countTerm, // outVar
 					true, // drop mode for cleaner output
-					(values, substitutions) => substitutions.length, // aggregator: count substitutions
+					(_values, substitutions) => substitutions.length, // aggregator: count substitutions
 				);
 			const results = await query()
 				.select(($) => ({
@@ -365,7 +364,7 @@ describe("Aggregates Base Functions", () => {
 					itemTerm, // valueVar
 					itemsTerm, // outVar
 					true, // drop mode
-					(values, substitutions) => arrayToLogicList(values), // aggregator: collect into logic list
+					(values, _substitutions) => arrayToLogicList(values), // aggregator: collect into logic list
 				);
 			const results = await query()
 				.select(($) => ({
@@ -404,7 +403,7 @@ describe("Aggregates Base Functions", () => {
 					valueTerm, // valueVar
 					sumTerm, // outVar
 					true, // drop mode
-					(values, substitutions) => values.reduce((acc, val) => acc + val, 0), // aggregator: sum
+					(values, _substitutions) => values.reduce((acc, val) => acc + val, 0), // aggregator: sum
 				);
 			const results = await query()
 				.select(($) => ({
@@ -437,7 +436,7 @@ describe("Aggregates Base Functions", () => {
 					null,
 					countTerm,
 					true,
-					(values, substitutions) => substitutions.length,
+					(_values, substitutions) => substitutions.length,
 				);
 			const results = await query()
 				.select(($) => ({
@@ -466,7 +465,7 @@ describe("Aggregates Base Functions", () => {
 					itemTerm,
 					countTerm,
 					false, // preserve mode - should keep extra variable
-					(values, substitutions) => values.length,
+					(values, _substitutions) => values.length,
 				);
 			const results = await query()
 				.select(($) => ({

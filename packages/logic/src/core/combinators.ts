@@ -358,7 +358,7 @@ export function timeout(goal: Goal, timeoutMs: number): Goal {
 /**
  * Run a goal and collect results with optional limits
  */
-export function run<T>(
+export function run(
 	goal: Goal,
 	maxResults?: number,
 	timeoutMs?: number,
@@ -503,7 +503,7 @@ export function projectJsonata(
 						inputObj = walk(inputVars, s);
 					}
 					// Evaluate JSONata
-					let result;
+					let result: any;
 					try {
 						result = await expr.evaluate(inputObj);
 					} catch (e) {

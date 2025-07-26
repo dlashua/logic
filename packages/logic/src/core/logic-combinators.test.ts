@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq, or, run } from "./combinators.js";
 import { lvar, resetVarCounter } from "./kernel.js";
-import { SimpleObservable } from "./observable.js";
 import { query } from "./query.js";
 
 describe("Logic Combinators", () => {

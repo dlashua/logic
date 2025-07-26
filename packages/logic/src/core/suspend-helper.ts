@@ -1,6 +1,6 @@
 import { isVar, walk } from "./kernel.js";
 import { SimpleObservable } from "./observable.js";
-import { addSuspendToSubst, SUSPENDED_CONSTRAINTS } from "./subst-suspends.js";
+import { addSuspendToSubst } from "./subst-suspends.js";
 import type { Goal, Subst, Term, Var } from "./types.js";
 
 export const CHECK_LATER = Symbol.for("constraint-check-later");
@@ -9,7 +9,11 @@ export const CHECK_LATER = Symbol.for("constraint-check-later");
  * Generic constraint helper that handles suspension automatically
  */
 
-export function makeSuspendHandler(vars, evaluator, minGrounded) {
+export function makeSuspendHandler(
+  vars: Term[], 
+  evaluator: (values: Term[], subst: Subst) => Subst | null | typeof CHECK_LATER, 
+  minGrounded: number
+) {
 	return function handleSuspend(subst: Subst): Subst | null {
 		const values = vars.map((v) => walk(v, subst));
 		const groundedCount = values.filter((v) => !isVar(v)).length;
@@ -69,45 +73,3 @@ export function suspendable<T extends Term[]>(
 		});
 }
 
-export function old_suspendable<T extends Term[]>(
-	vars: T,
-	evaluator: (values: any[], subst: Subst) => Subst | null | typeof CHECK_LATER,
-	minGrounded = vars.length - 1,
-): Goal {
-	function handleSuspend(subst: Subst): Subst | null {
-		const values = vars.map((v) => walk(v, subst));
-		const groundedCount = values.filter((v) => !isVar(v)).length;
-
-		if (groundedCount >= minGrounded) {
-			const result = evaluator(values, subst);
-			if (result === null) {
-				return null;
-			}
-			if (result !== CHECK_LATER) return result;
-		}
-
-		const watchedVars: string[] = [];
-		for (const value of values) {
-			if (isVar(value)) {
-				watchedVars.push((value as any).id);
-			}
-		}
-		return addSuspendToSubst(subst, handleSuspend, watchedVars);
-	}
-
-	return (input$: SimpleObservable<Subst>) =>
-		new SimpleObservable<Subst>((observer) => {
-			const sub = input$.subscribe({
-				next: (subst) => {
-					const result = handleSuspend(subst);
-					if (result !== null) {
-						observer.next(result);
-					}
-				},
-				error: observer.error,
-				complete: observer.complete,
-			});
-
-			return () => sub.unsubscribe();
-		});
-}

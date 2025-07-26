@@ -1,14 +1,13 @@
 import { SimpleObservable } from "./observable.js";
 import { SUSPENDED_CONSTRAINTS, wakeUpSuspends } from "./subst-suspends.js";
-import {
-	type ConsNode,
-	type Goal,
-	type LogicList,
-	type NilNode,
-	Observable,
-	type Subst,
-	type Term,
-	type Var,
+import type {
+	ConsNode,
+	Goal,
+	LogicList,
+	NilNode,
+	Subst,
+	Term,
+	Var,
 } from "./types.js";
 
 // Well-known symbols for SQL query coordination
@@ -61,7 +60,7 @@ export function walk(u: Term, s: Subst): Term {
 
 	// Fast path for variable chains - use iteration instead of recursion
 	while (isVar(current) && s.has(current.id)) {
-		current = s.get(current.id)!;
+		current = s.get(current.id);
 	}
 
 	// If we ended up with a non-variable, check if it needs structural walking
@@ -207,7 +206,7 @@ export function unifyWithConstraints(
 
 		// Check what new variables were bound
 		const newlyBoundVars: string[] = [];
-		for (const [key, value] of result) {
+		for (const [key] of result) {
 			if (!s.has(key) && typeof key === "string") {
 				newlyBoundVars.push(key);
 			}

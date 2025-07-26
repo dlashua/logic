@@ -12,19 +12,19 @@ const isPromise = (v: any): v is Promise<any> =>
 export class SimpleObservable<T> implements Observable<T> {
 	private producer: (
 		observer: Observer<T>,
-	) => (() => void) | void | Promise<(() => void) | void>;
+	) => (() => void) | void | Promise<(() => void) | undefined>;
 
 	constructor(
 		producer: (
 			observer: Observer<T>,
-		) => (() => void) | void | Promise<(() => void) | void>,
+		) => (() => void) | void | Promise<(() => void) | undefined>,
 	) {
 		this.producer = producer;
 	}
 
 	subscribe(observer: Observer<T>): Subscription {
 		let closed = false;
-		let cleanup: (() => void) | void = () => console.log("I HAVE NO CLEANUP");
+		let cleanup: (() => void) | undefined = () => console.log("I HAVE NO CLEANUP");
 
 		const safeObserver = {
 			next: (value: T) => {
@@ -36,7 +36,7 @@ export class SimpleObservable<T> implements Observable<T> {
 					}
 				}
 			},
-			error: (error: any) => {
+			error: (error: Error) => {
 				if (!closed && observer.error) {
 					observer.error(error);
 					closed = true;
@@ -62,14 +62,14 @@ export class SimpleObservable<T> implements Observable<T> {
 						}
 					})
 					.catch((error) => {
-						safeObserver.error(error);
+						safeObserver.error(error instanceof Error ? error : new Error(String(error)));
 					});
 			} else {
-				cleanup = result as (() => void) | void;
+				cleanup = result as (() => void) | undefined;
 			}
 		} catch (error) {
 			if (!closed) {
-				safeObserver.error(error);
+				safeObserver.error(error instanceof Error ? error : new Error(String(error)));
 			}
 		}
 
@@ -145,7 +145,7 @@ export class SimpleObservable<T> implements Observable<T> {
 	}
 
 	static fromAsync<T>(
-		asyncProducer: (observer: Observer<T>) => Promise<(() => void) | void>,
+		asyncProducer: (observer: Observer<T>) => Promise<(() => void) | undefined>,
 	): Observable<T> {
 		return new SimpleObservable<T>(asyncProducer);
 	}
@@ -365,7 +365,6 @@ export class SimpleObservable<T> implements Observable<T> {
 	toArray(): Promise<T[]> {
 		let sub: Subscription;
 		return new Promise<T[]>((resolve, reject) => {
-			let complete = false;
 			const values: T[] = [];
 			sub = this.subscribe({
 				next: (value) => values.push(value),
@@ -373,7 +372,6 @@ export class SimpleObservable<T> implements Observable<T> {
 				complete: () => {
 					setTimeout(() => sub.unsubscribe(), 0);
 					resolve(values);
-					complete = true;
 				},
 			});
 		});
@@ -382,5 +380,5 @@ export class SimpleObservable<T> implements Observable<T> {
 
 // Export the factory function for convenience
 export const observable = <T>(
-	producer: (observer: Observer<T>) => (() => void) | void,
+	producer: (observer: Observer<T>) => (() => void) | undefined,
 ) => new SimpleObservable(producer);

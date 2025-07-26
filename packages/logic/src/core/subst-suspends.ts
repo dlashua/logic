@@ -1,4 +1,3 @@
-import { inspect } from "util";
 import { isVar, walk } from "./kernel.js";
 import { CHECK_LATER } from "./suspend-helper.js";
 import type { Subst } from "./types.js";

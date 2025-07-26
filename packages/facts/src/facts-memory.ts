@@ -1,74 +1,77 @@
-import { getDefaultLogger } from "logic";
-import { BaseConfig } from "logic";
+import { type BaseConfig, getDefaultLogger } from "logic";
 import { FactRelationFactory } from "./relation-factory.js";
-import { FactRelation, FactObjRelation, FactRelationConfig } from "./types.js";
+import type {
+	FactObjRelation,
+	FactRelation,
+	FactRelationConfig,
+} from "./types.js";
 
 export const makeFacts = (
-  config?: Partial<BaseConfig>,
-  factConfig?: FactRelationConfig
+	config?: Partial<BaseConfig>,
+	factConfig?: FactRelationConfig,
 ) => {
-  const logger = getDefaultLogger();
-  
-  const factory = new FactRelationFactory({
-    logger,
-    config: factConfig || {
-      enableLogging: false,
-      enableIndexing: true 
-    }
-  });
+	const logger = getDefaultLogger();
 
-  return factory.createArrayRelation();
+	const factory = new FactRelationFactory({
+		logger,
+		config: factConfig || {
+			enableLogging: false,
+			enableIndexing: true,
+		},
+	});
+
+	return factory.createArrayRelation();
 };
 
 export const makeFactsObj = (
-  keys: string[],
-  config?: Partial<BaseConfig>,
-  factConfig?: FactRelationConfig
+	keys: string[],
+	config?: Partial<BaseConfig>,
+	factConfig?: FactRelationConfig,
 ): FactObjRelation => {
-  const logger = getDefaultLogger();
-  
-  const factory = new FactRelationFactory({
-    logger,
-    config: factConfig || {
-      enableLogging: false,
-      enableIndexing: true 
-    }
-  });
+	const logger = getDefaultLogger();
 
-  return factory.createObjectRelation(keys);
+	const factory = new FactRelationFactory({
+		logger,
+		config: factConfig || {
+			enableLogging: false,
+			enableIndexing: true,
+		},
+	});
+
+	return factory.createObjectRelation(keys);
 };
 
 export const makeFactsSym = (
-  config?: Partial<BaseConfig>,
-  factConfig?: FactRelationConfig
+	config?: Partial<BaseConfig>,
+	factConfig?: FactRelationConfig,
 ): FactRelation => {
-  const logger = getDefaultLogger();
-  
-  const factory = new FactRelationFactory({
-    logger,
-    config: factConfig || {
-      enableLogging: false,
-      enableIndexing: true 
-    }
-  });
+	const logger = getDefaultLogger();
 
-  return factory.createSymmetricArrayRelation();
+	const factory = new FactRelationFactory({
+		logger,
+		config: factConfig || {
+			enableLogging: false,
+			enableIndexing: true,
+		},
+	});
+
+	return factory.createSymmetricArrayRelation();
 };
 
 export const makeFactsObjSym = (
-  keys: string[],
-  config?: Partial<BaseConfig>,
-  factConfig?: FactRelationConfig
+	keys: string[],
+	config?: Partial<BaseConfig>,
+	factConfig?: FactRelationConfig,
 ): FactObjRelation => {
-  const logger = getDefaultLogger();
-  
-  const factory = new FactRelationFactory({
-    logger,
-    config: factConfig || {
-      enableLogging: false,
-      enableIndexing: true 
-    }
-  });
+	const logger = getDefaultLogger();
 
-  return factory.createSymmetricObjectRelation(keys);
+	const factory = new FactRelationFactory({
+		logger,
+		config: factConfig || {
+			enableLogging: false,
+			enableIndexing: true,
+		},
+	});
+
+	return factory.createSymmetricObjectRelation(keys);
 };

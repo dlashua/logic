@@ -12,12 +12,12 @@ Many REST APIs include the primary key in the URL path instead of query paramete
 const api = await makeRelREST({
   baseUrl: "https://api.example.com/v1",
   features: {
-    primaryKeyInPath: true
-  }
+    primaryKeyInPath: true,
+  },
 });
 
 const users = api.rel("users", {
-  restPrimaryKey: "id"  // Specifies which field is the primary key
+  restPrimaryKey: "id", // Specifies which field is the primary key
 });
 
 // This will generate: GET /users/123 instead of /users?id=123
@@ -37,8 +37,8 @@ const api = await makeRelREST({
         return `https://api.example.com/${table}/${primaryKeyValue}/details`;
       }
       return `https://api.example.com/${table}`;
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -50,8 +50,8 @@ Some APIs don't support comma-separated values for IN operations. When disabled,
 const api = await makeRelREST({
   baseUrl: "https://api.example.com",
   features: {
-    supportsInOperator: false  // Will make separate requests for each value
-  }
+    supportsInOperator: false, // Will make separate requests for each value
+  },
 });
 
 // This will make 3 separate requests instead of one with ?id=1,2,3
@@ -66,8 +66,8 @@ Some APIs don't support field selection. When disabled, the `fields` parameter i
 const api = await makeRelREST({
   baseUrl: "https://api.example.com",
   features: {
-    supportsFieldSelection: false  // Won't send ?fields=name,email
-  }
+    supportsFieldSelection: false, // Won't send ?fields=name,email
+  },
 });
 ```
 
@@ -80,15 +80,15 @@ const api = await makeRelREST({
   baseUrl: "https://api.example.com",
   features: {
     queryParamFormatter: (column, operator, value) => {
-      if (operator === 'gt') {
+      if (operator === "gt") {
         return { key: `${column}_greater_than`, value: String(value) };
       }
-      if (operator === 'like') {
+      if (operator === "like") {
         return { key: `search_${column}`, value: String(value) };
       }
       return { key: column, value: String(value) };
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -113,9 +113,17 @@ interface RestDataStoreConfig {
     /** Whether API supports field selection via query params */
     supportsFieldSelection?: boolean;
     /** Custom URL builder for different API patterns */
-    urlBuilder?: (table: string, primaryKey?: string, primaryKeyValue?: any) => string;
+    urlBuilder?: (
+      table: string,
+      primaryKey?: string,
+      primaryKeyValue?: any,
+    ) => string;
     /** Custom query parameter formatter */
-    queryParamFormatter?: (column: string, operator: string, value: any) => { key: string; value: string };
+    queryParamFormatter?: (
+      column: string,
+      operator: string,
+      value: any,
+    ) => { key: string; value: string };
   };
 }
 ```

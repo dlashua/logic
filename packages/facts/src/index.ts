@@ -2,21 +2,22 @@
 // -----------------------------------------------------------------------------
 
 export {
-  makeFacts,
-  makeFactsObj,
-  makeFactsSym,
-  makeFactsObjSym
-} from './facts-memory.ts';
-
+	makeFacts,
+	makeFactsObj,
+	makeFactsObjSym,
+	makeFactsSym,
+} from "./facts-memory.ts";
+export { MemoryObjRelation } from "./memory-obj-relation.ts";
+export { MemoryRelation } from "./memory-relation.ts";
+export { FactRelationFactory } from "./relation-factory.ts";
+export {
+	SymmetricMemoryObjRelation,
+	SymmetricMemoryRelation,
+} from "./symmetric-relation.ts";
 export type {
-  FactRelation,
-  FactObjRelation,
-  FactRelationConfig,
-  FactPattern,
-  FactManagerDependencies
-} from './types.ts';
-
-export { FactRelationFactory } from './relation-factory.ts';
-export { MemoryRelation } from './memory-relation.ts';
-export { MemoryObjRelation } from './memory-obj-relation.ts';
-export { SymmetricMemoryRelation, SymmetricMemoryObjRelation } from './symmetric-relation.ts';
+	FactManagerDependencies,
+	FactObjRelation,
+	FactPattern,
+	FactRelation,
+	FactRelationConfig,
+} from "./types.ts";

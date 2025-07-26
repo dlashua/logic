@@ -1,53 +1,59 @@
 # Goal Types
 
 ## Standard Goal
-input: `input$` (`SimpleObservable<Subst>`) 
+
+input: `input$` (`SimpleObservable<Subst>`)
 
 returns: `output$` (`SimpleObservable<Subst>`)
 
 signature:
+
 ```typescript
-(...args) => 
-    (input$: SimpleObservable<Subst>) => 
-        SimpleObservable<
-            Subst
-        >
+(...args) =>
+  (input$: SimpleObservable<Subst>) =>
+    SimpleObservable<Subst>;
 ```
 
 output$ can emit more than it received, less than it received, equal, or not at all
 
 Useful for:
-* Aggregates
-* Membero
-* Or
-* Low Level Goals
+
+- Aggregates
+- Membero
+- Or
+- Low Level Goals
 
 Requires:
-* walk to get possible Term Values
-* unify to set New Values
+
+- walk to get possible Term Values
+- unify to set New Values
 
 ## Subst Goal ??
-input: `inputSubst` (`Subst`) 
+
+input: `inputSubst` (`Subst`)
 
 returns: `outputSubst` (`Subst`)
 
 signature:
+
 ```typescript
-(...args) => 
+(...args) =>
     SubstGoal(
-        (inputSubst: Subst) => 
+        (inputSubst: Subst) =>
             Subst | Fail | Suspend<...args>
     )
 ```
 
 Useful for:
-* 1 to 1 Mappings
-* 1 to 0 Mappings
-* Simple Constraints (lteo, take, etc)
+
+- 1 to 1 Mappings
+- 1 to 0 Mappings
+- Simple Constraints (lteo, take, etc)
 
 Requires:
-* walk to get possible Term Values
-* unify to set New Values
+
+- walk to get possible Term Values
+- unify to set New Values
 
 ## Walked Goal ??
 
@@ -56,13 +62,15 @@ input: `walkedSubst` (`Subst`)
 just like `Subst Goal`, except all the terms are pre walked
 
 Requires:
-* unify to set New Values
+
+- unify to set New Values
 
 signature:
+
 ```javascript
-(...args) => 
+(...args) =>
     WalkedGoal(
-        (inputSubst: Subst, ...walkedArgs) => 
+        (inputSubst: Subst, ...walkedArgs) =>
             Subst | Fail | Suspend<...args>
     )
 ```
@@ -70,38 +78,44 @@ signature:
 ## Lifted Goal
 
 signature:
+
 ```javascript
-(...args, outVar) => 
+(...args, outVar) =>
     lift(
         (...walkedArgs) => Any | Fail
     )
 ```
 
 Features:
-* takes a regular javascript function.
-* automatically adds a term to the end of the argument list to accept the output.
-* Walks all terms
-* does not yield if all terms are not grounded
+
+- takes a regular javascript function.
+- automatically adds a term to the end of the argument list to accept the output.
+- Walks all terms
+- does not yield if all terms are not grounded
 
 ## Suspendable Lifted Goal
+
 signature:
+
 ```javascript
 (...args, outVar) =>
     suspendableLift(
-        (...walkedArgs) => 
+        (...walkedArgs) =>
             Any | Fail | Suspend<...args>
     )
 ```
 
 Features:
-* Similar to `Lifted Goal`
-* Suspends until all terms are grounded
+
+- Similar to `Lifted Goal`
+- Suspends until all terms are grounded
 
 # Special Relations
 
-## Subquery 
+## Subquery
 
 signature:
+
 ```javascript
-Subquery(select, where, [aggregator], outVar)
+Subquery(select, where, [aggregator], outVar);
 ```

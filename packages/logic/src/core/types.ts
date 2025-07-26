@@ -89,11 +89,17 @@ export type RunResult<Fmt> = {
 /**
  * Type for lifted function arguments
  */
-export type LiftedArgs<T extends (...args: any) => any> = T extends (
+export type LiftableFunction<T> = (...args: unknown[]) => T;
+
+/**
+ * Type for lifted function arguments
+ */
+export type LiftedArgs<T extends LiftableFunction<U>, U> = T extends (
 	...args: infer A
-) => infer R
-	? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<R>]) => Goal
+) => U
+	? (...args: [...{ [I in keyof A]: Term<A[I]> | A[I] }, out: Term<U>]) => Goal
 	: never;
+
 
 /**
  * Stream configuration for controlling evaluation behavior

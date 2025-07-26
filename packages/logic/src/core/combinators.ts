@@ -19,8 +19,6 @@ import type {
   Var,
 } from "./types.js";
 
-throw Error("hello");
-
 /**
  * A goal that succeeds if two terms can be unified.
  */
@@ -259,6 +257,62 @@ export function lift<U, T extends LiftableFunction<U>>(
         return () => subscription.unsubscribe?.();
       });
   }) as LiftedArgs<T, U>;
+}
+
+/**
+ * Either-or combinator: tries the first goal, and only if it produces no results,
+ * tries the second goal. This is different from `or` which tries both goals.
+ */
+export function eitherOr(firstGoal: Goal, secondGoal: Goal): Goal {
+  return (input$) =>
+    new SimpleObservable<Subst>((observer) => {
+      let active = 0;
+      let completed = false;
+
+      const subscription = input$.subscribe({
+        next: (s) => {
+          active++;
+          let hasResults = false;
+          const results: Subst[] = [];
+
+          firstGoal(SimpleObservable.of(s)).subscribe({
+            next: (s1) => {
+              hasResults = true;
+              results.push(s1);
+            },
+            complete: () => {
+              if (hasResults) {
+                // First goal succeeded, emit all its results
+                for (const result of results) {
+                  observer.next(result);
+                }
+              } else {
+                // First goal failed, try second goal
+                secondGoal(SimpleObservable.of(s)).subscribe({
+                  next: observer.next,
+                  error: observer.error,
+                  complete: () => {
+                    active--;
+                    if (completed && active === 0) observer.complete?.();
+                  },
+                });
+                return; // Skip the active-- below since secondGoal will handle it
+              }
+              active--;
+              if (completed && active === 0) observer.complete?.();
+            },
+            error: observer.error,
+          });
+        },
+        error: observer.error,
+        complete: () => {
+          completed = true;
+          if (active === 0) observer.complete?.();
+        },
+      });
+
+      return () => subscription.unsubscribe?.();
+    });
 }
 
 /**

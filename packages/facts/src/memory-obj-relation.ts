@@ -12,8 +12,94 @@ import {
 import type { FactObjRelation, FactRelationConfig } from "./types.js";
 
 export class MemoryObjRelation {
+  /**
+   * Update facts matching a where-clause with new values.
+   * @param where - fields and values to match
+   * @param newValues - fields and values to update
+   */
+  private updateFacts(
+    where: Partial<Record<string, Term>>,
+    newValues: Record<string, Term>,
+    upsert: boolean = false,
+  ): void {
+    let updated = false;
+    for (let i = 0; i < this.facts.length; i++) {
+      const fact = this.facts[i];
+      let match = true;
+      for (const key of Object.keys(where)) {
+        // Use strict equality for now; can swap for deep equality or unification if needed
+        if (fact[key] !== where[key]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        updated = true;
+        // Remove old index entries for changed keys
+        if (this.config.enableIndexing !== false) {
+          for (const key of this.keys) {
+            if (
+              key in newValues &&
+              key in fact &&
+              indexUtils.isIndexable(fact[key])
+            ) {
+              const index = this.indexes.get(key);
+              if (index) {
+                this.removeFromIndex(index, fact[key], i);
+              }
+            }
+          }
+        }
+        // Update fact fields
+        Object.assign(fact, newValues);
+        // Add new index entries for changed keys
+        if (this.config.enableIndexing !== false) {
+          for (const key of this.keys) {
+            if (key in newValues && indexUtils.isIndexable(fact[key])) {
+              let index = this.indexes.get(key);
+              if (!index) {
+                index = indexUtils.createIndex();
+                this.indexes.set(key, index);
+              }
+              indexUtils.addToIndex(index, fact[key], i);
+            }
+          }
+        }
+        this.logger.log("FACT_UPDATED", {
+          message: `Updated object fact at index ${i}`,
+          fact,
+        });
+      }
+    }
+    // If no record was updated and upsert is true, insert a new one
+    if (!updated && upsert) {
+      const newFact: Record<string, Term> = { ...where, ...newValues };
+      this.addFact(newFact);
+      this.logger.log("FACT_INSERTED", {
+        message: `Inserted new object fact (upsert)`,
+        fact: newFact,
+      });
+    }
+  }
+
+  /**
+   * Remove a fact index from a Map<value, Set<index>>
+   */
+  private removeFromIndex(
+    index: Map<unknown, Set<number>>,
+    value: unknown,
+    factIndex: number,
+  ): void {
+    const set = index.get(value);
+    if (set) {
+      set.delete(factIndex);
+      if (set.size === 0) {
+        index.delete(value);
+      }
+    }
+  }
   private facts: Record<string, Term>[] = [];
-  private indexes = new Map<string, Map<any, Set<number>>>();
+  private indexes: Map<string, Map<unknown, Set<number>>> = new Map();
   private goalIdCounter = 0;
 
   constructor(
@@ -30,6 +116,20 @@ export class MemoryObjRelation {
 
     goalFn.set = (factObj: Record<string, Term>) => {
       this.addFact(factObj);
+    };
+
+    goalFn.update = (
+      where: Partial<Record<string, Term>>,
+      newValues: Record<string, Term>,
+    ) => {
+      this.updateFacts(where, newValues, false);
+    };
+
+    goalFn.upsert = (
+      where: Partial<Record<string, Term>>,
+      newValues: Record<string, Term>,
+    ) => {
+      this.updateFacts(where, newValues, true);
     };
 
     goalFn.raw = this.facts;
@@ -150,7 +250,11 @@ export class MemoryObjRelation {
     walkedQuery: Record<string, Term>,
     queryKeys: string[],
     s: Subst,
-    observer: any,
+    observer: {
+      next: (s: Subst) => void;
+      complete?: () => void;
+      error?: (err: unknown) => void;
+    },
     isCancelled: () => boolean,
   ): Promise<void> {
     for (let i = 0; i < facts.length; i++) {

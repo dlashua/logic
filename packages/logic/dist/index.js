@@ -43,14 +43,18 @@ var SimpleObservable = class _SimpleObservable {
             cleanup();
           }
         }).catch((error) => {
-          safeObserver.error(error instanceof Error ? error : new Error(String(error)));
+          safeObserver.error(
+            error instanceof Error ? error : new Error(String(error))
+          );
         });
       } else {
         cleanup = result;
       }
     } catch (error) {
       if (!closed) {
-        safeObserver.error(error instanceof Error ? error : new Error(String(error)));
+        safeObserver.error(
+          error instanceof Error ? error : new Error(String(error))
+        );
       }
     }
     let unsubbed = false;
@@ -220,6 +224,22 @@ var SimpleObservable = class _SimpleObservable {
       };
     });
   }
+  reduce(reducer, initialValue) {
+    return new _SimpleObservable((observer) => {
+      let value = initialValue;
+      const sub = this.subscribe({
+        next: (v) => {
+          value = reducer(value, v);
+        },
+        complete: () => {
+          observer.next(value);
+          observer.complete?.();
+        },
+        error: (e) => observer.error?.(e)
+      });
+      return () => sub.unsubscribe();
+    });
+  }
   share(bufferSize = Number.POSITIVE_INFINITY) {
     let observers = [];
     let subscription = null;
@@ -319,6 +339,62 @@ var SimpleObservable = class _SimpleObservable {
         complete: () => {
           setTimeout(() => sub.unsubscribe(), 0);
           resolve(values);
+        }
+      });
+    });
+  }
+  firstFrom() {
+    let sub;
+    let settled = false;
+    return new Promise((resolve, reject) => {
+      sub = this.subscribe({
+        next: (value) => {
+          settled = true;
+          resolve(value);
+          setTimeout(() => sub.unsubscribe(), 0);
+        },
+        error: (e) => {
+          settled = true;
+          reject(e);
+        },
+        complete: () => {
+          if (!settled) {
+            reject(new Error("NO_VALUE_EMITTED"));
+          }
+          setTimeout(() => sub.unsubscribe(), 0);
+        }
+      });
+    });
+  }
+  pipe(next_observable) {
+    return next_observable(this);
+  }
+  lastFrom() {
+    let sub;
+    let settled = false;
+    let valueRecevied = false;
+    let finalValue;
+    return new Promise((resolve, reject) => {
+      sub = this.subscribe({
+        next: (value) => {
+          valueRecevied = true;
+          finalValue = value;
+        },
+        error: (e) => {
+          settled = true;
+          reject(e);
+        },
+        complete: () => {
+          if (!settled) {
+            if (valueRecevied) {
+              settled = true;
+              resolve(finalValue);
+            } else {
+              settled = true;
+              reject(new Error("NO_VALUE_EMITTED"));
+            }
+          }
+          setTimeout(() => sub.unsubscribe(), 0);
         }
       });
     });

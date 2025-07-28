@@ -1,20 +1,19 @@
 {
-	"compilerOptions": {
-		"target": "es2024",
-		"module": "nodenext",
-		"moduleResolution": "nodenext",
-		"allowJs": true,
-		"checkJs": true,
-		"outDir": "./dist",
-		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"skipLibCheck": false,
-		"noImplicitAny": true,
-		"rootDir": "./",
-		"allowImportingTsExtensions": true,
-		"noEmit": true
-		// "allowSyntheticDefaultImports": true,
-	},
-	"include": ["./eslint.config.js", "./vitest.config.ts"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true
+  },
+  "include": ["./eslint.config.js", "./vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

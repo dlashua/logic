@@ -1,18 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2022", // or "ESNext" for the absolute latest features
-    "module": "NodeNext", // or "ESNext" for browser environments, "Node16" for older Node.js
-    "moduleResolution": "NodeNext", // or "Bundler" if using a bundler like Webpack/Rollup
-    "lib": ["ES2022"], // or "ESNext", "DOM" for browser, add "DOM.Iterable" if needed
-    "strict": true, // Enables all strict type-checking options
-    "esModuleInterop": true, // Enables interoperability between CommonJS and ES Modules
-    "skipLibCheck": true, // Skips type checking of declaration files, improving build time
-    "forceConsistentCasingInFileNames": true, // Ensures consistent casing in file names
-    "outDir": "./dist", // Output directory for compiled JavaScript
-    "declaration": true, // Generates declaration files (.d.ts) for libraries
-    "sourceMap": true, // Generates source maps for debugging
-    "allowSyntheticDefaultImports": true, // Allows default imports from modules with no default export
-    "resolveJsonModule": true // Allows importing .json files as modules
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "src/index.ts", "tsup.config.ts"],
   "exclude": ["node_modules", "dist"]

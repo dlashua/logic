@@ -1,5 +1,3 @@
-import { Subst as Subst$1, Goal as Goal$1, Term as Term$1 } from 'logic';
-
 /**
  * Simple observable implementation focused on the needs of logic programming
  */
@@ -430,9 +428,9 @@ declare function collect_streamo(valueVar: Term, outList: Term, drop?: boolean):
  *
  * @param processor - Function that receives all buffered substitutions and observer to emit results
  */
-declare function collect_and_process_base(processor: (buffer: Subst$1[], observer: {
-    next: (s: Subst$1) => void;
-}) => void): Goal$1;
+declare function collect_and_process_base(processor: (buffer: Subst[], observer: {
+    next: (s: Subst) => void;
+}) => void): Goal;
 /**
  * Generic stream-based grouping function - the foundation for all group_by_*_streamo functions.
  * Groups substitutions by keyVar and applies an aggregator function to each group.
@@ -444,7 +442,7 @@ declare function collect_and_process_base(processor: (buffer: Subst$1[], observe
  * @param drop - If true, create fresh substitutions; if false, preserve original variables
  * @param aggregator - Function that takes (values, substitutions) and returns aggregated result
  */
-declare function group_by_streamo_base(keyVar: Term$1, valueVar: Term$1 | null, outVar: Term$1, drop: boolean, aggregator: (values: any[], substitutions: Subst$1[]) => any): Goal$1;
+declare function group_by_streamo_base(keyVar: Term, valueVar: Term | null, outVar: Term, drop: boolean, aggregator: (values: any[], substitutions: Subst[]) => any): Goal;
 
 /**
  * aggregateRelFactory: generic helper for collecto, collect_distincto, counto.

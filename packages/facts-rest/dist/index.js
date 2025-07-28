@@ -492,3 +492,4 @@ var makeRelREST = async (restConfig, config) => {
 export {
   makeRelREST
 };
+//# sourceMappingURL=index.js.map

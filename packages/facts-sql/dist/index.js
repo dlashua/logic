@@ -100,3 +100,4 @@ var makeRelDB = async (knex_connect_options, options, configOverrides) => {
 export {
   makeRelDB
 };
+//# sourceMappingURL=index.js.map

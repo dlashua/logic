@@ -535,7 +535,7 @@ var makeFactsObj = (keys, config, factConfig) => {
   const factory = new FactRelationFactory({
     logger,
     config: factConfig || {
-      enableLogging: true,
+      enableLogging: false,
       enableIndexing: true
     }
   });
@@ -574,3 +574,4 @@ export {
   makeFactsObjSym,
   makeFactsSym
 };
+//# sourceMappingURL=index.js.map

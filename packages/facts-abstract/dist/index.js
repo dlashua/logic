@@ -895,3 +895,4 @@ export {
   DefaultGoalManager,
   createAbstractRelationSystem
 };
+//# sourceMappingURL=index.js.map

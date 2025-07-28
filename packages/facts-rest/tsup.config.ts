@@ -5,5 +5,8 @@ export default defineConfig(() => {
     format: ["esm"],
     entryPoints: ["src/index.ts"],
     dts: true,
+    clean: true,
+    splitting: false,
+    sourcemap: true,
   };
 });

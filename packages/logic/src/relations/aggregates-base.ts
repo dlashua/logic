@@ -10,8 +10,8 @@
  * functions in aggregates.ts instead.
  */
 
-import type { Goal, Observable, Subst, Term } from "logic";
-import { SimpleObservable, unify, walk } from "logic";
+import type { Goal, Observable, Subst, Term } from "../index.js";
+import { SimpleObservable, unify, walk } from "../index.js";
 
 /**
  * Helper: collect all substitutions from a stream, then process them all at once.

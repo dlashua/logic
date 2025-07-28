@@ -1,4 +1,4 @@
-import { type Goal, Subst, type Term } from "../core/types.ts";
+import type { Goal, Term } from "logic";
 
 export interface FactRelation {
   (...query: Term[]): Goal;

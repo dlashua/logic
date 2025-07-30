@@ -1,13 +1,13 @@
 // Simple Observable Implementation
 // -----------------------------------------------------------------------------
 import {
-  merge as mergeOperator,
-  reduce as reduceOperator,
-  map as mapOperator,
-  take as takeOperator,
   filter as filterOperator,
   flatMap as flatMapOperator,
+  map as mapOperator,
+  merge as mergeOperator,
+  reduce as reduceOperator,
   share as shareOperator,
+  take as takeOperator,
 } from "./operators.js";
 import type { Observable, Observer, Subscription } from "./types.js";
 

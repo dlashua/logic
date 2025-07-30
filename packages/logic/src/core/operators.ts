@@ -1,5 +1,5 @@
 import { SimpleObservable } from "./observable.js";
-import type { Subscription, Observer } from "./types.js";
+import type { Observer, Subscription } from "./types.js";
 
 type ObserverOperator<A, B> = (
   input$: SimpleObservable<A>,

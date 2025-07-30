@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest run",
     "test:ui": "vitest --ui",
     "test:watch": "vitest"

@@ -1,6 +1,4 @@
-/**
- * Simple observable implementation focused on the needs of logic programming
- */
+type OperatorFunction<T, R> = (source: SimpleObservable<T>) => SimpleObservable<R>;
 declare class SimpleObservable<T> implements Observable<T> {
     private producer;
     constructor(producer: (observer: Observer<T>) => (() => void) | void | Promise<(() => void) | undefined>);
@@ -12,17 +10,26 @@ declare class SimpleObservable<T> implements Observable<T> {
     static fromPromise<T>(promise: Promise<T>): Observable<T>;
     toArray(): Promise<T[]>;
     firstFrom(): Promise<T>;
-    pipe<V>(next_observable: (input$: SimpleObservable<T>) => SimpleObservable<V>): SimpleObservable<V>;
+    lift<V>(next_observable: (input$: SimpleObservable<T>) => SimpleObservable<V>): SimpleObservable<V>;
     lastFrom(): Promise<T>;
     filter(predicate: (value: T) => boolean): SimpleObservable<T>;
     flatMap<U>(transform: (value: T) => SimpleObservable<U>): SimpleObservable<U>;
     map<U>(transform: (value: T) => U): SimpleObservable<U>;
     merge<R>(other: SimpleObservable<R>): SimpleObservable<T | R>;
+    pipe(): SimpleObservable<T>;
+    pipe<A>(op1: OperatorFunction<T, A>): SimpleObservable<A>;
+    pipe<A, B>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>): SimpleObservable<B>;
+    pipe<A, B, C>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>): SimpleObservable<C>;
+    pipe<A, B, C, D>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>): SimpleObservable<D>;
+    pipe<A, B, C, D, E>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>): SimpleObservable<E>;
+    pipe<A, B, C, D, E, F>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>): SimpleObservable<F>;
+    pipe<A, B, C, D, E, F, G>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>): SimpleObservable<G>;
+    pipe<A, B, C, D, E, F, G, H>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>, op8: OperatorFunction<G, H>): SimpleObservable<H>;
+    pipe<A, B, C, D, E, F, G, H, I>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>, op8: OperatorFunction<G, H>, op9: OperatorFunction<H, I>): SimpleObservable<I>;
     reduce<Q>(reducer: (accumulator: Q, value: unknown) => Q, initalValue: unknown): SimpleObservable<Q>;
     share(bufferSize?: number): SimpleObservable<T>;
     take(count: number): SimpleObservable<T>;
 }
-type ObsToObs = (input: SimpleObservable<any>) => SimpleObservable<any>;
 declare const observable: <T>(producer: (observer: Observer<T>) => (() => void) | undefined) => SimpleObservable<T>;
 
 /**
@@ -291,6 +298,25 @@ declare function createEnrichedSubst(s: Subst, type: string, conjGoals: Goal[], 
  * Unified helper for enriching input with group metadata
  */
 declare function enrichGroupInput(type: string, conjGoals: Goal[], disjGoals: Goal[], fn: (enrichedInput$: SimpleObservable<Subst>) => SimpleObservable<Subst>): (input$: SimpleObservable<Subst>) => SimpleObservable<Subst>;
+
+type ObserverOperator<A, B> = (input$: SimpleObservable<A>) => SimpleObservable<B>;
+declare function merge<A, B>(obsB: SimpleObservable<B>): (obsA: SimpleObservable<A>) => SimpleObservable<A | B>;
+declare function reduce<V>(reducer: (accumulator: V, value: unknown) => V, initialValue: unknown): ObserverOperator<unknown, V>;
+declare function map<T, U>(transform: (value: T) => U): (input$: SimpleObservable<T>) => SimpleObservable<U>;
+declare function take<T>(count: number): (input$: SimpleObservable<T>) => SimpleObservable<T>;
+declare function filter<T>(predicate: (value: T) => boolean): (input$: SimpleObservable<T>) => SimpleObservable<T>;
+declare function flatMap<T, U>(transform: (value: T) => SimpleObservable<U>): (input$: SimpleObservable<T>) => SimpleObservable<U>;
+declare function share<T>(bufferSize?: number): (input$: SimpleObservable<T>) => SimpleObservable<T>;
+declare function pipe<T>(): OperatorFunction<T, T>;
+declare function pipe<T, A>(op1: OperatorFunction<T, A>): OperatorFunction<T, A>;
+declare function pipe<T, A, B>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>): OperatorFunction<T, B>;
+declare function pipe<T, A, B, C>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>): OperatorFunction<T, C>;
+declare function pipe<T, A, B, C, D>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>): OperatorFunction<T, D>;
+declare function pipe<T, A, B, C, D, E>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>): OperatorFunction<T, E>;
+declare function pipe<T, A, B, C, D, E, F>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>): OperatorFunction<T, F>;
+declare function pipe<T, A, B, C, D, E, F, G>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>): OperatorFunction<T, G>;
+declare function pipe<T, A, B, C, D, E, F, G, H>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>, op8: OperatorFunction<G, H>): OperatorFunction<T, H>;
+declare function pipe<T, A, B, C, D, E, F, G, H, I>(op1: OperatorFunction<T, A>, op2: OperatorFunction<A, B>, op3: OperatorFunction<B, C>, op4: OperatorFunction<C, D>, op5: OperatorFunction<D, E>, op6: OperatorFunction<E, F>, op7: OperatorFunction<F, G>, op8: OperatorFunction<G, H>, op9: OperatorFunction<H, I>): OperatorFunction<T, I>;
 
 /**
  * Creates a proxy object that automatically creates logic variables on access.
@@ -792,4 +818,4 @@ declare function aggregateVar(sourceVar: Var, subgoal: Goal): Goal;
  */
 declare function aggregateVarMulti(groupVars: Var[], aggVars: Var[], subgoal: Goal): Goal;
 
-export { type BaseConfig, CHECK_LATER, type CacheConfig, type CacheType, type ConsNode, GOAL_GROUP_ALL_GOALS, GOAL_GROUP_CONJ_GOALS, GOAL_GROUP_ID, GOAL_GROUP_PATH, type Goal, type GoalFunction, type IndexManager, type IndexMap, type LiftableFunction, type LiftedArgs, type LogConfig, Logger, type LoggerConfig, type LogicList, type NilNode, type ObsToObs, type Observable, type Observer, type QueryParts, type QueryResult, type RunResult, SUSPENDED_CONSTRAINTS, SimpleObservable, type StreamConfig, type StreamResult, Subquery, type Subscription, type Subst, type SuspendedConstraint, type Term, type Var, type WhereClause, addSuspendToSubst, aggregateRelFactory, aggregateVar, aggregateVarMulti, alldistincto, and, appendo, arrayToLogicList, baseUnify, branch, chainGoals, collect_and_process_base, collect_distincto, collect_streamo, collecto, conde, conj, cons, count_distincto, count_value_streamo, count_valueo, counto, createEnrichedSubst, createLogicVarProxy, disj, dividebyo, eitherOr, enrichGroupInput, eq, extendSubst, extract, extractEach, fail, failo, firsto, fresh, getDefaultLogger, getSuspendsFromSubst, groundo, groupAggregateRelFactory, group_by_collect_distinct_streamo, group_by_collect_streamo, group_by_collecto, group_by_count_streamo, group_by_counto, group_by_streamo_base, gteo, gto, gv1_not, ifte, indexUtils, intersect, isCons, isIndexable, isLogicList, isNil, isVar, lengtho, lift, liftGoal, logicList, logicListToArray, lteo, lto, lvar, makeSuspendHandler, mapo, maxo, membero, mino, minuso, multo, neqo, nextGroupId, nil, nonGroundo, not, observable, old_neqo, old_not, once, onceo, or, patternUtils, permuteo, pluso, project, projectJsonata, query, queryUtils, removeFirsto, removeSuspendFromSubst, resetVarCounter, resto, run, sort_by_streamo, substLog, succeedo, suspendable, take_streamo, thruCount, timeout, unificationUtils, unify, unifyWithConstraints, uniqueo, wakeUpSuspends, walk };
+export { type BaseConfig, CHECK_LATER, type CacheConfig, type CacheType, type ConsNode, GOAL_GROUP_ALL_GOALS, GOAL_GROUP_CONJ_GOALS, GOAL_GROUP_ID, GOAL_GROUP_PATH, type Goal, type GoalFunction, type IndexManager, type IndexMap, type LiftableFunction, type LiftedArgs, type LogConfig, Logger, type LoggerConfig, type LogicList, type NilNode, type Observable, type Observer, type OperatorFunction, type QueryParts, type QueryResult, type RunResult, SUSPENDED_CONSTRAINTS, SimpleObservable, type StreamConfig, type StreamResult, Subquery, type Subscription, type Subst, type SuspendedConstraint, type Term, type Var, type WhereClause, addSuspendToSubst, aggregateRelFactory, aggregateVar, aggregateVarMulti, alldistincto, and, appendo, arrayToLogicList, baseUnify, branch, chainGoals, collect_and_process_base, collect_distincto, collect_streamo, collecto, conde, conj, cons, count_distincto, count_value_streamo, count_valueo, counto, createEnrichedSubst, createLogicVarProxy, disj, dividebyo, eitherOr, enrichGroupInput, eq, extendSubst, extract, extractEach, fail, failo, filter, firsto, flatMap, fresh, getDefaultLogger, getSuspendsFromSubst, groundo, groupAggregateRelFactory, group_by_collect_distinct_streamo, group_by_collect_streamo, group_by_collecto, group_by_count_streamo, group_by_counto, group_by_streamo_base, gteo, gto, gv1_not, ifte, indexUtils, intersect, isCons, isIndexable, isLogicList, isNil, isVar, lengtho, lift, liftGoal, logicList, logicListToArray, lteo, lto, lvar, makeSuspendHandler, map, mapo, maxo, membero, merge, mino, minuso, multo, neqo, nextGroupId, nil, nonGroundo, not, observable, old_neqo, old_not, once, onceo, or, patternUtils, permuteo, pipe, pluso, project, projectJsonata, query, queryUtils, reduce, removeFirsto, removeSuspendFromSubst, resetVarCounter, resto, run, share, sort_by_streamo, substLog, succeedo, suspendable, take, take_streamo, thruCount, timeout, unificationUtils, unify, unifyWithConstraints, uniqueo, wakeUpSuspends, walk };

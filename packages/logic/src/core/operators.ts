@@ -1,4 +1,4 @@
-import { SimpleObservable } from "./observable.js";
+import { type OperatorFunction, SimpleObservable } from "./observable.js";
 import type { Observer, Subscription } from "./types.js";
 
 type ObserverOperator<A, B> = (
@@ -183,7 +183,7 @@ export function share<T>(bufferSize: number = Number.POSITIVE_INFINITY) {
   let subscription: Subscription | null = null;
   let refCount = 0;
   let completed = false;
-  let lastError: any = null;
+  let lastError: unknown = null;
   const buffer: T[] = [];
 
   return (input$: SimpleObservable<T>) =>
@@ -239,4 +239,74 @@ export function share<T>(bufferSize: number = Number.POSITIVE_INFINITY) {
         }
       };
     });
+}
+
+export function pipe<T>(): OperatorFunction<T, T>;
+export function pipe<T, A>(op1: OperatorFunction<T, A>): OperatorFunction<T, A>;
+export function pipe<T, A, B>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+): OperatorFunction<T, B>;
+export function pipe<T, A, B, C>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+): OperatorFunction<T, C>;
+export function pipe<T, A, B, C, D>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+): OperatorFunction<T, D>;
+export function pipe<T, A, B, C, D, E>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+  op5: OperatorFunction<D, E>,
+): OperatorFunction<T, E>;
+export function pipe<T, A, B, C, D, E, F>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+  op5: OperatorFunction<D, E>,
+  op6: OperatorFunction<E, F>,
+): OperatorFunction<T, F>;
+export function pipe<T, A, B, C, D, E, F, G>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+  op5: OperatorFunction<D, E>,
+  op6: OperatorFunction<E, F>,
+  op7: OperatorFunction<F, G>,
+): OperatorFunction<T, G>;
+export function pipe<T, A, B, C, D, E, F, G, H>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+  op5: OperatorFunction<D, E>,
+  op6: OperatorFunction<E, F>,
+  op7: OperatorFunction<F, G>,
+  op8: OperatorFunction<G, H>,
+): OperatorFunction<T, H>;
+export function pipe<T, A, B, C, D, E, F, G, H, I>(
+  op1: OperatorFunction<T, A>,
+  op2: OperatorFunction<A, B>,
+  op3: OperatorFunction<B, C>,
+  op4: OperatorFunction<C, D>,
+  op5: OperatorFunction<D, E>,
+  op6: OperatorFunction<E, F>,
+  op7: OperatorFunction<F, G>,
+  op8: OperatorFunction<G, H>,
+  op9: OperatorFunction<H, I>,
+): OperatorFunction<T, I>;
+export function pipe(
+  // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+  ...operators: Array<OperatorFunction<any, any>>
+  // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+): OperatorFunction<any, any> {
+  return (input$) => operators.reduce((prev$, op) => op(prev$), input$);
 }

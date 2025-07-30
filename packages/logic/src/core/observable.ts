@@ -1,5 +1,3 @@
-// Simple Observable Implementation
-// -----------------------------------------------------------------------------
 import {
   filter as filterOperator,
   flatMap as flatMapOperator,
@@ -11,12 +9,13 @@ import {
 } from "./operators.js";
 import type { Observable, Observer, Subscription } from "./types.js";
 
-const isPromise = (v: any): v is Promise<any> =>
-  !!v && typeof v.then === "function";
+export type OperatorFunction<T, R> = (
+  source: SimpleObservable<T>,
+) => SimpleObservable<R>;
 
-/**
- * Simple observable implementation focused on the needs of logic programming
- */
+const isPromise = (v: unknown): v is Promise<unknown> =>
+  !!v && typeof (v as { then?: unknown }).then === "function";
+
 export class SimpleObservable<T> implements Observable<T> {
   private producer: (
     observer: Observer<T>,
@@ -39,7 +38,7 @@ export class SimpleObservable<T> implements Observable<T> {
       next: (value: T) => {
         if (!closed && observer.next) {
           if (isPromise(value)) {
-            value.then((v) => observer.next(v));
+            value.then((v) => observer.next(v as T));
           } else {
             observer.next(value);
           }
@@ -103,7 +102,6 @@ export class SimpleObservable<T> implements Observable<T> {
     };
   }
 
-  // Static factory methods
   static of<T>(...values: T[]): SimpleObservable<T> {
     return new SimpleObservable<T>((observer) => {
       for (const value of values) {
@@ -145,7 +143,7 @@ export class SimpleObservable<T> implements Observable<T> {
 
       return () => {
         cancelled = true;
-        generator.return?.(undefined as any);
+        generator.return?.(undefined as unknown);
       };
     });
   }
@@ -161,9 +159,6 @@ export class SimpleObservable<T> implements Observable<T> {
     });
   }
 
-  // Operators
-
-  // Utility to collect all values into an array
   toArray(): Promise<T[]> {
     let sub: Subscription;
     return new Promise<T[]>((resolve, reject) => {
@@ -203,7 +198,7 @@ export class SimpleObservable<T> implements Observable<T> {
     });
   }
 
-  pipe<V>(
+  lift<V>(
     next_observable: (input$: SimpleObservable<T>) => SimpleObservable<V>,
   ): SimpleObservable<V> {
     return next_observable(this);
@@ -257,6 +252,79 @@ export class SimpleObservable<T> implements Observable<T> {
     return mergeOperator<T, R>(other)(this);
   }
 
+  pipe(): SimpleObservable<T>;
+  pipe<A>(op1: OperatorFunction<T, A>): SimpleObservable<A>;
+  pipe<A, B>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+  ): SimpleObservable<B>;
+  pipe<A, B, C>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+  ): SimpleObservable<C>;
+  pipe<A, B, C, D>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+  ): SimpleObservable<D>;
+  pipe<A, B, C, D, E>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+    op5: OperatorFunction<D, E>,
+  ): SimpleObservable<E>;
+  pipe<A, B, C, D, E, F>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+    op5: OperatorFunction<D, E>,
+    op6: OperatorFunction<E, F>,
+  ): SimpleObservable<F>;
+  pipe<A, B, C, D, E, F, G>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+    op5: OperatorFunction<D, E>,
+    op6: OperatorFunction<E, F>,
+    op7: OperatorFunction<F, G>,
+  ): SimpleObservable<G>;
+  pipe<A, B, C, D, E, F, G, H>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+    op5: OperatorFunction<D, E>,
+    op6: OperatorFunction<E, F>,
+    op7: OperatorFunction<F, G>,
+    op8: OperatorFunction<G, H>,
+  ): SimpleObservable<H>;
+  pipe<A, B, C, D, E, F, G, H, I>(
+    op1: OperatorFunction<T, A>,
+    op2: OperatorFunction<A, B>,
+    op3: OperatorFunction<B, C>,
+    op4: OperatorFunction<C, D>,
+    op5: OperatorFunction<D, E>,
+    op6: OperatorFunction<E, F>,
+    op7: OperatorFunction<F, G>,
+    op8: OperatorFunction<G, H>,
+    op9: OperatorFunction<H, I>,
+  ): SimpleObservable<I>;
+  // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+  pipe(...operators: OperatorFunction<any, any>[]): SimpleObservable<any> {
+    return operators.length === 0
+      ? this
+      : // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+        (operators as Array<OperatorFunction<any, any>>).reduce<
+          // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+          SimpleObservable<any>
+        >((prev$, op) => op(prev$), this);
+  }
+
   reduce<Q>(
     reducer: (accumulator: Q, value: unknown) => Q,
     initalValue: unknown,
@@ -273,8 +341,6 @@ export class SimpleObservable<T> implements Observable<T> {
   }
 }
 
-export type ObsToObs = (input: SimpleObservable<any>) => SimpleObservable<any>;
-// Export the factory function for convenience
 export const observable = <T>(
   producer: (observer: Observer<T>) => (() => void) | undefined,
 ) => new SimpleObservable(producer);

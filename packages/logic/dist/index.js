@@ -207,6 +207,9 @@ function share(bufferSize = Number.POSITIVE_INFINITY) {
     };
   });
 }
+function pipe(...operators) {
+  return (input$) => operators.reduce((prev$, op) => op(prev$), input$);
+}
 
 // src/core/observable.ts
 var isPromise = (v) => !!v && typeof v.then === "function";
@@ -280,7 +283,6 @@ var SimpleObservable = class _SimpleObservable {
       }
     };
   }
-  // Static factory methods
   static of(...values) {
     return new _SimpleObservable((observer) => {
       for (const value of values) {
@@ -329,8 +331,6 @@ var SimpleObservable = class _SimpleObservable {
       }).catch((error) => observer.error?.(error));
     });
   }
-  // Operators
-  // Utility to collect all values into an array
   toArray() {
     let sub;
     return new Promise((resolve, reject) => {
@@ -368,7 +368,7 @@ var SimpleObservable = class _SimpleObservable {
       });
     });
   }
-  pipe(next_observable) {
+  lift(next_observable) {
     return next_observable(this);
   }
   lastFrom() {
@@ -413,6 +413,13 @@ var SimpleObservable = class _SimpleObservable {
   }
   merge(other) {
     return merge(other)(this);
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+  pipe(...operators) {
+    return operators.length === 0 ? this : (
+      // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
+      operators.reduce((prev$, op) => op(prev$), this)
+    );
   }
   reduce(reducer, initalValue) {
     return reduce(reducer, initalValue)(this);
@@ -3262,7 +3269,9 @@ export {
   extractEach,
   fail,
   failo,
+  filter,
   firsto,
+  flatMap,
   fresh,
   getDefaultLogger,
   getSuspendsFromSubst,
@@ -3294,9 +3303,11 @@ export {
   lto,
   lvar,
   makeSuspendHandler,
+  map,
   mapo,
   maxo,
   membero,
+  merge,
   mino,
   minuso,
   multo,
@@ -3313,20 +3324,24 @@ export {
   or,
   patternUtils,
   permuteo,
+  pipe,
   pluso,
   project,
   projectJsonata,
   query,
   queryUtils,
+  reduce,
   removeFirsto,
   removeSuspendFromSubst,
   resetVarCounter,
   resto,
   run,
+  share,
   sort_by_streamo,
   substLog,
   succeedo,
   suspendable,
+  take,
   take_streamo,
   thruCount,
   timeout,

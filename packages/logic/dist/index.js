@@ -1,6 +1,213 @@
 // src/core/combinators.ts
 import jsonata from "jsonata";
 
+// src/core/operators.ts
+function merge(obsB) {
+  return (obsA) => new SimpleObservable((observer) => {
+    let completed = 0;
+    const subscriptions = [
+      obsA.subscribe({
+        next: (r) => {
+          observer.next(r);
+        },
+        error: observer.error,
+        complete: () => {
+          completed++;
+          if (completed === 2) {
+            observer.complete?.();
+          }
+        }
+      }),
+      obsB.subscribe({
+        next: (r) => {
+          observer.next(r);
+        },
+        error: observer.error,
+        complete: () => {
+          completed++;
+          if (completed === 2) {
+            observer.complete?.();
+          }
+        }
+      })
+    ];
+    return () => {
+      subscriptions.forEach((sub) => sub.unsubscribe());
+    };
+  });
+}
+function reduce(reducer, initialValue) {
+  return (input$) => new SimpleObservable((observer) => {
+    let value = initialValue;
+    const sub = input$.subscribe({
+      next: (v) => {
+        value = reducer(value, v);
+      },
+      complete: () => {
+        observer.next(value);
+        observer.complete?.();
+      },
+      error: (e) => observer.error?.(e)
+    });
+    return () => sub.unsubscribe();
+  });
+}
+function map(transform) {
+  return (input$) => new SimpleObservable((observer) => {
+    const subscription = input$.subscribe({
+      next: (value) => observer.next(transform(value)),
+      error: observer.error,
+      complete: observer.complete
+    });
+    return () => subscription.unsubscribe();
+  });
+}
+function take(count) {
+  return (input$) => new SimpleObservable((observer) => {
+    let taken = 0;
+    let upstreamUnsubscribed = false;
+    const subscription = input$.subscribe({
+      next: (value) => {
+        if (taken < count) {
+          observer.next(value);
+          taken++;
+          if (taken >= count) {
+            observer.complete?.();
+            setTimeout(() => {
+              subscription.unsubscribe();
+              upstreamUnsubscribed = true;
+            }, 0);
+          }
+        }
+      },
+      error: (err) => {
+        observer.error?.(err);
+      },
+      complete: () => {
+        observer.complete?.();
+      }
+    });
+    return () => {
+      if (!upstreamUnsubscribed) {
+        subscription.unsubscribe();
+      }
+      upstreamUnsubscribed = true;
+    };
+  });
+}
+function filter(predicate) {
+  return (input$) => new SimpleObservable((observer) => {
+    const subscription = input$.subscribe({
+      next: (value) => {
+        if (predicate(value)) {
+          observer.next(value);
+        }
+      },
+      error: observer.error,
+      complete: observer.complete
+    });
+    return () => subscription.unsubscribe();
+  });
+}
+function flatMap(transform) {
+  return (input$) => new SimpleObservable((observer) => {
+    const subscriptions = [];
+    let outerCompleted = false;
+    let activeInnerCount = 0;
+    let scheduledCompletion = false;
+    let fullyComplete = false;
+    const checkCompletion = () => {
+      if (outerCompleted && activeInnerCount === 0 && !scheduledCompletion) {
+        scheduledCompletion = true;
+        setTimeout(() => {
+          observer.complete?.();
+          fullyComplete = true;
+        }, 0);
+      }
+    };
+    const outerSubscription = input$.subscribe({
+      next: (value) => {
+        activeInnerCount++;
+        const innerObservable = transform(value);
+        const innerSubscription = innerObservable.subscribe({
+          next: observer.next,
+          error: observer.error,
+          complete: () => {
+            activeInnerCount--;
+            checkCompletion();
+          }
+        });
+        subscriptions.push(innerSubscription);
+      },
+      error: observer.error,
+      complete: () => {
+        outerCompleted = true;
+        setTimeout(() => checkCompletion(), 0);
+      }
+    });
+    subscriptions.push(outerSubscription);
+    return () => {
+      if (!fullyComplete) {
+        subscriptions.forEach((sub) => sub.unsubscribe());
+      }
+    };
+  });
+}
+function share(bufferSize = Number.POSITIVE_INFINITY) {
+  let observers = [];
+  let subscription = null;
+  let refCount = 0;
+  let completed = false;
+  let lastError = null;
+  const buffer = [];
+  return (input$) => new SimpleObservable((observer) => {
+    buffer.forEach((value) => observer.next?.(value));
+    if (completed) {
+      if (lastError !== null) {
+        observer.error?.(lastError);
+      } else {
+        observer.complete?.();
+      }
+      return;
+    }
+    observers.push(observer);
+    refCount++;
+    if (subscription === null) {
+      subscription = input$.subscribe({
+        next: (value) => {
+          buffer.push(value);
+          if (buffer.length > bufferSize) {
+            buffer.shift();
+          }
+          observers.slice().forEach((o) => o.next?.(value));
+        },
+        error: (err) => {
+          lastError = err;
+          completed = true;
+          observers.slice().forEach((o) => o.error?.(err));
+          observers = [];
+        },
+        complete: () => {
+          completed = true;
+          observers.slice().forEach((o) => o.complete?.());
+          observers = [];
+        }
+      });
+    }
+    return () => {
+      observers = observers.filter((o) => o !== observer);
+      refCount--;
+      if (refCount === 0 && subscription) {
+        subscription.unsubscribe();
+        subscription = null;
+        completed = false;
+        lastError = null;
+        buffer.length = 0;
+      }
+    };
+  });
+}
+
 // src/core/observable.ts
 var isPromise = (v) => !!v && typeof v.then === "function";
 var SimpleObservable = class _SimpleObservable {
@@ -82,6 +289,9 @@ var SimpleObservable = class _SimpleObservable {
       observer.complete?.();
     });
   }
+  static from(values) {
+    return _SimpleObservable.of(...values);
+  }
   static empty() {
     return new _SimpleObservable((observer) => {
       observer.complete?.();
@@ -119,215 +329,7 @@ var SimpleObservable = class _SimpleObservable {
       }).catch((error) => observer.error?.(error));
     });
   }
-  static fromAsync(asyncProducer) {
-    return new _SimpleObservable(asyncProducer);
-  }
   // Operators
-  map(transform) {
-    return new _SimpleObservable((observer) => {
-      const subscription = this.subscribe({
-        next: (value) => observer.next(transform(value)),
-        error: observer.error,
-        complete: observer.complete
-      });
-      return () => subscription.unsubscribe();
-    });
-  }
-  flatMap(transform) {
-    return new _SimpleObservable((observer) => {
-      const subscriptions = [];
-      let outerCompleted = false;
-      let activeInnerCount = 0;
-      let scheduledCompletion = false;
-      let fullyComplete = false;
-      const checkCompletion = () => {
-        if (outerCompleted && activeInnerCount === 0 && !scheduledCompletion) {
-          scheduledCompletion = true;
-          setTimeout(() => {
-            observer.complete?.();
-            fullyComplete = true;
-          }, 0);
-        }
-      };
-      const outerSubscription = this.subscribe({
-        next: (value) => {
-          activeInnerCount++;
-          const innerObservable = transform(value);
-          const innerSubscription = innerObservable.subscribe({
-            next: observer.next,
-            error: observer.error,
-            complete: () => {
-              activeInnerCount--;
-              checkCompletion();
-            }
-          });
-          subscriptions.push(innerSubscription);
-        },
-        error: observer.error,
-        complete: () => {
-          outerCompleted = true;
-          setTimeout(() => checkCompletion(), 0);
-        }
-      });
-      subscriptions.push(outerSubscription);
-      return () => {
-        if (!fullyComplete) {
-          subscriptions.forEach((sub) => sub.unsubscribe());
-        }
-      };
-    });
-  }
-  filter(predicate) {
-    return new _SimpleObservable((observer) => {
-      const subscription = this.subscribe({
-        next: (value) => {
-          if (predicate(value)) {
-            observer.next(value);
-          }
-        },
-        error: observer.error,
-        complete: observer.complete
-      });
-      return () => subscription.unsubscribe();
-    });
-  }
-  take(count) {
-    return new _SimpleObservable((observer) => {
-      let taken = 0;
-      let upstreamUnsubscribed = false;
-      const subscription = this.subscribe({
-        next: (value) => {
-          if (taken < count) {
-            observer.next(value);
-            taken++;
-            if (taken >= count) {
-              observer.complete?.();
-              setTimeout(() => {
-                subscription.unsubscribe();
-                upstreamUnsubscribed = true;
-              }, 0);
-            }
-          }
-        },
-        error: (err) => {
-          observer.error?.(err);
-        },
-        complete: () => {
-          observer.complete?.();
-        }
-      });
-      return () => {
-        if (!upstreamUnsubscribed) {
-          subscription.unsubscribe();
-        }
-        upstreamUnsubscribed = true;
-      };
-    });
-  }
-  reduce(reducer, initialValue) {
-    return new _SimpleObservable((observer) => {
-      let value = initialValue;
-      const sub = this.subscribe({
-        next: (v) => {
-          value = reducer(value, v);
-        },
-        complete: () => {
-          observer.next(value);
-          observer.complete?.();
-        },
-        error: (e) => observer.error?.(e)
-      });
-      return () => sub.unsubscribe();
-    });
-  }
-  share(bufferSize = Number.POSITIVE_INFINITY) {
-    let observers = [];
-    let subscription = null;
-    let refCount = 0;
-    let completed = false;
-    let lastError = null;
-    const buffer = [];
-    return new _SimpleObservable((observer) => {
-      buffer.forEach((value) => observer.next?.(value));
-      if (completed) {
-        if (lastError !== null) {
-          observer.error?.(lastError);
-        } else {
-          observer.complete?.();
-        }
-        return;
-      }
-      observers.push(observer);
-      refCount++;
-      if (subscription === null) {
-        subscription = this.subscribe({
-          next: (value) => {
-            buffer.push(value);
-            if (buffer.length > bufferSize) {
-              buffer.shift();
-            }
-            observers.slice().forEach((o) => o.next?.(value));
-          },
-          error: (err) => {
-            lastError = err;
-            completed = true;
-            observers.slice().forEach((o) => o.error?.(err));
-            observers = [];
-          },
-          complete: () => {
-            completed = true;
-            observers.slice().forEach((o) => o.complete?.());
-            observers = [];
-          }
-        });
-      }
-      return () => {
-        observers = observers.filter((o) => o !== observer);
-        refCount--;
-        if (refCount === 0 && subscription) {
-          subscription.unsubscribe();
-          subscription = null;
-          completed = false;
-          lastError = null;
-          buffer.length = 0;
-        }
-      };
-    });
-  }
-  merge(other) {
-    return new _SimpleObservable((observer) => {
-      let completed = 0;
-      const subscriptions = [
-        this.subscribe({
-          next: (r) => {
-            observer.next(r);
-          },
-          error: observer.error,
-          complete: () => {
-            completed++;
-            if (completed === 2) {
-              observer.complete?.();
-            }
-          }
-        }),
-        other.subscribe({
-          next: (r) => {
-            observer.next(r);
-          },
-          error: observer.error,
-          complete: () => {
-            completed++;
-            if (completed === 2) {
-              observer.complete?.();
-            }
-          }
-        })
-      ];
-      return () => {
-        subscriptions.forEach((sub) => sub.unsubscribe());
-      };
-    });
-  }
   // Utility to collect all values into an array
   toArray() {
     let sub;
@@ -398,6 +400,28 @@ var SimpleObservable = class _SimpleObservable {
         }
       });
     });
+  }
+  // Fluent Operators
+  filter(predicate) {
+    return filter(predicate)(this);
+  }
+  flatMap(transform) {
+    return flatMap(transform)(this);
+  }
+  map(transform) {
+    return map(transform)(this);
+  }
+  merge(other) {
+    return merge(other)(this);
+  }
+  reduce(reducer, initalValue) {
+    return reduce(reducer, initalValue)(this);
+  }
+  share(bufferSize = Number.POSITIVE_INFINITY) {
+    return share(bufferSize)(this);
+  }
+  take(count) {
+    return take(count)(this);
   }
 };
 var observable = (producer) => new SimpleObservable(producer);

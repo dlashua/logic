@@ -5,9 +5,9 @@ import {
   getDefaultLogger,
   isVar,
   type Logger,
-  SimpleObservable,
   walk,
 } from "logic";
+import { SimpleObservable } from "observable";
 import {
   buildWhereConditions,
   canMergeQueries,

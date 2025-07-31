@@ -1,4 +1,6 @@
 import jsonata from "jsonata";
+import type { Observer, Subscription } from "observable";
+import { SimpleObservable } from "observable";
 import {
   arrayToLogicList,
   enrichGroupInput,
@@ -7,13 +9,10 @@ import {
   unify,
   walk,
 } from "./kernel.js";
-import { SimpleObservable } from "./observable.js";
 import type {
   Goal,
   LiftableFunction,
   LiftedArgs,
-  Observer,
-  Subscription,
   Subst,
   Term,
   Var,

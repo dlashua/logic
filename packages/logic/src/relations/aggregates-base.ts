@@ -9,9 +9,10 @@
  * Functions ending in _base are infrastructure - use the public aggregation
  * functions in aggregates.ts instead.
  */
-
-import type { Goal, Observable, Subst, Term } from "../index.js";
-import { SimpleObservable, unify, walk } from "../index.js";
+import type { Observable } from "observable";
+import { SimpleObservable } from "observable";
+import type { Goal, Subst, Term } from "../index.js";
+import { unify, walk } from "../index.js";
 
 /**
  * Helper: collect all substitutions from a stream, then process them all at once.

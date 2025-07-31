@@ -11,7 +11,7 @@ import {
   unify,
   walk,
 } from "../core/kernel.js";
-import { SimpleObservable } from "../core/observable.js";
+import { SimpleObservable } from "observable";
 import type { Goal, LogicList, Subst, Term } from "../core/types.js";
 
 export function membero(x: Term, list: Term): Goal {

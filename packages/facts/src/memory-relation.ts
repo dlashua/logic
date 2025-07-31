@@ -4,13 +4,11 @@ import {
   isVar,
   type Logger,
   queryUtils,
-  SimpleObservable,
   type Subst,
   type Term,
   unificationUtils,
-  unify,
-  walk,
 } from "logic";
+import { SimpleObservable } from "observable";
 import type { FactRelation, FactRelationConfig } from "./types.js";
 
 export class MemoryRelation {

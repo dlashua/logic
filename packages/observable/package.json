@@ -1,5 +1,5 @@
 {
-  "name": "facts",
+  "name": "observable",
   "version": "0.0.1",
   "description": "",
   "type": "module",
@@ -22,9 +22,8 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.10.0",
-  "devDependencies": {},
-  "dependencies": {
-    "logic": "workspace:*",
-    "observable": "workspace:*"
-  }
+  "devDependencies": {
+    "@types/node": "^22.16.5"
+  },
+  "dependencies": {}
 }

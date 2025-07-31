@@ -1,41 +1,24 @@
+import { makeFacts, makeFactsObj } from "facts";
 import {
+  and,
+  collect_distincto,
   collecto,
   eitherOr,
   eq,
-  extract,
-  ifte,
+  fresh,
   membero,
+  or,
   query,
-  run,
+  uniqueo,
+  type Term,
 } from "logic";
-import { makeFacts } from "facts";
 
-const parentOf = makeFacts();
-const favColor = makeFacts();
-
-parentOf.set("celeste", "daniel");
-parentOf.set("james", "daniel");
-parentOf.set("jackson", "daniel");
-
-parentOf.set("celeste", "jen");
-parentOf.set("liam", "david");
-parentOf.set("daniel", "rick");
-parentOf.set("david", "rick");
-parentOf.set("jen", "gail");
-favColor.set("daniel", "blue");
-favColor.set("jen", "pink");
-favColor.set("celeste", "yellow");
-favColor.set("liam", "yellow");
+const people = makeFactsObj(["name", "vzid", "managerVzid"]);
 
 const start = Date.now();
 const results = await query()
   //   .select(($) => ({ ary: $.ary, obj: $.obj }))
-  .where(($) => [
-    membero($.person, ["jen", "daniel", "rick"]),
-    eitherOr(favColor($.person, $.favColor), eq($.favColor, "none")),
-    // favColor($.person, $.favColor),
-    collecto($._kid, parentOf($._kid, $.person), $.kids),
-  ])
+  .where(($) => [])
   .toArray();
 
 console.dir(results, { depth: null });

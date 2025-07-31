@@ -1,7 +1,5 @@
 export * from "./core/combinators.js";
 export * from "./core/kernel.js";
-export * from "./core/observable.js";
-export * from "./core/operators.js";
 export * from "./core/query.js";
 export * from "./core/subst-suspends.js";
 export * from "./core/suspend-helper.js";

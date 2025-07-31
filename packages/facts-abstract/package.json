@@ -24,6 +24,7 @@
   "packageManager": "pnpm@10.10.0",
   "devDependencies": {},
   "dependencies": {
-    "logic": "workspace:*"
+    "logic": "workspace:*",
+    "observable": "workspace:*"
   }
 }

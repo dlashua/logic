@@ -1,5 +1,5 @@
-import type { Observable } from "observable";
-import { SimpleObservable } from "observable";
+import type { Observable } from "@swiftfall/observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { and } from "./combinators.js";
 import { isLogicList, isVar, logicListToArray, lvar, walk } from "./kernel.js";
 import type { Goal, RunResult, Subst, Var } from "./types.js";

@@ -1,5 +1,5 @@
 {
-  "name": "facts-rest",
+  "name": "@swiftfall/facts-rest",
   "version": "0.0.1",
   "description": "",
   "type": "module",
@@ -24,7 +24,7 @@
   "packageManager": "pnpm@10.10.0",
   "dependencies": {
     "@types/node": "^22.16.5",
-    "facts-abstract": "workspace:*",
-    "logic": "workspace:*"
+    "@swiftfall/facts-abstract": "workspace:*",
+    "@swiftfall/logic": "workspace:*"
   }
 }

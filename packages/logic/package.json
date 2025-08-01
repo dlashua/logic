@@ -1,5 +1,5 @@
 {
-  "name": "logic",
+  "name": "@swiftfall/logic",
   "version": "0.0.1",
   "description": "",
   "type": "module",
@@ -27,6 +27,6 @@
   },
   "dependencies": {
     "jsonata": "^2.0.6",
-    "observable": "workspace:*"
+    "@swiftfall/observable": "workspace:*"
   }
 }

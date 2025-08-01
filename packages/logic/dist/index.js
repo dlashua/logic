@@ -1,439 +1,12 @@
 // src/core/combinators.ts
 import jsonata from "jsonata";
+import { SimpleObservable as SimpleObservable3 } from "@swiftfall/observable";
 
-// src/core/operators.ts
-function merge(obsB) {
-  return (obsA) => new SimpleObservable((observer) => {
-    let completed = 0;
-    const subscriptions = [
-      obsA.subscribe({
-        next: (r) => {
-          observer.next(r);
-        },
-        error: observer.error,
-        complete: () => {
-          completed++;
-          if (completed === 2) {
-            observer.complete?.();
-          }
-        }
-      }),
-      obsB.subscribe({
-        next: (r) => {
-          observer.next(r);
-        },
-        error: observer.error,
-        complete: () => {
-          completed++;
-          if (completed === 2) {
-            observer.complete?.();
-          }
-        }
-      })
-    ];
-    return () => {
-      subscriptions.forEach((sub) => sub.unsubscribe());
-    };
-  });
-}
-function reduce(reducer, initialValue) {
-  return (input$) => new SimpleObservable((observer) => {
-    let value = initialValue;
-    const sub = input$.subscribe({
-      next: (v) => {
-        value = reducer(value, v);
-      },
-      complete: () => {
-        observer.next(value);
-        observer.complete?.();
-      },
-      error: (e) => observer.error?.(e)
-    });
-    return () => sub.unsubscribe();
-  });
-}
-function map(transform) {
-  return (input$) => new SimpleObservable((observer) => {
-    const subscription = input$.subscribe({
-      next: (value) => observer.next(transform(value)),
-      error: observer.error,
-      complete: observer.complete
-    });
-    return () => subscription.unsubscribe();
-  });
-}
-function take(count) {
-  return (input$) => new SimpleObservable((observer) => {
-    let taken = 0;
-    let upstreamUnsubscribed = false;
-    const subscription = input$.subscribe({
-      next: (value) => {
-        if (taken < count) {
-          observer.next(value);
-          taken++;
-          if (taken >= count) {
-            observer.complete?.();
-            setTimeout(() => {
-              subscription.unsubscribe();
-              upstreamUnsubscribed = true;
-            }, 0);
-          }
-        }
-      },
-      error: (err) => {
-        observer.error?.(err);
-      },
-      complete: () => {
-        observer.complete?.();
-      }
-    });
-    return () => {
-      if (!upstreamUnsubscribed) {
-        subscription.unsubscribe();
-      }
-      upstreamUnsubscribed = true;
-    };
-  });
-}
-function filter(predicate) {
-  return (input$) => new SimpleObservable((observer) => {
-    const subscription = input$.subscribe({
-      next: (value) => {
-        if (predicate(value)) {
-          observer.next(value);
-        }
-      },
-      error: observer.error,
-      complete: observer.complete
-    });
-    return () => subscription.unsubscribe();
-  });
-}
-function flatMap(transform) {
-  return (input$) => new SimpleObservable((observer) => {
-    const subscriptions = [];
-    let outerCompleted = false;
-    let activeInnerCount = 0;
-    let scheduledCompletion = false;
-    let fullyComplete = false;
-    const checkCompletion = () => {
-      if (outerCompleted && activeInnerCount === 0 && !scheduledCompletion) {
-        scheduledCompletion = true;
-        setTimeout(() => {
-          observer.complete?.();
-          fullyComplete = true;
-        }, 0);
-      }
-    };
-    const outerSubscription = input$.subscribe({
-      next: (value) => {
-        activeInnerCount++;
-        const innerObservable = transform(value);
-        const innerSubscription = innerObservable.subscribe({
-          next: observer.next,
-          error: observer.error,
-          complete: () => {
-            activeInnerCount--;
-            checkCompletion();
-          }
-        });
-        subscriptions.push(innerSubscription);
-      },
-      error: observer.error,
-      complete: () => {
-        outerCompleted = true;
-        setTimeout(() => checkCompletion(), 0);
-      }
-    });
-    subscriptions.push(outerSubscription);
-    return () => {
-      if (!fullyComplete) {
-        subscriptions.forEach((sub) => sub.unsubscribe());
-      }
-    };
-  });
-}
-function share(bufferSize = Number.POSITIVE_INFINITY) {
-  let observers = [];
-  let subscription = null;
-  let refCount = 0;
-  let completed = false;
-  let lastError = null;
-  const buffer = [];
-  return (input$) => new SimpleObservable((observer) => {
-    buffer.forEach((value) => observer.next?.(value));
-    if (completed) {
-      if (lastError !== null) {
-        observer.error?.(lastError);
-      } else {
-        observer.complete?.();
-      }
-      return;
-    }
-    observers.push(observer);
-    refCount++;
-    if (subscription === null) {
-      subscription = input$.subscribe({
-        next: (value) => {
-          buffer.push(value);
-          if (buffer.length > bufferSize) {
-            buffer.shift();
-          }
-          observers.slice().forEach((o) => o.next?.(value));
-        },
-        error: (err) => {
-          lastError = err;
-          completed = true;
-          observers.slice().forEach((o) => o.error?.(err));
-          observers = [];
-        },
-        complete: () => {
-          completed = true;
-          observers.slice().forEach((o) => o.complete?.());
-          observers = [];
-        }
-      });
-    }
-    return () => {
-      observers = observers.filter((o) => o !== observer);
-      refCount--;
-      if (refCount === 0 && subscription) {
-        subscription.unsubscribe();
-        subscription = null;
-        completed = false;
-        lastError = null;
-        buffer.length = 0;
-      }
-    };
-  });
-}
-function pipe(...operators) {
-  return (input$) => operators.reduce((prev$, op) => op(prev$), input$);
-}
-
-// src/core/observable.ts
-var isPromise = (v) => !!v && typeof v.then === "function";
-var SimpleObservable = class _SimpleObservable {
-  producer;
-  constructor(producer) {
-    this.producer = producer;
-  }
-  subscribe(observer) {
-    let closed = false;
-    let cleanup = () => console.log("I HAVE NO CLEANUP");
-    const safeObserver = {
-      next: (value) => {
-        if (!closed && observer.next) {
-          if (isPromise(value)) {
-            value.then((v) => observer.next(v));
-          } else {
-            observer.next(value);
-          }
-        }
-      },
-      error: (error) => {
-        if (!closed && observer.error) {
-          observer.error(error);
-          closed = true;
-        }
-      },
-      complete: () => {
-        if (!closed && observer.complete) {
-          observer.complete();
-          closed = true;
-        }
-      }
-    };
-    try {
-      const result = this.producer(safeObserver);
-      if (result && typeof result === "object" && "then" in result) {
-        result.then((asyncCleanup) => {
-          cleanup = asyncCleanup;
-          if (unsubbed && cleanup) {
-            cleanup();
-          }
-        }).catch((error) => {
-          safeObserver.error(
-            error instanceof Error ? error : new Error(String(error))
-          );
-        });
-      } else {
-        cleanup = result;
-      }
-    } catch (error) {
-      if (!closed) {
-        safeObserver.error(
-          error instanceof Error ? error : new Error(String(error))
-        );
-      }
-    }
-    let unsubbed = false;
-    return {
-      unsubscribe: () => {
-        if (!unsubbed) {
-          closed = true;
-          unsubbed = true;
-          if (cleanup) {
-            cleanup();
-          }
-        }
-      },
-      get closed() {
-        return closed;
-      }
-    };
-  }
-  static of(...values) {
-    return new _SimpleObservable((observer) => {
-      for (const value of values) {
-        observer.next(value);
-      }
-      observer.complete?.();
-    });
-  }
-  static from(values) {
-    return _SimpleObservable.of(...values);
-  }
-  static empty() {
-    return new _SimpleObservable((observer) => {
-      observer.complete?.();
-    });
-  }
-  static fromAsyncGenerator(generator) {
-    return new _SimpleObservable((observer) => {
-      let cancelled = false;
-      (async () => {
-        try {
-          for await (const value of generator) {
-            if (cancelled) break;
-            observer.next(value);
-          }
-          if (!cancelled) {
-            observer.complete?.();
-          }
-        } catch (error) {
-          if (!cancelled) {
-            observer.error?.(error);
-          }
-        }
-      })();
-      return () => {
-        cancelled = true;
-        generator.return?.(void 0);
-      };
-    });
-  }
-  static fromPromise(promise) {
-    return new _SimpleObservable((observer) => {
-      promise.then((value) => {
-        observer.next(value);
-        observer.complete?.();
-      }).catch((error) => observer.error?.(error));
-    });
-  }
-  toArray() {
-    let sub;
-    return new Promise((resolve, reject) => {
-      const values = [];
-      sub = this.subscribe({
-        next: (value) => values.push(value),
-        error: reject,
-        complete: () => {
-          setTimeout(() => sub.unsubscribe(), 0);
-          resolve(values);
-        }
-      });
-    });
-  }
-  firstFrom() {
-    let sub;
-    let settled = false;
-    return new Promise((resolve, reject) => {
-      sub = this.subscribe({
-        next: (value) => {
-          settled = true;
-          resolve(value);
-          setTimeout(() => sub.unsubscribe(), 0);
-        },
-        error: (e) => {
-          settled = true;
-          reject(e);
-        },
-        complete: () => {
-          if (!settled) {
-            reject(new Error("NO_VALUE_EMITTED"));
-          }
-          setTimeout(() => sub.unsubscribe(), 0);
-        }
-      });
-    });
-  }
-  lift(next_observable) {
-    return next_observable(this);
-  }
-  lastFrom() {
-    let sub;
-    let settled = false;
-    let valueRecevied = false;
-    let finalValue;
-    return new Promise((resolve, reject) => {
-      sub = this.subscribe({
-        next: (value) => {
-          valueRecevied = true;
-          finalValue = value;
-        },
-        error: (e) => {
-          settled = true;
-          reject(e);
-        },
-        complete: () => {
-          if (!settled) {
-            if (valueRecevied) {
-              settled = true;
-              resolve(finalValue);
-            } else {
-              settled = true;
-              reject(new Error("NO_VALUE_EMITTED"));
-            }
-          }
-          setTimeout(() => sub.unsubscribe(), 0);
-        }
-      });
-    });
-  }
-  // Fluent Operators
-  filter(predicate) {
-    return filter(predicate)(this);
-  }
-  flatMap(transform) {
-    return flatMap(transform)(this);
-  }
-  map(transform) {
-    return map(transform)(this);
-  }
-  merge(other) {
-    return merge(other)(this);
-  }
-  // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
-  pipe(...operators) {
-    return operators.length === 0 ? this : (
-      // biome-ignore lint/suspicious/noExplicitAny: <unknown type produces bad DX>
-      operators.reduce((prev$, op) => op(prev$), this)
-    );
-  }
-  reduce(reducer, initalValue) {
-    return reduce(reducer, initalValue)(this);
-  }
-  share(bufferSize = Number.POSITIVE_INFINITY) {
-    return share(bufferSize)(this);
-  }
-  take(count) {
-    return take(count)(this);
-  }
-};
-var observable = (producer) => new SimpleObservable(producer);
+// src/core/kernel.ts
+import { SimpleObservable as SimpleObservable2 } from "@swiftfall/observable";
 
 // src/core/suspend-helper.ts
+import { SimpleObservable } from "@swiftfall/observable";
 var CHECK_LATER = Symbol.for("constraint-check-later");
 function makeSuspendHandler(vars, evaluator, minGrounded) {
   return function handleSuspend(subst) {
@@ -709,7 +282,7 @@ function liftGoal(singleGoal) {
     groupType,
     [],
     [],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable2((observer) => {
       const subs = input$.subscribe({
         next: (s) => {
           const out$ = singleGoal(s);
@@ -803,7 +376,7 @@ function eq(x, y) {
     "eq",
     [],
     [],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable3((observer) => {
       const sub = input$.subscribe({
         complete: observer.complete,
         error: observer.error,
@@ -819,7 +392,7 @@ function eq(x, y) {
   );
 }
 function fresh(f) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -827,7 +400,7 @@ function fresh(f) {
         active++;
         const freshVars = Array.from({ length: f.length }, () => lvar());
         const subGoal = f(...freshVars);
-        subGoal(SimpleObservable.of(s)).subscribe({
+        subGoal(SimpleObservable3.of(s)).subscribe({
           next: observer.next,
           error: observer.error,
           complete: () => {
@@ -867,7 +440,7 @@ var and = (...goals) => {
 };
 var or = (...goals) => {
   if (goals.length === 0) {
-    return () => SimpleObservable.empty();
+    return () => SimpleObservable3.empty();
   }
   if (goals.length === 1) {
     return goals[0];
@@ -877,7 +450,7 @@ var or = (...goals) => {
     [],
     goals,
     (input$) => {
-      return new SimpleObservable((observer) => {
+      return new SimpleObservable3((observer) => {
         const sharedInput$ = input$.share();
         let completedGoals = 0;
         const subscriptions = [];
@@ -910,7 +483,7 @@ function lift(fn) {
   return (...args) => {
     const out = args[args.length - 1];
     const inputArgs = args.slice(0, -1);
-    return (input$) => new SimpleObservable((observer) => {
+    return (input$) => new SimpleObservable3((observer) => {
       const subscription = input$.subscribe({
         next: (s) => {
           try {
@@ -935,7 +508,7 @@ function lift(fn) {
   };
 }
 function eitherOr(firstGoal, secondGoal) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -943,7 +516,7 @@ function eitherOr(firstGoal, secondGoal) {
         active++;
         let hasResults = false;
         const results = [];
-        firstGoal(SimpleObservable.of(s)).subscribe({
+        firstGoal(SimpleObservable3.of(s)).subscribe({
           next: (s1) => {
             hasResults = true;
             results.push(s1);
@@ -954,7 +527,7 @@ function eitherOr(firstGoal, secondGoal) {
                 observer.next(result);
               }
             } else {
-              secondGoal(SimpleObservable.of(s)).subscribe({
+              secondGoal(SimpleObservable3.of(s)).subscribe({
                 next: observer.next,
                 error: observer.error,
                 complete: () => {
@@ -980,12 +553,12 @@ function eitherOr(firstGoal, secondGoal) {
   });
 }
 function ifte(ifGoal, thenGoal, elseGoal) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     input$.subscribe({
       next: (s) => {
         let succeeded = false;
         const results = [];
-        ifGoal(SimpleObservable.of(s)).subscribe({
+        ifGoal(SimpleObservable3.of(s)).subscribe({
           next: (s1) => {
             succeeded = true;
             results.push(s1);
@@ -994,7 +567,7 @@ function ifte(ifGoal, thenGoal, elseGoal) {
             if (succeeded) {
               let completed = 0;
               for (const s1 of results) {
-                thenGoal(SimpleObservable.of(s1)).subscribe({
+                thenGoal(SimpleObservable3.of(s1)).subscribe({
                   next: observer.next,
                   error: observer.error,
                   complete: () => {
@@ -1009,7 +582,7 @@ function ifte(ifGoal, thenGoal, elseGoal) {
                 observer.complete?.();
               }
             } else {
-              elseGoal(SimpleObservable.of(s)).subscribe({
+              elseGoal(SimpleObservable3.of(s)).subscribe({
                 next: observer.next,
                 complete: observer.complete,
                 error: observer.error
@@ -1028,7 +601,7 @@ function once(goal) {
   return (input$) => goal(input$).take(1);
 }
 function timeout(goal, timeoutMs) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     let completed = false;
     const timer = setTimeout(() => {
       if (!completed) {
@@ -1069,7 +642,7 @@ function run(goal, maxResults, timeoutMs) {
     let error;
     const effectiveGoal = timeoutMs ? timeout(goal, timeoutMs) : goal;
     const limitedGoal = maxResults ? (input$) => effectiveGoal(input$).take(maxResults) : effectiveGoal;
-    limitedGoal(SimpleObservable.of(/* @__PURE__ */ new Map())).subscribe({
+    limitedGoal(SimpleObservable3.of(/* @__PURE__ */ new Map())).subscribe({
       next: (result) => {
         results.push(result);
       },
@@ -1126,7 +699,7 @@ function getByPath(obj, path) {
   return current;
 }
 function project(inputVar, pathOrMap, outputVar) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     const subscription = input$.subscribe({
       next: (s) => {
         const input = walk(inputVar, s);
@@ -1153,7 +726,7 @@ function project(inputVar, pathOrMap, outputVar) {
 }
 function projectJsonata(inputVars, jsonataExpr, outputVars) {
   const expr = jsonata(jsonataExpr);
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable3((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -1265,8 +838,8 @@ function Subquery(goal, extractVar, bindVar, aggregator = (results, _) => arrayT
     [goal],
     (input$) => input$.flatMap((s) => {
       const extracted = [];
-      return new SimpleObservable((observer) => {
-        const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
+      return new SimpleObservable3((observer) => {
+        const subgoalSubscription = goal(SimpleObservable3.of(s)).subscribe({
           next: (subResult) => {
             const value = walk(extractVar, subResult);
             extracted.push(value);
@@ -1298,14 +871,14 @@ function branch(goal, aggregator) {
     "branch",
     [],
     [goal],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable3((observer) => {
       const goalSubs = [];
       const inputSub = input$.subscribe({
         error: observer.error,
         complete: observer.complete,
         next: (inputSubst) => {
           const collectedSubsts = [];
-          const goalSub = goal(SimpleObservable.of(inputSubst)).subscribe({
+          const goalSub = goal(SimpleObservable3.of(inputSubst)).subscribe({
             error: observer.error,
             complete: () => {
               aggregator(observer, collectedSubsts, inputSubst);
@@ -1327,6 +900,7 @@ function branch(goal, aggregator) {
 }
 
 // src/core/query.ts
+import { SimpleObservable as SimpleObservable4 } from "@swiftfall/observable";
 function deepListWalk(val) {
   if (isLogicList(val)) {
     return logicListToArray(val).map(deepListWalk);
@@ -1437,7 +1011,7 @@ var Query = class {
   getSubstObservale() {
     const initialSubst = /* @__PURE__ */ new Map();
     const combinedGoal = and(...this._goals);
-    const substStream = combinedGoal(SimpleObservable.of(initialSubst));
+    const substStream = combinedGoal(SimpleObservable4.of(initialSubst));
     return substStream;
   }
   getObservable() {
@@ -1460,7 +1034,7 @@ var Query = class {
     }
     const initialSubst = /* @__PURE__ */ new Map();
     const combinedGoal = and(...this._goals);
-    const substStream = combinedGoal(SimpleObservable.of(initialSubst));
+    const substStream = combinedGoal(SimpleObservable4.of(initialSubst));
     const results = formatSubstitutions(substStream, formatter, this._limit);
     const rawSelector = this._rawSelector;
     return {
@@ -1484,7 +1058,7 @@ var Query = class {
    * Properly propagates cancellation upstream when the consumer stops early.
    */
   async *[Symbol.asyncIterator]() {
-    const observable2 = this.getObservable();
+    const observable = this.getObservable();
     const queue = [];
     let completed = false;
     let error = null;
@@ -1492,7 +1066,7 @@ var Query = class {
     const nextPromise = () => new Promise((resolve) => {
       resolveNext = resolve;
     });
-    const subcription = observable2.subscribe({
+    const subcription = observable.subscribe({
       next: (result) => {
         queue.push(result);
         if (resolveNext) {
@@ -1537,10 +1111,10 @@ var Query = class {
    * Executes the query and returns all results as an array.
    */
   async toArray() {
-    const observable2 = this.getObservable();
+    const observable = this.getObservable();
     const results = [];
     return new Promise((resolve, reject) => {
-      observable2.subscribe({
+      observable.subscribe({
         next: (result) => {
           results.push(result);
         },
@@ -1560,9 +1134,13 @@ function query() {
   return new Query();
 }
 
+// src/relations/aggregates.ts
+import { SimpleObservable as SimpleObservable6 } from "@swiftfall/observable";
+
 // src/relations/aggregates-base.ts
+import { SimpleObservable as SimpleObservable5 } from "@swiftfall/observable";
 function collect_and_process_base(processor) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable5((observer) => {
     const buffer = [];
     const subscription = input$.subscribe({
       next: (item) => buffer.push(item),
@@ -1583,7 +1161,7 @@ function collect_and_process_base(processor) {
   });
 }
 function group_by_streamo_base(keyVar, valueVar, outVar, drop, aggregator) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable5((observer) => {
     const groups = /* @__PURE__ */ new Map();
     const subscription = input$.subscribe({
       next: (s) => {
@@ -1643,7 +1221,7 @@ function group_by_streamo_base(keyVar, valueVar, outVar, drop, aggregator) {
 
 // src/relations/aggregates.ts
 function count_value_streamo(x, value, count) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable6((observer) => {
     const substitutions = [];
     const subscription = input$.subscribe({
       next: (s) => substitutions.push(s),
@@ -1661,7 +1239,7 @@ function count_value_streamo(x, value, count) {
         eq(
           count,
           n
-        )(SimpleObservable.of(/* @__PURE__ */ new Map())).subscribe({
+        )(SimpleObservable6.of(/* @__PURE__ */ new Map())).subscribe({
           next: observer.next,
           error: observer.error,
           complete: () => {
@@ -1728,7 +1306,7 @@ var ascComparator = (a, b) => {
   return 0;
 };
 function take_streamo(n) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable6((observer) => {
     let count = 0;
     const subscription = input$.subscribe({
       next: (item) => {
@@ -1896,21 +1474,22 @@ function deduplicate(items) {
 
 // src/relations/control.ts
 import util from "util";
+import { SimpleObservable as SimpleObservable7 } from "@swiftfall/observable";
 var uniqueo = (t, g) => enrichGroupInput(
   "uniqueo",
   [g],
   [],
   (input$) => input$.flatMap((s) => {
     const seen = /* @__PURE__ */ new Set();
-    return g(SimpleObservable.of(s)).flatMap((s2) => {
+    return g(SimpleObservable7.of(s)).flatMap((s2) => {
       const w_t = walk(t, s2);
       if (isVar(w_t)) {
-        return SimpleObservable.of(s2);
+        return SimpleObservable7.of(s2);
       }
       const key = JSON.stringify(w_t);
-      if (seen.has(key)) return SimpleObservable.empty();
+      if (seen.has(key)) return SimpleObservable7.empty();
       seen.add(key);
-      return SimpleObservable.of(s2);
+      return SimpleObservable7.of(s2);
     });
   })
 );
@@ -1920,9 +1499,9 @@ function not(goal) {
     [],
     [goal],
     (input$) => input$.flatMap((s) => {
-      return new SimpleObservable((observer) => {
+      return new SimpleObservable7((observer) => {
         let hasSolutions = false;
-        const sub = goal(SimpleObservable.of(s)).subscribe({
+        const sub = goal(SimpleObservable7.of(s)).subscribe({
           next: (subst) => {
             if (!subst.has(SUSPENDED_CONSTRAINTS)) {
               hasSolutions = true;
@@ -1947,9 +1526,9 @@ function gv1_not(goal) {
     [],
     [goal],
     (input$) => input$.flatMap((s) => {
-      return new SimpleObservable((observer) => {
+      return new SimpleObservable7((observer) => {
         let hasSolutions = false;
-        const sub = goal(SimpleObservable.of(s)).subscribe({
+        const sub = goal(SimpleObservable7.of(s)).subscribe({
           next: () => {
             hasSolutions = true;
           },
@@ -1973,8 +1552,8 @@ function old_not(goal) {
     [goal],
     (input$) => input$.flatMap((s) => {
       let found = false;
-      return new SimpleObservable((observer) => {
-        goal(SimpleObservable.of(s)).subscribe({
+      return new SimpleObservable7((observer) => {
+        goal(SimpleObservable7.of(s)).subscribe({
           next: (subst) => {
             let addedNewBindings = false;
             for (const [key, value] of subst) {
@@ -2038,18 +1617,18 @@ function onceo(goal) {
 }
 function succeedo() {
   return (input$) => input$.flatMap(
-    (s) => new SimpleObservable((observer) => {
+    (s) => new SimpleObservable7((observer) => {
       observer.next(s);
       observer.complete?.();
     })
   );
 }
 function failo() {
-  return (_input$) => SimpleObservable.empty();
+  return (_input$) => SimpleObservable7.empty();
 }
 function groundo(term) {
   return (input$) => input$.flatMap(
-    (s) => new SimpleObservable((observer) => {
+    (s) => new SimpleObservable7((observer) => {
       const walked = walk(term, s);
       function isGround(t) {
         if (isVar(t)) return false;
@@ -2085,7 +1664,7 @@ function substLog(msg, onlyVars = false) {
     "substLog",
     [],
     [],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable7((observer) => {
       const sub = input$.subscribe({
         next: (s) => {
           const ns = onlyVars ? Object.fromEntries(
@@ -2114,7 +1693,7 @@ function thruCount(msg, level = 1e3) {
     "thruCount",
     [],
     [],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable7((observer) => {
       let cnt = 0;
       const sub = input$.subscribe({
         next: (s) => {
@@ -2147,7 +1726,7 @@ function thruCount(msg, level = 1e3) {
   );
 }
 function fail() {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable7((observer) => {
     const sub = input$.subscribe({
       next: (s) => {
       },
@@ -2159,12 +1738,13 @@ function fail() {
 }
 
 // src/relations/lists.ts
+import { SimpleObservable as SimpleObservable8 } from "@swiftfall/observable";
 function membero(x, list) {
   return enrichGroupInput(
     "membero",
     [],
     [],
-    (input$) => new SimpleObservable((observer) => {
+    (input$) => new SimpleObservable8((observer) => {
       const subscriptions = [];
       let cancelled = false;
       let active = 0;
@@ -2193,7 +1773,7 @@ function membero(x, list) {
             const sub = membero(
               x,
               l.tail
-            )(SimpleObservable.of(s)).subscribe({
+            )(SimpleObservable8.of(s)).subscribe({
               next: (result) => {
                 if (!cancelled) observer.next(result);
               },
@@ -2231,7 +1811,7 @@ function membero(x, list) {
   );
 }
 function firsto(x, xs) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const l = walk(xs, s);
@@ -2248,7 +1828,7 @@ function firsto(x, xs) {
   });
 }
 function resto(xs, tail) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const l = walk(xs, s);
@@ -2265,7 +1845,7 @@ function resto(xs, tail) {
   });
 }
 function appendo(xs, ys, zs) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const xsVal = walk(xs, s);
@@ -2288,7 +1868,7 @@ function appendo(xs, ys, zs) {
               tail,
               ys,
               rest
-            )(SimpleObservable.of(s1)).subscribe({
+            )(SimpleObservable8.of(s1)).subscribe({
               next: observer.next,
               error: observer.error,
               complete: observer.complete
@@ -2307,7 +1887,7 @@ function appendo(xs, ys, zs) {
   });
 }
 function lengtho(arrayOrList, length) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const walkedArray = walk(arrayOrList, s);
@@ -2331,7 +1911,7 @@ function lengtho(arrayOrList, length) {
   });
 }
 function permuteo(xs, ys) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const xsVal = walk(xs, s);
@@ -2339,7 +1919,7 @@ function permuteo(xs, ys) {
           eq(
             ys,
             nil
-          )(SimpleObservable.of(s)).subscribe({
+          )(SimpleObservable8.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
             complete: observer.complete
@@ -2355,14 +1935,14 @@ function permuteo(xs, ys) {
               removeFirsto(xsVal, head, rest),
               permuteo(rest, lvar()),
               eq(ys, cons(head, lvar()))
-            )(SimpleObservable.of(s)).subscribe({
+            )(SimpleObservable8.of(s)).subscribe({
               next: (s1) => {
                 const ysVal2 = walk(ys, s1);
                 if (isCons(ysVal2)) {
                   eq(
                     ysVal2.tail,
                     walk(lvar(), s1)
-                  )(SimpleObservable.of(s1)).subscribe({
+                  )(SimpleObservable8.of(s1)).subscribe({
                     next: observer.next,
                     error: observer.error
                   });
@@ -2390,7 +1970,7 @@ function permuteo(xs, ys) {
   });
 }
 function mapo(rel, xs, ys) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -2401,7 +1981,7 @@ function mapo(rel, xs, ys) {
           eq(
             ys,
             nil
-          )(SimpleObservable.of(s)).subscribe({
+          )(SimpleObservable8.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
             complete: () => {
@@ -2420,7 +2000,7 @@ function mapo(rel, xs, ys) {
             eq(ys, cons(yHead, yTail)),
             rel(xHead, yHead),
             mapo(rel, xTail, yTail)
-          )(SimpleObservable.of(s)).subscribe({
+          )(SimpleObservable8.of(s)).subscribe({
             next: observer.next,
             error: observer.error,
             complete: () => {
@@ -2443,7 +2023,7 @@ function mapo(rel, xs, ys) {
   });
 }
 function removeFirsto(xs, x, ys) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -2462,7 +2042,7 @@ function removeFirsto(xs, x, ys) {
             eq(
               ys,
               xsVal.tail
-            )(SimpleObservable.of(s)).subscribe({
+            )(SimpleObservable8.of(s)).subscribe({
               next: observer.next,
               error: observer.error,
               complete: () => {
@@ -2475,7 +2055,7 @@ function removeFirsto(xs, x, ys) {
             and(
               eq(ys, cons(xsVal.head, rest)),
               removeFirsto(xsVal.tail, x, rest)
-            )(SimpleObservable.of(s)).subscribe({
+            )(SimpleObservable8.of(s)).subscribe({
               next: observer.next,
               error: observer.error,
               complete: () => {
@@ -2499,7 +2079,7 @@ function removeFirsto(xs, x, ys) {
   });
 }
 function alldistincto(xs) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable8((observer) => {
     input$.subscribe({
       next: (s) => {
         const arr = walk(xs, s);
@@ -2533,6 +2113,7 @@ function alldistincto(xs) {
 }
 
 // src/relations/numeric.ts
+import { SimpleObservable as SimpleObservable9 } from "@swiftfall/observable";
 function gto(x, y) {
   return suspendable(
     [x, y],
@@ -2638,7 +2219,7 @@ function multo(x, y, z) {
 }
 var dividebyo = (x, y, z) => multo(z, y, x);
 function maxo(variable) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable9((observer) => {
     const substitutions = [];
     const subscription = input$.subscribe({
       next: (s) => {
@@ -2674,7 +2255,7 @@ function maxo(variable) {
   });
 }
 function mino(variable) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable9((observer) => {
     const substitutions = [];
     const subscription = input$.subscribe({
       next: (s) => {
@@ -2711,9 +2292,10 @@ function mino(variable) {
 }
 
 // src/relations/objects.ts
+import { SimpleObservable as SimpleObservable10 } from "@swiftfall/observable";
 function extract(inputVar, mapping) {
   return (input$) => input$.flatMap(
-    (s) => new SimpleObservable((observer) => {
+    (s) => new SimpleObservable10((observer) => {
       const inputValue = walk(inputVar, s);
       if (typeof inputValue !== "object" || inputValue === null) {
         observer.complete?.();
@@ -2728,7 +2310,11 @@ function extract(inputVar, mapping) {
           }
           let resultSubst = currentSubst2;
           for (let i = 0; i < targetMapping.length; i++) {
-            const nextSubst = extractRecursive(sourceValue[i], targetMapping[i], resultSubst);
+            const nextSubst = extractRecursive(
+              sourceValue[i],
+              targetMapping[i],
+              resultSubst
+            );
             if (nextSubst === null) return null;
             resultSubst = nextSubst;
           }
@@ -2740,7 +2326,11 @@ function extract(inputVar, mapping) {
           let resultSubst = currentSubst2;
           for (const [key, targetValue] of Object.entries(targetMapping)) {
             const sourceNestedValue = sourceValue[key];
-            const nextSubst = extractRecursive(sourceNestedValue, targetValue, resultSubst);
+            const nextSubst = extractRecursive(
+              sourceNestedValue,
+              targetValue,
+              resultSubst
+            );
             if (nextSubst === null) return null;
             resultSubst = nextSubst;
           }
@@ -2752,7 +2342,11 @@ function extract(inputVar, mapping) {
       let currentSubst = s;
       for (const [key, outputMapping] of Object.entries(mapping)) {
         const value = inputValue[key];
-        const nextSubst = extractRecursive(value, outputMapping, currentSubst);
+        const nextSubst = extractRecursive(
+          value,
+          outputMapping,
+          currentSubst
+        );
         if (nextSubst === null) {
           observer.complete?.();
           return;
@@ -2766,7 +2360,7 @@ function extract(inputVar, mapping) {
 }
 function extractEach(arrayVar, mapping) {
   return (input$) => input$.flatMap(
-    (s) => new SimpleObservable((observer) => {
+    (s) => new SimpleObservable10((observer) => {
       const arrayValue = walk(arrayVar, s);
       if (!Array.isArray(arrayValue)) {
         observer.complete?.();
@@ -3138,8 +2732,9 @@ var intersect = indexUtils.intersect;
 var isIndexable = indexUtils.isIndexable;
 
 // src/util/procedural-helpers.ts
+import { SimpleObservable as SimpleObservable11 } from "@swiftfall/observable";
 function aggregateVar(sourceVar, subgoal) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable11((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
@@ -3147,7 +2742,7 @@ function aggregateVar(sourceVar, subgoal) {
         active++;
         const results = [];
         let subgoalEmitted = false;
-        subgoal(SimpleObservable.of(s)).subscribe({
+        subgoal(SimpleObservable11.of(s)).subscribe({
           next: (subst) => {
             subgoalEmitted = true;
             results.push(walk(sourceVar, subst));
@@ -3172,14 +2767,14 @@ function aggregateVar(sourceVar, subgoal) {
   });
 }
 function aggregateVarMulti(groupVars, aggVars, subgoal) {
-  return (input$) => new SimpleObservable((observer) => {
+  return (input$) => new SimpleObservable11((observer) => {
     let active = 0;
     let completed = false;
     const subscription = input$.subscribe({
       next: (s) => {
         active++;
         const groupMap = /* @__PURE__ */ new Map();
-        subgoal(SimpleObservable.of(s)).subscribe({
+        subgoal(SimpleObservable11.of(s)).subscribe({
           next: (subst) => {
             const groupKey = JSON.stringify(
               groupVars.map((v) => walk(v, subst))
@@ -3233,7 +2828,6 @@ export {
   GOAL_GROUP_PATH,
   Logger,
   SUSPENDED_CONSTRAINTS,
-  SimpleObservable,
   Subquery,
   addSuspendToSubst,
   aggregateRelFactory,
@@ -3269,9 +2863,7 @@ export {
   extractEach,
   fail,
   failo,
-  filter,
   firsto,
-  flatMap,
   fresh,
   getDefaultLogger,
   getSuspendsFromSubst,
@@ -3303,11 +2895,9 @@ export {
   lto,
   lvar,
   makeSuspendHandler,
-  map,
   mapo,
   maxo,
   membero,
-  merge,
   mino,
   minuso,
   multo,
@@ -3316,7 +2906,6 @@ export {
   nil,
   nonGroundo,
   not,
-  observable,
   old_neqo,
   old_not,
   once,
@@ -3324,24 +2913,20 @@ export {
   or,
   patternUtils,
   permuteo,
-  pipe,
   pluso,
   project,
   projectJsonata,
   query,
   queryUtils,
-  reduce,
   removeFirsto,
   removeSuspendFromSubst,
   resetVarCounter,
   resto,
   run,
-  share,
   sort_by_streamo,
   substLog,
   succeedo,
   suspendable,
-  take,
   take_streamo,
   thruCount,
   timeout,

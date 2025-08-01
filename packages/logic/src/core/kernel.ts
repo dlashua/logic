@@ -1,4 +1,4 @@
-import { SimpleObservable } from "observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { SUSPENDED_CONSTRAINTS, wakeUpSuspends } from "./subst-suspends.js";
 import type {
   ConsNode,

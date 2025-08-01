@@ -1,5 +1,5 @@
 import util from "node:util";
-import { SimpleObservable } from "observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { eq } from "../core/combinators.js";
 import { enrichGroupInput, isVar, walk } from "../core/kernel.js";
 import {

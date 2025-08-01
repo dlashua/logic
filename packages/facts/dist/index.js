@@ -1,14 +1,14 @@
 // src/facts-memory.ts
-import { getDefaultLogger } from "logic";
+import { getDefaultLogger } from "@swiftfall/logic";
 
 // src/memory-obj-relation.ts
 import {
   indexUtils,
   isVar,
   queryUtils,
-  SimpleObservable,
   unificationUtils
-} from "logic";
+} from "@swiftfall/logic";
+import { SimpleObservable } from "@swiftfall/observable";
 var MemoryObjRelation = class {
   constructor(keys, logger, config) {
     this.keys = keys;
@@ -259,9 +259,9 @@ import {
   indexUtils as indexUtils2,
   isVar as isVar2,
   queryUtils as queryUtils2,
-  SimpleObservable as SimpleObservable2,
   unificationUtils as unificationUtils2
-} from "logic";
+} from "@swiftfall/logic";
+import { SimpleObservable as SimpleObservable2 } from "@swiftfall/observable";
 var MemoryRelation = class {
   constructor(logger, config) {
     this.logger = logger;
@@ -417,7 +417,7 @@ var MemoryRelation = class {
 };
 
 // src/symmetric-relation.ts
-import { eq } from "logic";
+import { eq } from "@swiftfall/logic";
 var SymmetricMemoryRelation = class {
   memoryRelation;
   constructor(logger, config) {

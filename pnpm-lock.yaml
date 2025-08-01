@@ -8,21 +8,24 @@ importers:
 
   .:
     dependencies:
+      '@swiftfall/facts':
+        specifier: workspace:*
+        version: link:packages/facts
+      '@swiftfall/facts-sql':
+        specifier: workspace:*
+        version: link:packages/facts-sql
+      '@swiftfall/logic':
+        specifier: workspace:*
+        version: link:packages/logic
+      '@swiftfall/observable':
+        specifier: workspace:*
+        version: link:packages/observable
       '@types/node':
         specifier: ^22.16.5
         version: 22.16.5
-      facts:
-        specifier: workspace:*
-        version: link:packages/facts
-      facts-sql:
-        specifier: workspace:*
-        version: link:packages/facts-sql
       knex:
         specifier: ^3.1.0
         version: 3.1.0
-      logic:
-        specifier: workspace:*
-        version: link:packages/logic
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -48,54 +51,54 @@ importers:
 
   packages/facts:
     dependencies:
-      logic:
+      '@swiftfall/logic':
         specifier: workspace:*
         version: link:../logic
-      observable:
+      '@swiftfall/observable':
         specifier: workspace:*
         version: link:../observable
 
   packages/facts-abstract:
     dependencies:
-      logic:
+      '@swiftfall/logic':
         specifier: workspace:*
         version: link:../logic
-      observable:
+      '@swiftfall/observable':
         specifier: workspace:*
         version: link:../observable
 
   packages/facts-rest:
     dependencies:
+      '@swiftfall/facts-abstract':
+        specifier: workspace:*
+        version: link:../facts-abstract
+      '@swiftfall/logic':
+        specifier: workspace:*
+        version: link:../logic
       '@types/node':
         specifier: ^22.16.5
         version: 22.16.5
-      facts-abstract:
-        specifier: workspace:*
-        version: link:../facts-abstract
-      logic:
-        specifier: workspace:*
-        version: link:../logic
 
   packages/facts-sql:
     dependencies:
-      facts-abstract:
+      '@swiftfall/facts-abstract':
         specifier: workspace:*
         version: link:../facts-abstract
+      '@swiftfall/logic':
+        specifier: workspace:*
+        version: link:../logic
       knex:
         specifier: ^3.1.0
         version: 3.1.0
-      logic:
-        specifier: workspace:*
-        version: link:../logic
 
   packages/logic:
     dependencies:
+      '@swiftfall/observable':
+        specifier: workspace:*
+        version: link:../observable
       jsonata:
         specifier: ^2.0.6
         version: 2.0.6
-      observable:
-        specifier: workspace:*
-        version: link:../observable
     devDependencies:
       '@types/node':
         specifier: ^22.16.5

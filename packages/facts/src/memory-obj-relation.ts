@@ -7,8 +7,8 @@ import {
   type Subst,
   type Term,
   unificationUtils,
-} from "logic";
-import { SimpleObservable } from "observable";
+} from "@swiftfall/logic";
+import { SimpleObservable } from "@swiftfall/observable";
 import type { FactObjRelation, FactRelationConfig } from "./types.js";
 
 export class MemoryObjRelation {

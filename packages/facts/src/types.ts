@@ -1,4 +1,4 @@
-import type { Goal, Term } from "logic";
+import type { Goal, Term } from "@swiftfall/logic";
 
 export interface FactRelation {
   (...query: Term[]): Goal;

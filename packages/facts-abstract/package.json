@@ -1,5 +1,5 @@
 {
-  "name": "facts-abstract",
+  "name": "@swiftfall/facts-abstract",
   "version": "0.0.1",
   "description": "",
   "type": "module",
@@ -24,7 +24,7 @@
   "packageManager": "pnpm@10.10.0",
   "devDependencies": {},
   "dependencies": {
-    "logic": "workspace:*",
-    "observable": "workspace:*"
+    "@swiftfall/logic": "workspace:*",
+    "@swiftfall/observable": "workspace:*"
   }
 }

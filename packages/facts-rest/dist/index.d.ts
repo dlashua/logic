@@ -1,7 +1,7 @@
-import * as facts_abstract from 'facts-abstract';
-import { RelationOptions, RestDataStoreConfig, AbstractRelationConfig } from 'facts-abstract';
-export { RestDataStoreConfig } from 'facts-abstract';
-import * as logic from 'logic';
+import * as _swiftfall_facts_abstract from '@swiftfall/facts-abstract';
+import { RelationOptions, RestDataStoreConfig, AbstractRelationConfig } from '@swiftfall/facts-abstract';
+export { RestDataStoreConfig } from '@swiftfall/facts-abstract';
+import * as _swiftfall_logic from '@swiftfall/logic';
 
 interface RelationCache {
     get(key: string): Promise<any | undefined>;
@@ -27,13 +27,13 @@ declare const makeRelREST: (restConfig: RestDataStoreConfig & {
 }, config?: AbstractRelationConfig) => Promise<{
     rel: (pathTemplate: string, options?: RestRelationOptions & {
         cache?: RelationCache | null;
-    }) => (queryObj: Record<string, logic.Term>) => logic.Goal;
-    relSym: (table: string, keys: [string, string], options?: facts_abstract.RelationOptions) => (queryObj: Record<string, logic.Term>) => logic.Goal;
+    }) => (queryObj: Record<string, _swiftfall_logic.Term>) => _swiftfall_logic.Goal;
+    relSym: (table: string, keys: [string, string], options?: _swiftfall_facts_abstract.RelationOptions) => (queryObj: Record<string, _swiftfall_logic.Term>) => _swiftfall_logic.Goal;
     getQueries: () => string[];
     clearQueries: () => void;
     getQueryCount: () => number;
     close: () => Promise<void>;
-    getDataStore: () => facts_abstract.DataStore;
+    getDataStore: () => _swiftfall_facts_abstract.DataStore;
 }>;
 
 export { makeRelREST };

@@ -1,4 +1,4 @@
-import { pipe, SimpleObservable, type Observable } from "logic";
+import { pipe, SimpleObservable } from "@swiftfall/observable";
 import * as RX from "rxjs";
 
 const RXdoubleMap =

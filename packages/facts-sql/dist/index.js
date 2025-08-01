@@ -1,7 +1,7 @@
 // src/index.ts
-import { createAbstractRelationSystem } from "facts-abstract";
+import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
 import knex from "knex";
-import { getDefaultLogger } from "logic";
+import { getDefaultLogger } from "@swiftfall/logic";
 
 // src/sql-datastore.ts
 var SqlDataStore = class {

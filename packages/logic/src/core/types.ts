@@ -1,7 +1,7 @@
 // Observable-based Core Types for Logic Programming
 // -----------------------------------------------------------------------------
 
-import type { SimpleObservable } from "observable";
+import type { SimpleObservable } from "@swiftfall/observable";
 
 /**
  * Represents a logic variable, a placeholder for a value.

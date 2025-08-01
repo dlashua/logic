@@ -1,6 +1,6 @@
 // src/index.ts
-import { createAbstractRelationSystem } from "facts-abstract";
-import { getDefaultLogger } from "logic";
+import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
+import { getDefaultLogger } from "@swiftfall/logic";
 
 // src/rest-datastore.ts
 var RestDataStore = class {

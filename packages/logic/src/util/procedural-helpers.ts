@@ -1,4 +1,4 @@
-import { SimpleObservable } from "observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { walk } from "../core/kernel.js";
 import type { Goal, Subst, Term, Var } from "../core/types.js";
 

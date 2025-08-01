@@ -1,5 +1,5 @@
-import type { Observable } from "observable";
-import { SimpleObservable } from "observable";
+import type { Observable } from "@swiftfall/observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { eq } from "../core/combinators.js";
 import { arrayToLogicList, unify, walk } from "../core/kernel.js";
 import type { Goal, Subst, Term } from "../core/types.ts";

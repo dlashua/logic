@@ -1,4 +1,4 @@
-import { SimpleObservable } from "observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import { isVar, unify, walk } from "../core/kernel.js";
 import { CHECK_LATER, suspendable } from "../core/suspend-helper.js";
 import type { Goal, Subst, Term } from "../core/types.js";

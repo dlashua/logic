@@ -1,4 +1,4 @@
-import { Term, Goal, BaseConfig, Logger } from 'logic';
+import { Term, Goal, BaseConfig, Logger } from '@swiftfall/logic';
 
 interface FactRelation {
     (...query: Term[]): Goal;

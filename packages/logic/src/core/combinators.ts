@@ -1,6 +1,6 @@
 import jsonata from "jsonata";
-import type { Observer, Subscription } from "observable";
-import { SimpleObservable } from "observable";
+import type { Observer, Subscription } from "@swiftfall/observable";
+import { SimpleObservable } from "@swiftfall/observable";
 import {
   arrayToLogicList,
   enrichGroupInput,

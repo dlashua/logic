@@ -1,52 +1,52 @@
-import type { Logger } from "logic";
+import type { Logger } from "@swiftfall/logic";
 import { MemoryObjRelation } from "./memory-obj-relation.js";
 import { MemoryRelation } from "./memory-relation.js";
 import {
-	SymmetricMemoryObjRelation,
-	SymmetricMemoryRelation,
+  SymmetricMemoryObjRelation,
+  SymmetricMemoryRelation,
 } from "./symmetric-relation.js";
 import type {
-	FactObjRelation,
-	FactRelation,
-	FactRelationConfig,
+  FactObjRelation,
+  FactRelation,
+  FactRelationConfig,
 } from "./types.js";
 
 export interface FactRelationFactoryDependencies {
-	logger: Logger;
-	config: FactRelationConfig;
+  logger: Logger;
+  config: FactRelationConfig;
 }
 
 export class FactRelationFactory {
-	constructor(private deps: FactRelationFactoryDependencies) {}
+  constructor(private deps: FactRelationFactoryDependencies) {}
 
-	createArrayRelation(): FactRelation {
-		const relation = new MemoryRelation(this.deps.logger, this.deps.config);
-		return relation.createRelation();
-	}
+  createArrayRelation(): FactRelation {
+    const relation = new MemoryRelation(this.deps.logger, this.deps.config);
+    return relation.createRelation();
+  }
 
-	createObjectRelation(keys: string[]): FactObjRelation {
-		const relation = new MemoryObjRelation(
-			keys,
-			this.deps.logger,
-			this.deps.config,
-		);
-		return relation.createRelation();
-	}
+  createObjectRelation(keys: string[]): FactObjRelation {
+    const relation = new MemoryObjRelation(
+      keys,
+      this.deps.logger,
+      this.deps.config,
+    );
+    return relation.createRelation();
+  }
 
-	createSymmetricArrayRelation(): FactRelation {
-		const relation = new SymmetricMemoryRelation(
-			this.deps.logger,
-			this.deps.config,
-		);
-		return relation.createRelation();
-	}
+  createSymmetricArrayRelation(): FactRelation {
+    const relation = new SymmetricMemoryRelation(
+      this.deps.logger,
+      this.deps.config,
+    );
+    return relation.createRelation();
+  }
 
-	createSymmetricObjectRelation(keys: string[]): FactObjRelation {
-		const relation = new SymmetricMemoryObjRelation(
-			keys,
-			this.deps.logger,
-			this.deps.config,
-		);
-		return relation.createRelation();
-	}
+  createSymmetricObjectRelation(keys: string[]): FactObjRelation {
+    const relation = new SymmetricMemoryObjRelation(
+      keys,
+      this.deps.logger,
+      this.deps.config,
+    );
+    return relation.createRelation();
+  }
 }

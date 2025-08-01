@@ -1,9 +1,9 @@
-import type { AbstractRelationConfig } from "facts-abstract";
-import { createAbstractRelationSystem } from "facts-abstract";
+import type { AbstractRelationConfig } from "@swiftfall/facts-abstract";
+import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
 import type { Knex } from "knex";
 import knex from "knex";
-import type { BaseConfig as Configuration } from "logic";
-import { getDefaultLogger, Logger } from "logic";
+import type { BaseConfig as Configuration } from "@swiftfall/logic";
+import { getDefaultLogger, Logger } from "@swiftfall/logic";
 import { SqlDataStore } from "./sql-datastore.js";
 
 /**
@@ -11,41 +11,41 @@ import { SqlDataStore } from "./sql-datastore.js";
  * This is a drop-in replacement for the old facts-sql module
  */
 export const makeRelDB = async (
-	knex_connect_options: Knex.Config,
-	options?: Record<string, string>,
-	configOverrides?: Partial<Configuration>,
+  knex_connect_options: Knex.Config,
+  options?: Record<string, string>,
+  configOverrides?: Partial<Configuration>,
 ) => {
-	options ??= {};
+  options ??= {};
 
-	const logger = getDefaultLogger();
-	const db = knex(knex_connect_options);
+  const logger = getDefaultLogger();
+  const db = knex(knex_connect_options);
 
-	// Create SQL data store
-	const dataStore = new SqlDataStore(db);
+  // Create SQL data store
+  const dataStore = new SqlDataStore(db);
 
-	// Configure the abstract relation system
-	const config: AbstractRelationConfig = {
-		batchSize: 100,
-		debounceMs: 50,
-		enableCaching: true,
-		enableQueryMerging: true,
-		...configOverrides,
-	};
+  // Configure the abstract relation system
+  const config: AbstractRelationConfig = {
+    batchSize: 100,
+    debounceMs: 50,
+    enableCaching: true,
+    enableQueryMerging: true,
+    ...configOverrides,
+  };
 
-	// Create the abstract relation system
-	const relationSystem = createAbstractRelationSystem(
-		dataStore,
-		logger,
-		config,
-	);
+  // Create the abstract relation system
+  const relationSystem = createAbstractRelationSystem(
+    dataStore,
+    logger,
+    config,
+  );
 
-	return {
-		rel: relationSystem.rel,
-		relSym: relationSystem.relSym,
-		db,
-		getQueries: relationSystem.getQueries,
-		clearQueries: relationSystem.clearQueries,
-		getQueryCount: relationSystem.getQueryCount,
-		close: relationSystem.close,
-	};
+  return {
+    rel: relationSystem.rel,
+    relSym: relationSystem.relSym,
+    db,
+    getQueries: relationSystem.getQueries,
+    clearQueries: relationSystem.clearQueries,
+    getQueryCount: relationSystem.getQueryCount,
+    close: relationSystem.close,
+  };
 };

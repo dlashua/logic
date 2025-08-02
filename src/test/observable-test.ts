@@ -1,4 +1,4 @@
-import { pipe, SimpleObservable } from "@swiftfall/observable";
+import { pipe, SimpleObservable } from "@codespiral/observable";
 import * as RX from "rxjs";
 
 const RXdoubleMap =
@@ -7,8 +7,8 @@ const RXdoubleMap =
     new RX.Observable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(v * 2),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();
@@ -20,8 +20,8 @@ const RXdoubleMapToString =
     new RX.Observable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(String(v * 2)),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();
@@ -33,8 +33,8 @@ const RXaddMsg =
     new RX.Observable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(`${msg} ${v}`),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();
@@ -46,8 +46,8 @@ const doubleMap =
     new SimpleObservable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(v * 2),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();
@@ -59,8 +59,8 @@ const doubleMapToString =
     new SimpleObservable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(String(v * 2)),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();
@@ -72,8 +72,8 @@ const addMsg =
     new SimpleObservable((observer) => {
       const sub = input$.subscribe({
         next: (v) => observer.next(`${msg} ${v}`),
-        complete: observer.complete,
-        error: observer.error,
+        complete: () => observer.complete(),
+        error: (e: Error) => observer.error(e),
       });
 
       return () => sub.unsubscribe();

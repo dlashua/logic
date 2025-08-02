@@ -9,7 +9,7 @@ import {
   or,
   query,
   resetVarCounter,
-} from "@swiftfall/logic";
+} from "@codespiral/logic";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeFacts, makeFactsObj } from "./facts-memory.js";
 

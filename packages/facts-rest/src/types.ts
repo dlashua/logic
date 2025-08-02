@@ -1,4 +1,4 @@
-import type { RelationOptions } from "@swiftfall/facts-abstract";
+import type { RelationOptions } from "@codespiral/facts-abstract";
 
 /**
  * REST-specific relation options (extends global RelationOptions)

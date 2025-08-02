@@ -1,4 +1,4 @@
-import type { Subst, Term } from "@swiftfall/logic";
+import type { Subst, Term } from "@codespiral/logic";
 
 /**
  * Core goal record that tracks logic goals independently of data store implementation

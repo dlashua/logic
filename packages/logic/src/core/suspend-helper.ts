@@ -1,4 +1,4 @@
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { isVar, walk } from "./kernel.js";
 import { addSuspendToSubst } from "./subst-suspends.js";
 import type { Goal, Subst, Term, Var } from "./types.js";
@@ -68,8 +68,8 @@ export function suspendable<T extends Term[]>(
             observer.error?.(error);
           }
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
 
       return () => sub.unsubscribe();

@@ -3,7 +3,7 @@ import type {
   DataStore,
   QueryParams,
   WhereCondition,
-} from "@swiftfall/facts-abstract";
+} from "@codespiral/facts-abstract";
 import type { Knex } from "knex";
 
 /**

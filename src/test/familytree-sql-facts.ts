@@ -1,7 +1,7 @@
 // import { makeRelDB } from "../facts-sql/index.js";
-import { makeRelDB } from "facts-sql";
+import { makeRelDB } from "@codespiral/facts-sql";
 // import { makeRelDB } from "../facts-sql.js";
-import type { Term } from "logic";
+import type { Term } from "@codespiral/logic";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { FamilytreeRelations } from "../extended/familytree-rel.js";
@@ -9,55 +9,55 @@ import { FamilytreeRelations } from "../extended/familytree-rel.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export const relDB = await makeRelDB({
-	client: "better-sqlite3",
-	connection: {
-		filename: resolve(__dirname, "../../data/family.db"),
-	},
-	useNullAsDefault: true,
+  client: "better-sqlite3",
+  connection: {
+    filename: resolve(__dirname, "../../data/family.db"),
+  },
+  useNullAsDefault: true,
 });
 const PK = await relDB.rel(
-	"family",
-	// {
-	// primaryKey: "parent",
-	// selectColumns: ["parent", "kid"],
-	// }
+  "family",
+  // {
+  // primaryKey: "parent",
+  // selectColumns: ["parent", "kid"],
+  // }
 );
 const R = await relDB.relSym(
-	"relationship",
-	["a", "b"],
-	// {
-	// primaryKey: "a",
-	// selectColumns: ["a", "b"],
-	// }
+  "relationship",
+  ["a", "b"],
+  // {
+  // primaryKey: "a",
+  // selectColumns: ["a", "b"],
+  // }
 );
 const I = await relDB.rel("people_info");
 
 export const parent_kid = (p: Term, k: Term) =>
-	PK({
-		parent: p,
-		kid: k,
-	});
+  PK({
+    parent: p,
+    kid: k,
+  });
 
 export const relationship = (
-	a: Term<string | number>,
-	b: Term<string | number>,
+  a: Term<string | number>,
+  b: Term<string | number>,
 ) =>
-	R({
-		a,
-		b,
-	});
+  R({
+    a,
+    b,
+  });
 
 export const info_color = (person: Term<string>, color: Term<string>) =>
-	I({
-		person,
-		color,
-	});
+  I({
+    person,
+    color,
+  });
 
 export const info_number = (person: Term<string>, number: Term<number>) =>
-	I({
-		person,
-		number,
-	});
+  I({
+    person,
+    number,
+  });
 
 // RELATIONS
 export const familytree = new FamilytreeRelations(parent_kid, relationship);

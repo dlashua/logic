@@ -1,9 +1,9 @@
 import type {
   AbstractRelationConfig,
   RestDataStoreConfig,
-} from "@swiftfall/facts-abstract";
-import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
-import { getDefaultLogger } from "@swiftfall/logic";
+} from "@codespiral/facts-abstract";
+import { createAbstractRelationSystem } from "@codespiral/facts-abstract";
+import { getDefaultLogger } from "@codespiral/logic";
 import type { RelationCache } from "./relation-cache.js";
 import { RestDataStore } from "./rest-datastore.js";
 import type { RestRelationOptions } from "./types.js";
@@ -76,4 +76,4 @@ export const makeRelREST = async (
 };
 
 // Re-export for convenience
-export type { RestDataStoreConfig } from "@swiftfall/facts-abstract";
+export type { RestDataStoreConfig } from "@codespiral/facts-abstract";

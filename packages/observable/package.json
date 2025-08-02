@@ -1,8 +1,10 @@
 {
-  "name": "@swiftfall/observable",
-  "version": "0.0.1",
-  "description": "",
+  "name": "@codespiral/observable",
+  "version": "0.0.8",
+  "description": "Just Another Observable",
   "type": "module",
+  "private": false,
+  "homepage": "https://github.com/dlashua/logic/tree/main/packages/observable",
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -25,5 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.16.5"
   },
-  "dependencies": {}
+  "dependencies": {
+    "rxjs": "^7.8.2"
+  }
 }

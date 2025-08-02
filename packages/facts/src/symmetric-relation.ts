@@ -1,4 +1,4 @@
-import { eq, type Logger, type Term } from "@swiftfall/logic";
+import { eq, type Logger, type Term } from "@codespiral/logic";
 import { MemoryObjRelation } from "./memory-obj-relation.js";
 import { MemoryRelation } from "./memory-relation.js";
 import type {

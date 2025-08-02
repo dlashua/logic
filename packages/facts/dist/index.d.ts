@@ -1,4 +1,4 @@
-import { Term, Goal, BaseConfig, Logger } from '@swiftfall/logic';
+import { Term, Goal, BaseConfig, Logger } from '@codespiral/logic';
 
 interface FactRelation {
     (...query: Term[]): Goal;
@@ -9,8 +9,6 @@ interface FactRelation {
 interface FactObjRelation {
     (queryObj: Record<string, Term>): Goal;
     set: (factObj: Record<string, Term>) => void;
-    update: (where: Partial<Record<string, Term>>, newValues: Record<string, Term>) => void;
-    upsert: (where: Partial<Record<string, Term>>, newValues: Record<string, Term>) => void;
     raw: Record<string, Term>[];
     indexes: Map<string, Map<any, Set<number>>>;
     keys: string[];
@@ -39,16 +37,6 @@ declare class MemoryObjRelation {
     private keys;
     private logger;
     private config;
-    /**
-     * Update facts matching a where-clause with new values.
-     * @param where - fields and values to match
-     * @param newValues - fields and values to update
-     */
-    private updateFacts;
-    /**
-     * Remove a fact index from a Map<value, Set<index>>
-     */
-    private removeFromIndex;
     private facts;
     private indexes;
     private goalIdCounter;
@@ -65,12 +53,11 @@ declare class MemoryRelation {
     private config;
     private facts;
     private indexes;
-    private goalIdCounter;
     constructor(logger: Logger, config: FactRelationConfig);
     createRelation(): FactRelation;
-    private generateGoalId;
     private createGoal;
-    private processFacts;
+    private queryFacts;
+    private getCandidateIndexes;
     private addFact;
 }
 

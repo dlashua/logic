@@ -1,4 +1,4 @@
-import type { Goal, Term } from "@swiftfall/logic";
+import type { Goal, Term } from "@codespiral/logic";
 
 export interface FactRelation {
   (...query: Term[]): Goal;
@@ -10,14 +10,14 @@ export interface FactRelation {
 export interface FactObjRelation {
   (queryObj: Record<string, Term>): Goal;
   set: (factObj: Record<string, Term>) => void;
-  update: (
-    where: Partial<Record<string, Term>>,
-    newValues: Record<string, Term>,
-  ) => void;
-  upsert: (
-    where: Partial<Record<string, Term>>,
-    newValues: Record<string, Term>,
-  ) => void;
+  // update: (
+  //   where: Partial<Record<string, Term>>,
+  //   newValues: Record<string, Term>,
+  // ) => void;
+  // upsert: (
+  //   where: Partial<Record<string, Term>>,
+  //   newValues: Record<string, Term>,
+  // ) => void;
   raw: Record<string, Term>[];
   indexes: Map<string, Map<any, Set<number>>>;
   keys: string[];

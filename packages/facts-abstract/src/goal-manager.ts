@@ -1,4 +1,4 @@
-import type { Term } from "@swiftfall/logic";
+import type { Term } from "@codespiral/logic";
 import type { GoalManager, GoalRecord } from "./types.js";
 
 /**

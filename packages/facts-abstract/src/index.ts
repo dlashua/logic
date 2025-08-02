@@ -1,5 +1,5 @@
-import type { Goal, Term } from "@swiftfall/logic";
-import { getDefaultLogger, type Logger, or } from "@swiftfall/logic";
+import type { Goal, Term } from "@codespiral/logic";
+import { getDefaultLogger, type Logger, or } from "@codespiral/logic";
 import { AbstractRelation } from "./abstract-relation.js";
 import { DefaultGoalManager } from "./goal-manager.js";
 import type {

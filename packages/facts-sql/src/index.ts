@@ -1,9 +1,9 @@
-import type { AbstractRelationConfig } from "@swiftfall/facts-abstract";
-import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
+import type { AbstractRelationConfig } from "@codespiral/facts-abstract";
+import { createAbstractRelationSystem } from "@codespiral/facts-abstract";
 import type { Knex } from "knex";
 import knex from "knex";
-import type { BaseConfig as Configuration } from "@swiftfall/logic";
-import { getDefaultLogger, Logger } from "@swiftfall/logic";
+import type { BaseConfig as Configuration } from "@codespiral/logic";
+import { getDefaultLogger, Logger } from "@codespiral/logic";
 import { SqlDataStore } from "./sql-datastore.js";
 
 /**

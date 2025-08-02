@@ -1,5 +1,5 @@
 import { isVar, lvar, unify, walk } from "./kernel.js";
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { CHECK_LATER } from "./suspend-helper.js";
 import type { Goal, Subst, Term, Var } from "./types.js";
 
@@ -466,8 +466,8 @@ export function cspSolver(
             }
           }
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
 
       return () => sub.unsubscribe();

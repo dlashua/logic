@@ -1,4 +1,4 @@
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq, run } from "../core/combinators.js";
 import {

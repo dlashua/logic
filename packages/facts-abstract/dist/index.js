@@ -1,5 +1,5 @@
 // src/index.ts
-import { getDefaultLogger as getDefaultLogger2, or } from "@swiftfall/logic";
+import { getDefaultLogger as getDefaultLogger2, or } from "@codespiral/logic";
 
 // src/abstract-relation.ts
 import {
@@ -8,11 +8,11 @@ import {
   getDefaultLogger,
   isVar as isVar2,
   walk as walk2
-} from "@swiftfall/logic";
-import { SimpleObservable } from "@swiftfall/observable";
+} from "@codespiral/logic";
+import { SimpleObservable } from "@codespiral/observable";
 
 // src/abstract-relation-helpers.ts
-import { isVar, queryUtils, unify, walk } from "@swiftfall/logic";
+import { isVar, queryUtils, unify, walk } from "@codespiral/logic";
 function couldBenefitFromCache(myGoal, otherGoal, subst) {
   if (myGoal.relationIdentifier !== otherGoal.relationIdentifier) {
     return "different_relation";

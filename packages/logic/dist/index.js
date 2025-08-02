@@ -1,12 +1,12 @@
 // src/core/combinators.ts
 import jsonata from "jsonata";
-import { SimpleObservable as SimpleObservable3 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable3, flatMap, share, take } from "@codespiral/observable";
 
 // src/core/kernel.ts
-import { SimpleObservable as SimpleObservable2 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable2, map } from "@codespiral/observable";
 
 // src/core/suspend-helper.ts
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 var CHECK_LATER = Symbol.for("constraint-check-later");
 function makeSuspendHandler(vars, evaluator, minGrounded) {
   return function handleSuspend(subst) {
@@ -43,8 +43,8 @@ function suspendable(vars, evaluator, minGrounded = vars.length - 1) {
           observer.error?.(error);
         }
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
     return () => sub.unsubscribe();
   });
@@ -359,8 +359,8 @@ function createEnrichedSubst(s, type, conjGoals, disjGoals, branch2) {
 }
 function enrichGroupInput(type, conjGoals, disjGoals, fn) {
   function newInput$(input$) {
-    const enrichedInput$ = input$.map(
-      (s) => createEnrichedSubst(s, type, conjGoals, disjGoals)
+    const enrichedInput$ = input$.pipe(
+      map((s) => createEnrichedSubst(s, type, conjGoals, disjGoals))
     );
     return fn(enrichedInput$);
   }
@@ -378,8 +378,8 @@ function eq(x, y) {
     [],
     (input$) => new SimpleObservable3((observer) => {
       const sub = input$.subscribe({
-        complete: observer.complete,
-        error: observer.error,
+        error: (err) => observer.error(err),
+        complete: () => observer.complete(),
         next: (subst) => {
           const s2 = unify(x, y, subst);
           if (s2) {
@@ -401,15 +401,15 @@ function fresh(f) {
         const freshVars = Array.from({ length: f.length }, () => lvar());
         const subGoal = f(...freshVars);
         subGoal(SimpleObservable3.of(s)).subscribe({
-          next: observer.next,
-          error: observer.error,
+          next: (v) => observer.next(v),
+          error: (e) => observer.error(e),
           complete: () => {
             active--;
             if (completed && active === 0) observer.complete?.();
           }
         });
       },
-      error: observer.error,
+      error: (err) => observer.error(err),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -451,16 +451,16 @@ var or = (...goals) => {
     goals,
     (input$) => {
       return new SimpleObservable3((observer) => {
-        const sharedInput$ = input$.share();
+        const sharedInput$ = input$.pipe(share());
         let completedGoals = 0;
         const subscriptions = [];
         const sharedObserver = {
-          next: observer.next,
-          error: observer.error,
+          next: (value) => observer.next(value),
+          error: (err) => observer.error(err),
           complete: () => {
             completedGoals++;
             if (completedGoals === goals.length) {
-              observer.complete?.();
+              observer.complete();
             }
           }
         };
@@ -500,8 +500,8 @@ function lift(fn) {
             observer.error?.(error);
           }
         },
-        error: observer.error,
-        complete: observer.complete
+        error: (e) => observer.error(e),
+        complete: () => observer.complete()
       });
       return () => subscription.unsubscribe?.();
     });
@@ -528,8 +528,8 @@ function eitherOr(firstGoal, secondGoal) {
               }
             } else {
               secondGoal(SimpleObservable3.of(s)).subscribe({
-                next: observer.next,
-                error: observer.error,
+                next: (v) => observer.next(v),
+                error: (e) => observer.error(e),
                 complete: () => {
                   active--;
                   if (completed && active === 0) observer.complete?.();
@@ -540,10 +540,10 @@ function eitherOr(firstGoal, secondGoal) {
             active--;
             if (completed && active === 0) observer.complete?.();
           },
-          error: observer.error
+          error: (e) => observer.error(e)
         });
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -568,8 +568,8 @@ function ifte(ifGoal, thenGoal, elseGoal) {
               let completed = 0;
               for (const s1 of results) {
                 thenGoal(SimpleObservable3.of(s1)).subscribe({
-                  next: observer.next,
-                  error: observer.error,
+                  next: (v) => observer.next(v),
+                  error: (e) => observer.error(e),
                   complete: () => {
                     completed++;
                     if (completed === results.length) {
@@ -583,22 +583,22 @@ function ifte(ifGoal, thenGoal, elseGoal) {
               }
             } else {
               elseGoal(SimpleObservable3.of(s)).subscribe({
-                next: observer.next,
-                complete: observer.complete,
-                error: observer.error
+                next: (v) => observer.next(v),
+                complete: () => observer.complete(),
+                error: (e) => observer.error(e)
               });
             }
           },
-          error: observer.error
+          error: (e) => observer.error(e)
         });
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
 function once(goal) {
-  return (input$) => goal(input$).take(1);
+  return (input$) => goal(input$).pipe(take(1));
 }
 function timeout(goal, timeoutMs) {
   return (input$) => new SimpleObservable3((observer) => {
@@ -641,7 +641,7 @@ function run(goal, maxResults, timeoutMs) {
     let completed = false;
     let error;
     const effectiveGoal = timeoutMs ? timeout(goal, timeoutMs) : goal;
-    const limitedGoal = maxResults ? (input$) => effectiveGoal(input$).take(maxResults) : effectiveGoal;
+    const limitedGoal = maxResults ? (input$) => effectiveGoal(input$).pipe(take(maxResults)) : effectiveGoal;
     limitedGoal(SimpleObservable3.of(/* @__PURE__ */ new Map())).subscribe({
       next: (result) => {
         results.push(result);
@@ -718,8 +718,8 @@ function project(inputVar, pathOrMap, outputVar) {
           if (unified !== null) observer.next(unified);
         }
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
     return () => subscription.unsubscribe?.();
   });
@@ -822,7 +822,7 @@ function projectJsonata(inputVars, jsonataExpr, outputVars) {
           }
         }
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -836,34 +836,36 @@ function Subquery(goal, extractVar, bindVar, aggregator = (results, _) => arrayT
     "Subquery",
     [],
     [goal],
-    (input$) => input$.flatMap((s) => {
-      const extracted = [];
-      return new SimpleObservable3((observer) => {
-        const subgoalSubscription = goal(SimpleObservable3.of(s)).subscribe({
-          next: (subResult) => {
-            const value = walk(extractVar, subResult);
-            extracted.push(value);
-          },
-          error: (error) => {
-            extracted.length = 0;
-            observer.error?.(error);
-          },
-          complete: () => {
-            const aggregated = aggregator(extracted, s);
-            const unified = unify(bindVar, aggregated, s);
-            if (unified !== null) {
-              observer.next(unified);
+    (input$) => input$.pipe(
+      flatMap((s) => {
+        const extracted = [];
+        return new SimpleObservable3((observer) => {
+          const subgoalSubscription = goal(SimpleObservable3.of(s)).subscribe({
+            next: (subResult) => {
+              const value = walk(extractVar, subResult);
+              extracted.push(value);
+            },
+            error: (error) => {
+              extracted.length = 0;
+              observer.error?.(error);
+            },
+            complete: () => {
+              const aggregated = aggregator(extracted, s);
+              const unified = unify(bindVar, aggregated, s);
+              if (unified !== null) {
+                observer.next(unified);
+              }
+              extracted.length = 0;
+              observer.complete?.();
             }
+          });
+          return () => {
+            subgoalSubscription.unsubscribe?.();
             extracted.length = 0;
-            observer.complete?.();
-          }
+          };
         });
-        return () => {
-          subgoalSubscription.unsubscribe?.();
-          extracted.length = 0;
-        };
-      });
-    })
+      })
+    )
   );
 }
 function branch(goal, aggregator) {
@@ -874,12 +876,12 @@ function branch(goal, aggregator) {
     (input$) => new SimpleObservable3((observer) => {
       const goalSubs = [];
       const inputSub = input$.subscribe({
-        error: observer.error,
-        complete: observer.complete,
+        error: (e) => observer.error(e),
+        complete: () => observer.complete(),
         next: (inputSubst) => {
           const collectedSubsts = [];
           const goalSub = goal(SimpleObservable3.of(inputSubst)).subscribe({
-            error: observer.error,
+            error: (e) => observer.error(e),
             complete: () => {
               aggregator(observer, collectedSubsts, inputSubst);
               collectedSubsts.length = 0;
@@ -900,7 +902,7 @@ function branch(goal, aggregator) {
 }
 
 // src/core/query.ts
-import { SimpleObservable as SimpleObservable4 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable4 } from "@codespiral/observable";
 function deepListWalk(val) {
   if (isLogicList(val)) {
     return logicListToArray(val).map(deepListWalk);
@@ -942,28 +944,26 @@ function createLogicVarProxy(prefix = "") {
 }
 function formatSubstitutions(substs, formatter, limit) {
   const limitedSubsts = limit === Infinity ? substs : substs.take(limit);
-  return {
-    subscribe(observer) {
-      const unsub = limitedSubsts.subscribe({
-        next: (s) => {
-          const result = {};
-          for (const key in formatter) {
-            if (key.startsWith("_")) continue;
-            const term = formatter[key];
-            result[key] = walk(term, s);
-          }
-          observer.next(deepListWalk(result));
-        },
-        error: observer.error,
-        complete: observer.complete
-      });
-      if (typeof unsub === "function") return unsub;
-      if (unsub && typeof unsub.unsubscribe === "function")
-        return () => unsub.unsubscribe();
-      return function noop() {
-      };
-    }
-  };
+  return new SimpleObservable4((observer) => {
+    const unsub = limitedSubsts.subscribe({
+      next: (s) => {
+        const result = {};
+        for (const key in formatter) {
+          if (key.startsWith("_")) continue;
+          const term = formatter[key];
+          result[key] = walk(term, s);
+        }
+        observer.next(deepListWalk(result));
+      },
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
+    });
+    if (typeof unsub === "function") return unsub;
+    if (unsub && typeof unsub.unsubscribe === "function")
+      return () => unsub.unsubscribe();
+    return function noop() {
+    };
+  });
 }
 var Query = class {
   _formatter = null;
@@ -1037,21 +1037,20 @@ var Query = class {
     const substStream = combinedGoal(SimpleObservable4.of(initialSubst));
     const results = formatSubstitutions(substStream, formatter, this._limit);
     const rawSelector = this._rawSelector;
-    return {
-      subscribe(observer) {
-        return results.subscribe({
-          next: (result) => {
-            if (rawSelector) {
-              observer.next(result.result);
-            } else {
-              observer.next(result);
-            }
-          },
-          error: observer.error,
-          complete: observer.complete
-        });
-      }
-    };
+    return new SimpleObservable4((observer) => {
+      const sub = results.subscribe({
+        next: (result) => {
+          if (rawSelector) {
+            observer.next(result.result);
+          } else {
+            observer.next(result);
+          }
+        },
+        error: (err) => observer.error(err),
+        complete: () => observer.complete()
+      });
+      return () => sub.unsubscribe();
+    });
   }
   /**
    * Makes the Query object itself an async iterable.
@@ -1135,10 +1134,10 @@ function query() {
 }
 
 // src/relations/aggregates.ts
-import { SimpleObservable as SimpleObservable6 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable6 } from "@codespiral/observable";
 
 // src/relations/aggregates-base.ts
-import { SimpleObservable as SimpleObservable5 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable5 } from "@codespiral/observable";
 function collect_and_process_base(processor) {
   return (input$) => new SimpleObservable5((observer) => {
     const buffer = [];
@@ -1240,8 +1239,8 @@ function count_value_streamo(x, value, count) {
           count,
           n
         )(SimpleObservable6.of(/* @__PURE__ */ new Map())).subscribe({
-          next: observer.next,
-          error: observer.error,
+          next: (v) => observer.next(v),
+          error: (e) => observer.error(e),
           complete: () => {
             substitutions.length = 0;
             observer.complete?.();
@@ -1319,8 +1318,8 @@ function take_streamo(n) {
           }
         }
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
     return () => subscription.unsubscribe?.();
   });
@@ -1474,50 +1473,56 @@ function deduplicate(items) {
 
 // src/relations/control.ts
 import util from "util";
-import { SimpleObservable as SimpleObservable7 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable7, flatMap as flatMap2, take as take2 } from "@codespiral/observable";
 var uniqueo = (t, g) => enrichGroupInput(
   "uniqueo",
   [g],
   [],
-  (input$) => input$.flatMap((s) => {
-    const seen = /* @__PURE__ */ new Set();
-    return g(SimpleObservable7.of(s)).flatMap((s2) => {
-      const w_t = walk(t, s2);
-      if (isVar(w_t)) {
-        return SimpleObservable7.of(s2);
-      }
-      const key = JSON.stringify(w_t);
-      if (seen.has(key)) return SimpleObservable7.empty();
-      seen.add(key);
-      return SimpleObservable7.of(s2);
-    });
-  })
+  (input$) => input$.pipe(
+    flatMap2((s) => {
+      const seen = /* @__PURE__ */ new Set();
+      return g(SimpleObservable7.of(s)).pipe(
+        flatMap2((s2) => {
+          const w_t = walk(t, s2);
+          if (isVar(w_t)) {
+            return SimpleObservable7.of(s2);
+          }
+          const key = JSON.stringify(w_t);
+          if (seen.has(key)) return SimpleObservable7.empty();
+          seen.add(key);
+          return SimpleObservable7.of(s2);
+        })
+      );
+    })
+  )
 );
 function not(goal) {
   return enrichGroupInput(
     "not",
     [],
     [goal],
-    (input$) => input$.flatMap((s) => {
-      return new SimpleObservable7((observer) => {
-        let hasSolutions = false;
-        const sub = goal(SimpleObservable7.of(s)).subscribe({
-          next: (subst) => {
-            if (!subst.has(SUSPENDED_CONSTRAINTS)) {
-              hasSolutions = true;
+    (input$) => input$.pipe(
+      flatMap2((s) => {
+        return new SimpleObservable7((observer) => {
+          let hasSolutions = false;
+          const sub = goal(SimpleObservable7.of(s)).subscribe({
+            next: (subst) => {
+              if (!subst.has(SUSPENDED_CONSTRAINTS)) {
+                hasSolutions = true;
+              }
+            },
+            error: (err) => observer.error?.(err),
+            complete: () => {
+              if (!hasSolutions) {
+                observer.next(s);
+              }
+              observer.complete?.();
             }
-          },
-          error: (err) => observer.error?.(err),
-          complete: () => {
-            if (!hasSolutions) {
-              observer.next(s);
-            }
-            observer.complete?.();
-          }
+          });
+          return () => sub.unsubscribe();
         });
-        return () => sub.unsubscribe();
-      });
-    })
+      })
+    )
   );
 }
 function gv1_not(goal) {
@@ -1525,24 +1530,26 @@ function gv1_not(goal) {
     "not",
     [],
     [goal],
-    (input$) => input$.flatMap((s) => {
-      return new SimpleObservable7((observer) => {
-        let hasSolutions = false;
-        const sub = goal(SimpleObservable7.of(s)).subscribe({
-          next: () => {
-            hasSolutions = true;
-          },
-          error: (err) => observer.error?.(err),
-          complete: () => {
-            if (!hasSolutions) {
-              observer.next(s);
+    (input$) => input$.pipe(
+      flatMap2((s) => {
+        return new SimpleObservable7((observer) => {
+          let hasSolutions = false;
+          const sub = goal(SimpleObservable7.of(s)).subscribe({
+            next: () => {
+              hasSolutions = true;
+            },
+            error: (err) => observer.error?.(err),
+            complete: () => {
+              if (!hasSolutions) {
+                observer.next(s);
+              }
+              observer.complete?.();
             }
-            observer.complete?.();
-          }
+          });
+          return () => sub.unsubscribe();
         });
-        return () => sub.unsubscribe();
-      });
-    })
+      })
+    )
   );
 }
 function old_not(goal) {
@@ -1550,30 +1557,32 @@ function old_not(goal) {
     "not",
     [],
     [goal],
-    (input$) => input$.flatMap((s) => {
-      let found = false;
-      return new SimpleObservable7((observer) => {
-        goal(SimpleObservable7.of(s)).subscribe({
-          next: (subst) => {
-            let addedNewBindings = false;
-            for (const [key, value] of subst) {
-              if (!s.has(key)) {
-                addedNewBindings = true;
-                break;
+    (input$) => input$.pipe(
+      flatMap2((s) => {
+        let found = false;
+        return new SimpleObservable7((observer) => {
+          goal(SimpleObservable7.of(s)).subscribe({
+            next: (subst) => {
+              let addedNewBindings = false;
+              for (const [key, value] of subst) {
+                if (!s.has(key)) {
+                  addedNewBindings = true;
+                  break;
+                }
               }
+              if (!addedNewBindings) {
+                found = true;
+              }
+            },
+            error: (e) => observer.error(e),
+            complete: () => {
+              if (!found) observer.next(s);
+              observer.complete?.();
             }
-            if (!addedNewBindings) {
-              found = true;
-            }
-          },
-          error: observer.error,
-          complete: () => {
-            if (!found) observer.next(s);
-            observer.complete?.();
-          }
+          });
         });
-      });
-    })
+      })
+    )
   );
 }
 function neqo(x, y) {
@@ -1613,47 +1622,51 @@ function old_neqo(x, y) {
   );
 }
 function onceo(goal) {
-  return (input$) => goal(input$).take(1);
+  return (input$) => goal(input$).pipe(take2(1));
 }
 function succeedo() {
-  return (input$) => input$.flatMap(
-    (s) => new SimpleObservable7((observer) => {
-      observer.next(s);
-      observer.complete?.();
-    })
+  return (input$) => input$.pipe(
+    flatMap2(
+      (s) => new SimpleObservable7((observer) => {
+        observer.next(s);
+        observer.complete?.();
+      })
+    )
   );
 }
 function failo() {
   return (_input$) => SimpleObservable7.empty();
 }
 function groundo(term) {
-  return (input$) => input$.flatMap(
-    (s) => new SimpleObservable7((observer) => {
-      const walked = walk(term, s);
-      function isGround(t) {
-        if (isVar(t)) return false;
-        if (Array.isArray(t)) {
-          return t.every(isGround);
-        }
-        if (t && typeof t === "object" && "tag" in t) {
-          if (t.tag === "cons") {
-            const l = t;
-            return isGround(l.head) && isGround(l.tail);
+  return (input$) => input$.pipe(
+    flatMap2(
+      (s) => new SimpleObservable7((observer) => {
+        const walked = walk(term, s);
+        function isGround(t) {
+          if (isVar(t)) return false;
+          if (Array.isArray(t)) {
+            return t.every(isGround);
           }
-          if (t.tag === "nil") {
-            return true;
+          if (t && typeof t === "object" && "tag" in t) {
+            if (t.tag === "cons") {
+              const l = t;
+              return isGround(l.head) && isGround(l.tail);
+            }
+            if (t.tag === "nil") {
+              return true;
+            }
           }
+          if (t && typeof t === "object" && !("tag" in t)) {
+            return Object.values(t).every(isGround);
+          }
+          return true;
         }
-        if (t && typeof t === "object" && !("tag" in t)) {
-          return Object.values(t).every(isGround);
+        if (isGround(walked)) {
+          observer.next(s);
         }
-        return true;
-      }
-      if (isGround(walked)) {
-        observer.next(s);
-      }
-      observer.complete?.();
-    })
+        observer.complete?.();
+      })
+    )
   );
 }
 function nonGroundo(term) {
@@ -1679,8 +1692,8 @@ function substLog(msg, onlyVars = false) {
           );
           observer.next(s);
         },
-        error: observer.error,
-        complete: observer.complete
+        error: (e) => observer.error(e),
+        complete: () => observer.complete()
       });
       return () => sub.unsubscribe();
     })
@@ -1715,7 +1728,7 @@ function thruCount(msg, level = 1e3) {
           }
           observer.next(s);
         },
-        error: observer.error,
+        error: (e) => observer.error(e),
         complete: () => {
           console.log("THRU COMPLETE", id, msg, cnt);
           observer.complete?.();
@@ -1730,15 +1743,15 @@ function fail() {
     const sub = input$.subscribe({
       next: (s) => {
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
     return () => sub.unsubscribe();
   });
 }
 
 // src/relations/lists.ts
-import { SimpleObservable as SimpleObservable8 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable8 } from "@codespiral/observable";
 function membero(x, list) {
   return enrichGroupInput(
     "membero",
@@ -1822,8 +1835,8 @@ function firsto(x, xs) {
         }
         observer.complete?.();
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
@@ -1839,8 +1852,8 @@ function resto(xs, tail) {
         }
         observer.complete?.();
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
@@ -1869,9 +1882,9 @@ function appendo(xs, ys, zs) {
               ys,
               rest
             )(SimpleObservable8.of(s1)).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: observer.complete
+              next: (v) => observer.next(v),
+              error: (e) => observer.error(e),
+              complete: () => observer.complete()
             });
             return;
           }
@@ -1881,8 +1894,8 @@ function appendo(xs, ys, zs) {
         }
         observer.complete?.();
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
@@ -1905,8 +1918,8 @@ function lengtho(arrayOrList, length) {
           observer.next(unified);
         }
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
@@ -1920,9 +1933,9 @@ function permuteo(xs, ys) {
             ys,
             nil
           )(SimpleObservable8.of(s)).subscribe({
-            next: observer.next,
-            error: observer.error,
-            complete: observer.complete
+            next: (v) => observer.next(v),
+            error: (e) => observer.error(e),
+            complete: () => observer.complete()
           });
           return;
         }
@@ -1943,12 +1956,12 @@ function permuteo(xs, ys) {
                     ysVal2.tail,
                     walk(lvar(), s1)
                   )(SimpleObservable8.of(s1)).subscribe({
-                    next: observer.next,
-                    error: observer.error
+                    next: (v) => observer.next(v),
+                    error: (e) => observer.error(e)
                   });
                 }
               },
-              error: observer.error,
+              error: (e) => observer.error(e),
               complete: () => {
                 completedCount++;
                 if (completedCount === arr.length) {
@@ -1964,8 +1977,8 @@ function permuteo(xs, ys) {
           observer.complete?.();
         }
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
@@ -1982,8 +1995,8 @@ function mapo(rel, xs, ys) {
             ys,
             nil
           )(SimpleObservable8.of(s)).subscribe({
-            next: observer.next,
-            error: observer.error,
+            next: (v) => observer.next(v),
+            error: (e) => observer.error(e),
             complete: () => {
               active--;
               if (completed && active === 0) observer.complete?.();
@@ -2001,8 +2014,8 @@ function mapo(rel, xs, ys) {
             rel(xHead, yHead),
             mapo(rel, xTail, yTail)
           )(SimpleObservable8.of(s)).subscribe({
-            next: observer.next,
-            error: observer.error,
+            next: (v) => observer.next(v),
+            error: (e) => observer.error(e),
             complete: () => {
               active--;
               if (completed && active === 0) observer.complete?.();
@@ -2013,7 +2026,7 @@ function mapo(rel, xs, ys) {
           if (completed && active === 0) observer.complete?.();
         }
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -2043,8 +2056,8 @@ function removeFirsto(xs, x, ys) {
               ys,
               xsVal.tail
             )(SimpleObservable8.of(s)).subscribe({
-              next: observer.next,
-              error: observer.error,
+              next: (v) => observer.next(v),
+              error: (e) => observer.error(e),
               complete: () => {
                 active--;
                 if (completed && active === 0) observer.complete?.();
@@ -2056,8 +2069,8 @@ function removeFirsto(xs, x, ys) {
               eq(ys, cons(xsVal.head, rest)),
               removeFirsto(xsVal.tail, x, rest)
             )(SimpleObservable8.of(s)).subscribe({
-              next: observer.next,
-              error: observer.error,
+              next: (v) => observer.next(v),
+              error: (e) => observer.error(e),
               complete: () => {
                 active--;
                 if (completed && active === 0) observer.complete?.();
@@ -2069,7 +2082,7 @@ function removeFirsto(xs, x, ys) {
           if (completed && active === 0) observer.complete?.();
         }
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -2106,14 +2119,14 @@ function alldistincto(xs) {
         if (allDistinct) observer.next(s);
         observer.complete?.();
       },
-      error: observer.error,
-      complete: observer.complete
+      error: (e) => observer.error(e),
+      complete: () => observer.complete()
     });
   });
 }
 
 // src/relations/numeric.ts
-import { SimpleObservable as SimpleObservable9 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable9 } from "@codespiral/observable";
 function gto(x, y) {
   return suspendable(
     [x, y],
@@ -2225,7 +2238,7 @@ function maxo(variable) {
       next: (s) => {
         substitutions.push(s);
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         if (substitutions.length === 0) {
           observer.complete?.();
@@ -2261,7 +2274,7 @@ function mino(variable) {
       next: (s) => {
         substitutions.push(s);
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         if (substitutions.length === 0) {
           observer.complete?.();
@@ -2292,101 +2305,107 @@ function mino(variable) {
 }
 
 // src/relations/objects.ts
-import { SimpleObservable as SimpleObservable10 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable10, flatMap as flatMap3 } from "@codespiral/observable";
 function extract(inputVar, mapping) {
-  return (input$) => input$.flatMap(
-    (s) => new SimpleObservable10((observer) => {
-      const inputValue = walk(inputVar, s);
-      if (typeof inputValue !== "object" || inputValue === null) {
-        observer.complete?.();
-        return;
-      }
-      const extractRecursive = (sourceValue, targetMapping, currentSubst2) => {
-        if (isVar(targetMapping)) {
-          return unify(targetMapping, sourceValue, currentSubst2);
-        } else if (Array.isArray(targetMapping)) {
-          if (!Array.isArray(sourceValue) || sourceValue.length !== targetMapping.length) {
-            return null;
-          }
-          let resultSubst = currentSubst2;
-          for (let i = 0; i < targetMapping.length; i++) {
-            const nextSubst = extractRecursive(
-              sourceValue[i],
-              targetMapping[i],
-              resultSubst
-            );
-            if (nextSubst === null) return null;
-            resultSubst = nextSubst;
-          }
-          return resultSubst;
-        } else if (typeof targetMapping === "object" && targetMapping !== null) {
-          if (typeof sourceValue !== "object" || sourceValue === null) {
-            return null;
-          }
-          let resultSubst = currentSubst2;
-          for (const [key, targetValue] of Object.entries(targetMapping)) {
-            const sourceNestedValue = sourceValue[key];
-            const nextSubst = extractRecursive(
-              sourceNestedValue,
-              targetValue,
-              resultSubst
-            );
-            if (nextSubst === null) return null;
-            resultSubst = nextSubst;
-          }
-          return resultSubst;
-        } else {
-          return sourceValue === targetMapping ? currentSubst2 : null;
-        }
-      };
-      let currentSubst = s;
-      for (const [key, outputMapping] of Object.entries(mapping)) {
-        const value = inputValue[key];
-        const nextSubst = extractRecursive(
-          value,
-          outputMapping,
-          currentSubst
-        );
-        if (nextSubst === null) {
+  return (input$) => input$.pipe(
+    flatMap3(
+      (s) => new SimpleObservable10((observer) => {
+        const inputValue = walk(inputVar, s);
+        if (typeof inputValue !== "object" || inputValue === null) {
           observer.complete?.();
           return;
         }
-        currentSubst = nextSubst;
-      }
-      observer.next(currentSubst);
-      observer.complete?.();
-    })
+        const extractRecursive = (sourceValue, targetMapping, currentSubst2) => {
+          if (isVar(targetMapping)) {
+            return unify(targetMapping, sourceValue, currentSubst2);
+          } else if (Array.isArray(targetMapping)) {
+            if (!Array.isArray(sourceValue) || sourceValue.length !== targetMapping.length) {
+              return null;
+            }
+            let resultSubst = currentSubst2;
+            for (let i = 0; i < targetMapping.length; i++) {
+              const nextSubst = extractRecursive(
+                sourceValue[i],
+                targetMapping[i],
+                resultSubst
+              );
+              if (nextSubst === null) return null;
+              resultSubst = nextSubst;
+            }
+            return resultSubst;
+          } else if (typeof targetMapping === "object" && targetMapping !== null) {
+            if (typeof sourceValue !== "object" || sourceValue === null) {
+              return null;
+            }
+            let resultSubst = currentSubst2;
+            for (const [key, targetValue] of Object.entries(
+              targetMapping
+            )) {
+              const sourceNestedValue = sourceValue[key];
+              const nextSubst = extractRecursive(
+                sourceNestedValue,
+                targetValue,
+                resultSubst
+              );
+              if (nextSubst === null) return null;
+              resultSubst = nextSubst;
+            }
+            return resultSubst;
+          } else {
+            return sourceValue === targetMapping ? currentSubst2 : null;
+          }
+        };
+        let currentSubst = s;
+        for (const [key, outputMapping] of Object.entries(mapping)) {
+          const value = inputValue[key];
+          const nextSubst = extractRecursive(
+            value,
+            outputMapping,
+            currentSubst
+          );
+          if (nextSubst === null) {
+            observer.complete?.();
+            return;
+          }
+          currentSubst = nextSubst;
+        }
+        observer.next(currentSubst);
+        observer.complete?.();
+      })
+    )
   );
 }
 function extractEach(arrayVar, mapping) {
-  return (input$) => input$.flatMap(
-    (s) => new SimpleObservable10((observer) => {
-      const arrayValue = walk(arrayVar, s);
-      if (!Array.isArray(arrayValue)) {
-        observer.complete?.();
-        return;
-      }
-      for (const element of arrayValue) {
-        if (typeof element === "object" && element !== null) {
-          let currentSubst = s;
-          let allUnified = true;
-          for (const [key, outputVar] of Object.entries(mapping)) {
-            const value = element[key];
-            const unified = unify(outputVar, value, currentSubst);
-            if (unified !== null) {
-              currentSubst = unified;
-            } else {
-              allUnified = false;
-              break;
+  return (input$) => input$.pipe(
+    flatMap3(
+      (s) => new SimpleObservable10((observer) => {
+        const arrayValue = walk(arrayVar, s);
+        if (!Array.isArray(arrayValue)) {
+          observer.complete?.();
+          return;
+        }
+        for (const element of arrayValue) {
+          if (typeof element === "object" && element !== null) {
+            let currentSubst = s;
+            let allUnified = true;
+            for (const [key, outputVar] of Object.entries(mapping)) {
+              const value = element[key];
+              const unified = unify(outputVar, value, currentSubst);
+              if (unified !== null) {
+                currentSubst = unified;
+              } else {
+                allUnified = false;
+                break;
+              }
+            }
+            if (allUnified) {
+              observer.next(currentSubst);
             }
           }
-          if (allUnified) {
-            observer.next(currentSubst);
-          }
         }
-      }
-      observer.complete?.();
-    })
+        observer.complete?.();
+      })
+    )
   );
 }
 
@@ -2732,7 +2751,7 @@ var intersect = indexUtils.intersect;
 var isIndexable = indexUtils.isIndexable;
 
 // src/util/procedural-helpers.ts
-import { SimpleObservable as SimpleObservable11 } from "@swiftfall/observable";
+import { SimpleObservable as SimpleObservable11 } from "@codespiral/observable";
 function aggregateVar(sourceVar, subgoal) {
   return (input$) => new SimpleObservable11((observer) => {
     let active = 0;
@@ -2747,7 +2766,7 @@ function aggregateVar(sourceVar, subgoal) {
             subgoalEmitted = true;
             results.push(walk(sourceVar, subst));
           },
-          error: observer.error,
+          error: (e) => observer.error(e),
           complete: () => {
             const s2 = new Map(s);
             s2.set(sourceVar.id, results);
@@ -2757,7 +2776,7 @@ function aggregateVar(sourceVar, subgoal) {
           }
         });
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();
@@ -2789,7 +2808,7 @@ function aggregateVarMulti(groupVars, aggVars, subgoal) {
               aggArrays[i].push(value);
             }
           },
-          error: observer.error,
+          error: (e) => observer.error(e),
           complete: () => {
             if (groupMap.size === 0) {
               const s2 = new Map(s);
@@ -2811,7 +2830,7 @@ function aggregateVarMulti(groupVars, aggVars, subgoal) {
           }
         });
       },
-      error: observer.error,
+      error: (e) => observer.error(e),
       complete: () => {
         completed = true;
         if (active === 0) observer.complete?.();

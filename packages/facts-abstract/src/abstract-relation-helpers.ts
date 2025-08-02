@@ -1,5 +1,5 @@
-import type { Subst, Term } from "@swiftfall/logic";
-import { isVar, queryUtils, unify, walk } from "@swiftfall/logic";
+import type { Subst, Term } from "@codespiral/logic";
+import { isVar, queryUtils, unify, walk } from "@codespiral/logic";
 import type {
   DataRow,
   GoalRecord,

@@ -1,5 +1,5 @@
-import type { Observable } from "@swiftfall/observable";
-import { SimpleObservable } from "@swiftfall/observable";
+import type { Observable } from "@codespiral/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { eq } from "../core/combinators.js";
 import { arrayToLogicList, unify, walk } from "../core/kernel.js";
 import type { Goal, Subst, Term } from "../core/types.ts";
@@ -39,8 +39,8 @@ export function count_value_streamo(x: Term, value: Term, count: Term): Goal {
             count,
             n,
           )(SimpleObservable.of(new Map())).subscribe({
-            next: observer.next,
-            error: observer.error,
+            next: (v) => observer.next(v),
+            error: (e: Error) => observer.error(e),
             complete: () => {
               // Clean up substitutions after processing
               substitutions.length = 0;
@@ -161,8 +161,8 @@ export function take_streamo(n: number): Goal {
             }
           }
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
 
       return () => subscription.unsubscribe?.();

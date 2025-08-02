@@ -1,4 +1,4 @@
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable, map } from "@codespiral/observable";
 import { SUSPENDED_CONSTRAINTS, wakeUpSuspends } from "./subst-suspends.js";
 import type {
   ConsNode,
@@ -414,8 +414,8 @@ export function enrichGroupInput(
   fn: (enrichedInput$: SimpleObservable<Subst>) => SimpleObservable<Subst>,
 ) {
   function newInput$(input$: SimpleObservable<Subst>) {
-    const enrichedInput$ = input$.map((s) =>
-      createEnrichedSubst(s, type, conjGoals, disjGoals),
+    const enrichedInput$ = input$.pipe(
+      map((s) => createEnrichedSubst(s, type, conjGoals, disjGoals)),
     );
     return fn(enrichedInput$);
   }

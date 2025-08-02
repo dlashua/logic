@@ -1,5 +1,5 @@
-import type { Observable } from "@swiftfall/observable";
-import { SimpleObservable } from "@swiftfall/observable";
+import type { Observable } from "@codespiral/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { and } from "./combinators.js";
 import { isLogicList, isVar, logicListToArray, lvar, walk } from "./kernel.js";
 import type { Goal, RunResult, Subst, Var } from "./types.js";
@@ -64,30 +64,28 @@ function formatSubstitutions<Fmt>(
   // Use the built-in take operator which properly handles cleanup
   const limitedSubsts =
     limit === Infinity ? substs : (substs as any).take(limit);
-  return {
-    subscribe(observer) {
-      const unsub = limitedSubsts.subscribe({
-        next: (s: Subst) => {
-          const result: Partial<RunResult<Fmt>> = {};
-          for (const key in formatter) {
-            if (key.startsWith("_")) continue;
-            const term = formatter[key];
-            result[key] = walk(term, s);
-          }
-          // Convert logic lists to arrays before yielding the final result
-          observer.next(deepListWalk(result) as RunResult<Fmt>);
-        },
-        error: observer.error,
-        complete: observer.complete,
-      });
-      if (typeof unsub === "function") return unsub;
-      if (unsub && typeof unsub.unsubscribe === "function")
-        return () => unsub.unsubscribe();
-      return function noop() {
-        /* pass */
-      };
-    },
-  };
+  return new SimpleObservable((observer) => {
+    const unsub = limitedSubsts.subscribe({
+      next: (s: Subst) => {
+        const result: Partial<RunResult<Fmt>> = {};
+        for (const key in formatter) {
+          if (key.startsWith("_")) continue;
+          const term = formatter[key];
+          result[key] = walk(term, s);
+        }
+        // Convert logic lists to arrays before yielding the final result
+        observer.next(deepListWalk(result) as RunResult<Fmt>);
+      },
+      error: (e: Error) => observer.error(e),
+      complete: () => observer.complete(),
+    });
+    if (typeof unsub === "function") return unsub;
+    if (unsub && typeof unsub.unsubscribe === "function")
+      return () => unsub.unsubscribe();
+    return function noop() {
+      /* pass */
+    };
+  });
 }
 
 type QueryOutput<Fmt, Sel> = Sel extends ($: Record<string, Var>) => Fmt
@@ -191,21 +189,21 @@ class Query<Fmt = Record<string, Var>, Sel = "*"> {
     const results = formatSubstitutions(substStream, formatter, this._limit);
 
     const rawSelector = this._rawSelector;
-    return {
-      subscribe(observer) {
-        return results.subscribe({
-          next: (result) => {
-            if (rawSelector) {
-              observer.next(result.result);
-            } else {
-              observer.next(result);
-            }
-          },
-          error: observer.error,
-          complete: observer.complete,
-        });
-      },
-    };
+    return new SimpleObservable((observer) => {
+      const sub = results.subscribe({
+        next: (result) => {
+          if (rawSelector) {
+            observer.next(result.result);
+          } else {
+            observer.next(result);
+          }
+        },
+        error: (err: Error) => observer.error(err),
+        complete: () => observer.complete(),
+      });
+
+      return () => sub.unsubscribe();
+    });
   }
 
   /**

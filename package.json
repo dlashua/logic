@@ -1,8 +1,9 @@
 {
-  "name": "@swiftfall/logicroot",
+  "name": "@codespiral/logicroot",
   "version": "0.0.1",
   "description": "",
   "type": "module",
+  "private": true,
   "scripts": {
     "build": "pnpm --recursive run build",
     "dev": "pnpm --recursive run dev"
@@ -10,20 +11,21 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.10.0",
+  "packageManager": "pnpm@10.14.0",
   "dependencies": {
+    "@codespiral/facts": "workspace:*",
+    "@codespiral/facts-sql": "workspace:*",
+    "@codespiral/logic": "workspace:*",
+    "@codespiral/observable": "workspace:*",
     "@types/node": "^22.16.5",
-    "@swiftfall/facts": "workspace:*",
-    "@swiftfall/facts-sql": "workspace:*",
     "knex": "^3.1.0",
-    "@swiftfall/logic": "workspace:*",
-    "@swiftfall/observable": "workspace:*",
     "rxjs": "^7.8.2",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
+    "@changesets/cli": "^2.29.5",
     "ts-node": "^10.9.2",
     "tsup": "^8.5.0",
     "vitest": "^3.2.4"

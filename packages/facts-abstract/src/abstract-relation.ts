@@ -1,4 +1,4 @@
-import type { Goal, Subst, Term } from "@swiftfall/logic";
+import type { Goal, Subst, Term } from "@codespiral/logic";
 import {
   GOAL_GROUP_ALL_GOALS,
   GOAL_GROUP_CONJ_GOALS,
@@ -6,9 +6,9 @@ import {
   isVar,
   type Logger,
   walk,
-} from "@swiftfall/logic";
-import { SimpleObservable } from "@swiftfall/observable";
-import type { Observable } from "@swiftfall/observable";
+} from "@codespiral/logic";
+import { SimpleObservable } from "@codespiral/observable";
+import type { Observable } from "@codespiral/observable";
 import {
   buildWhereConditions,
   canMergeQueries,

@@ -1,4 +1,4 @@
-import { type BaseConfig, getDefaultLogger } from "@swiftfall/logic";
+import { type BaseConfig, getDefaultLogger } from "@codespiral/logic";
 import { FactRelationFactory } from "./relation-factory.js";
 import type {
   FactObjRelation,

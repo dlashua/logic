@@ -1,4 +1,4 @@
-import type { Subst } from "@swiftfall/logic";
+import type { Subst } from "@codespiral/logic";
 import type { CacheEntry, CacheManager, DataRow } from "./types.js";
 
 const ROW_CACHE = Symbol.for("abstract-row-cache");

@@ -1,4 +1,4 @@
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { isVar, unify, walk } from "../core/kernel.js";
 import { CHECK_LATER, suspendable } from "../core/suspend-helper.js";
 import type { Goal, Subst, Term } from "../core/types.js";
@@ -180,7 +180,7 @@ export function maxo(variable: Term): Goal {
         next: (s) => {
           substitutions.push(s);
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           if (substitutions.length === 0) {
             observer.complete?.();
@@ -233,7 +233,7 @@ export function mino(variable: Term): Goal {
         next: (s) => {
           substitutions.push(s);
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           if (substitutions.length === 0) {
             observer.complete?.();

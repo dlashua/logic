@@ -1,6 +1,6 @@
 import jsonata from "jsonata";
-import type { Observer, Subscription } from "@swiftfall/observable";
-import { SimpleObservable } from "@swiftfall/observable";
+import type { Observer, Subscription } from "@codespiral/observable";
+import { SimpleObservable, flatMap, share, take } from "@codespiral/observable";
 import {
   arrayToLogicList,
   enrichGroupInput,
@@ -44,8 +44,8 @@ export function eq(x: Term, y: Term): Goal {
     (input$) =>
       new SimpleObservable((observer) => {
         const sub = input$.subscribe({
-          complete: observer.complete,
-          error: observer.error,
+          error: (err: Error) => observer.error(err),
+          complete: () => observer.complete(),
           next: (subst) => {
             const s2 = unify(x, y, subst);
             if (s2) {
@@ -99,15 +99,15 @@ export function fresh(f: (...vars: Var[]) => Goal): Goal {
           const freshVars = Array.from({ length: f.length }, () => lvar());
           const subGoal = f(...freshVars);
           subGoal(SimpleObservable.of(s)).subscribe({
-            next: observer.next,
-            error: observer.error,
+            next: (v) => observer.next(v),
+            error: (e: Error) => observer.error(e),
             complete: () => {
               active--;
               if (completed && active === 0) observer.complete?.();
             },
           });
         },
-        error: observer.error,
+        error: (err: Error) => observer.error(err),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -155,7 +155,7 @@ export const and = (...goals: Goal[]): Goal => {
 
 export const or = (...goals: Goal[]): Goal => {
   if (goals.length === 0) {
-    return () => SimpleObservable.empty<Subst>();
+    return () => SimpleObservable.empty();
   }
   if (goals.length === 1) {
     return goals[0];
@@ -168,18 +168,18 @@ export const or = (...goals: Goal[]): Goal => {
     (input$: SimpleObservable<Subst>) => {
       return new SimpleObservable<Subst>((observer) => {
         // Use the improved share() method that replays values for logic programming
-        const sharedInput$ = input$.share();
+        const sharedInput$ = input$.pipe(share());
 
         let completedGoals = 0;
         const subscriptions: Subscription[] = [];
 
         const sharedObserver = {
-          next: observer.next,
-          error: observer.error,
+          next: (value: Subst) => observer.next(value),
+          error: (err: Error) => observer.error(err),
           complete: () => {
             completedGoals++;
             if (completedGoals === goals.length) {
-              observer.complete?.();
+              observer.complete();
             }
           },
         };
@@ -190,8 +190,8 @@ export const or = (...goals: Goal[]): Goal => {
 
         // for (const goal of goals) {
         //   const goalSubscription = goal(sharedInput$).subscribe({
-        //     next: observer.next,
-        //     error: observer.error,
+        //     next: (v) => observer.next(v),
+        //     error: (e: Error) => observer.error(e),
         //     complete: () => {
         //       completedGoals++;
         //       if (completedGoals === goals.length) {
@@ -250,8 +250,8 @@ export function lift<U, T extends LiftableFunction<U>>(
               observer.error?.(error);
             }
           },
-          error: observer.error,
-          complete: observer.complete,
+          error: (e: Error) => observer.error(e),
+          complete: () => observer.complete(),
         });
         return () => subscription.unsubscribe?.();
       });
@@ -288,8 +288,8 @@ export function eitherOr(firstGoal: Goal, secondGoal: Goal): Goal {
               } else {
                 // First goal failed, try second goal
                 secondGoal(SimpleObservable.of(s)).subscribe({
-                  next: observer.next,
-                  error: observer.error,
+                  next: (v) => observer.next(v),
+                  error: (e: Error) => observer.error(e),
                   complete: () => {
                     active--;
                     if (completed && active === 0) observer.complete?.();
@@ -300,10 +300,10 @@ export function eitherOr(firstGoal: Goal, secondGoal: Goal): Goal {
               active--;
               if (completed && active === 0) observer.complete?.();
             },
-            error: observer.error,
+            error: (e: Error) => observer.error(e),
           });
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -334,8 +334,8 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
                 let completed = 0;
                 for (const s1 of results) {
                   thenGoal(SimpleObservable.of(s1)).subscribe({
-                    next: observer.next,
-                    error: observer.error,
+                    next: (v) => observer.next(v),
+                    error: (e: Error) => observer.error(e),
                     complete: () => {
                       completed++;
                       if (completed === results.length) {
@@ -349,17 +349,17 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
                 }
               } else {
                 elseGoal(SimpleObservable.of(s)).subscribe({
-                  next: observer.next,
-                  complete: observer.complete,
-                  error: observer.error,
+                  next: (v) => observer.next(v),
+                  complete: () => observer.complete(),
+                  error: (e: Error) => observer.error(e),
                 });
               }
             },
-            error: observer.error,
+            error: (e: Error) => observer.error(e),
           });
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -368,7 +368,7 @@ export function ifte(ifGoal: Goal, thenGoal: Goal, elseGoal: Goal): Goal {
  * Succeeds exactly once with the given substitution (useful for cut-like behavior)
  */
 export function once(goal: Goal): Goal {
-  return (input$) => goal(input$).take(1);
+  return (input$) => goal(input$).pipe(take(1));
 }
 
 /**
@@ -426,7 +426,7 @@ export function run(
     const effectiveGoal = timeoutMs ? timeout(goal, timeoutMs) : goal;
     const limitedGoal = maxResults
       ? (input$: SimpleObservable<Subst>) =>
-          effectiveGoal(input$).take(maxResults)
+          effectiveGoal(input$).pipe(take(maxResults))
       : effectiveGoal;
     limitedGoal(SimpleObservable.of(new Map())).subscribe({
       next: (result) => {
@@ -520,8 +520,8 @@ export function project(
             if (unified !== null) observer.next(unified);
           }
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
       return () => subscription.unsubscribe?.();
     });
@@ -676,7 +676,7 @@ export function projectJsonata(
             }
           }
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -710,39 +710,41 @@ export function Subquery(
   ) => arrayToLogicList(results),
 ): Goal {
   return enrichGroupInput("Subquery", [], [goal], (input$) =>
-    input$.flatMap((s: Subst) => {
-      const extracted: unknown[] = [];
+    input$.pipe(
+      flatMap((s: Subst) => {
+        const extracted: unknown[] = [];
 
-      return new SimpleObservable<Subst>((observer) => {
-        const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
-          next: (subResult) => {
-            // Extract the value from each subgoal result
-            const value = walk(extractVar, subResult);
-            extracted.push(value);
-          },
-          error: (error) => {
+        return new SimpleObservable<Subst>((observer) => {
+          const subgoalSubscription = goal(SimpleObservable.of(s)).subscribe({
+            next: (subResult) => {
+              // Extract the value from each subgoal result
+              const value = walk(extractVar, subResult);
+              extracted.push(value);
+            },
+            error: (error) => {
+              extracted.length = 0;
+              observer.error?.(error);
+            },
+            complete: () => {
+              // Aggregate all extracted values and bind to the target variable
+              // Pass the original substitution so aggregator can walk variables
+              const aggregated = aggregator(extracted, s);
+              const unified = unify(bindVar, aggregated, s);
+              if (unified !== null) {
+                observer.next(unified);
+              }
+              extracted.length = 0;
+              observer.complete?.();
+            },
+          });
+
+          return () => {
+            subgoalSubscription.unsubscribe?.();
             extracted.length = 0;
-            observer.error?.(error);
-          },
-          complete: () => {
-            // Aggregate all extracted values and bind to the target variable
-            // Pass the original substitution so aggregator can walk variables
-            const aggregated = aggregator(extracted, s);
-            const unified = unify(bindVar, aggregated, s);
-            if (unified !== null) {
-              observer.next(unified);
-            }
-            extracted.length = 0;
-            observer.complete?.();
-          },
+          };
         });
-
-        return () => {
-          subgoalSubscription.unsubscribe?.();
-          extracted.length = 0;
-        };
-      });
-    }),
+      }),
+    ),
   );
 }
 
@@ -762,12 +764,12 @@ export function branch(
       new SimpleObservable<Subst>((observer) => {
         const goalSubs: Subscription[] = [];
         const inputSub = input$.subscribe({
-          error: observer.error,
-          complete: observer.complete,
+          error: (e: Error) => observer.error(e),
+          complete: () => observer.complete(),
           next: (inputSubst) => {
             const collectedSubsts: Subst[] = [];
             const goalSub = goal(SimpleObservable.of(inputSubst)).subscribe({
-              error: observer.error,
+              error: (e: Error) => observer.error(e),
               complete: () => {
                 aggregator(observer, collectedSubsts, inputSubst);
                 // observer.complete?.();

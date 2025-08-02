@@ -9,8 +9,8 @@
  * Functions ending in _base are infrastructure - use the public aggregation
  * functions in aggregates.ts instead.
  */
-import type { Observable } from "@swiftfall/observable";
-import { SimpleObservable } from "@swiftfall/observable";
+import type { Observable } from "@codespiral/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import type { Goal, Subst, Term } from "../index.js";
 import { unify, walk } from "../index.js";
 

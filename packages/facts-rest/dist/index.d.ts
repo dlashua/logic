@@ -1,7 +1,7 @@
-import * as _swiftfall_facts_abstract from '@swiftfall/facts-abstract';
-import { RelationOptions, RestDataStoreConfig, AbstractRelationConfig } from '@swiftfall/facts-abstract';
-export { RestDataStoreConfig } from '@swiftfall/facts-abstract';
-import * as _swiftfall_logic from '@swiftfall/logic';
+import * as _codespiral_facts_abstract from '@codespiral/facts-abstract';
+import { RelationOptions, RestDataStoreConfig, AbstractRelationConfig } from '@codespiral/facts-abstract';
+export { RestDataStoreConfig } from '@codespiral/facts-abstract';
+import * as _codespiral_logic from '@codespiral/logic';
 
 interface RelationCache {
     get(key: string): Promise<any | undefined>;
@@ -27,13 +27,13 @@ declare const makeRelREST: (restConfig: RestDataStoreConfig & {
 }, config?: AbstractRelationConfig) => Promise<{
     rel: (pathTemplate: string, options?: RestRelationOptions & {
         cache?: RelationCache | null;
-    }) => (queryObj: Record<string, _swiftfall_logic.Term>) => _swiftfall_logic.Goal;
-    relSym: (table: string, keys: [string, string], options?: _swiftfall_facts_abstract.RelationOptions) => (queryObj: Record<string, _swiftfall_logic.Term>) => _swiftfall_logic.Goal;
+    }) => (queryObj: Record<string, _codespiral_logic.Term>) => _codespiral_logic.Goal;
+    relSym: (table: string, keys: [string, string], options?: _codespiral_facts_abstract.RelationOptions) => (queryObj: Record<string, _codespiral_logic.Term>) => _codespiral_logic.Goal;
     getQueries: () => string[];
     clearQueries: () => void;
     getQueryCount: () => number;
     close: () => Promise<void>;
-    getDataStore: () => _swiftfall_facts_abstract.DataStore;
+    getDataStore: () => _codespiral_facts_abstract.DataStore;
 }>;
 
 export { makeRelREST };

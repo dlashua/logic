@@ -1,4 +1,4 @@
-import { query } from "logic";
+import { query } from "@codespiral/logic";
 
 console.log("START quick-test");
 
@@ -26,7 +26,7 @@ async function loadBackend(backend: string) {
           queries: module.relDB.getQueryCount(),
         });
       },
-      () => module.relDB.db.destroy()
+      () => module.relDB.db.destroy(),
     );
     return module.familytree;
   } else if (backend === "mem") {
@@ -93,7 +93,7 @@ console.dir(
   },
   {
     depth: 100,
-  }
+  },
 );
 await Promise.all(closeFns.map((x) => x()));
 console.log("FINISHED", BACKEND, Date.now() - start);

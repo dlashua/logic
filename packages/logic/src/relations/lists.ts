@@ -11,7 +11,7 @@ import {
   unify,
   walk,
 } from "../core/kernel.js";
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import type { Goal, LogicList, Subst, Term } from "../core/types.js";
 
 export function membero(x: Term, list: Term): Goal {
@@ -119,8 +119,8 @@ export function firsto(x: Term, xs: Term): Goal {
           }
           observer.complete?.();
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -141,8 +141,8 @@ export function resto(xs: Term, tail: Term): Goal {
           }
           observer.complete?.();
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -177,9 +177,9 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
                 ys,
                 rest,
               )(SimpleObservable.of(s1)).subscribe({
-                next: observer.next,
-                error: observer.error,
-                complete: observer.complete,
+                next: (v) => observer.next(v),
+                error: (e: Error) => observer.error(e),
+                complete: () => observer.complete(),
               });
               return;
             }
@@ -189,8 +189,8 @@ export function appendo(xs: Term, ys: Term, zs: Term): Goal {
           }
           observer.complete?.();
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -222,8 +222,8 @@ export function lengtho(arrayOrList: Term, length: Term): Goal {
           }
           // observer.complete?.();
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -239,9 +239,9 @@ export function permuteo(xs: Term, ys: Term): Goal {
               ys,
               nil,
             )(SimpleObservable.of(s)).subscribe({
-              next: observer.next,
-              error: observer.error,
-              complete: observer.complete,
+              next: (v) => observer.next(v),
+              error: (e: Error) => observer.error(e),
+              complete: () => observer.complete(),
             });
             return;
           }
@@ -262,12 +262,12 @@ export function permuteo(xs: Term, ys: Term): Goal {
                       ysVal2.tail,
                       walk(lvar(), s1),
                     )(SimpleObservable.of(s1)).subscribe({
-                      next: observer.next,
-                      error: observer.error,
+                      next: (v) => observer.next(v),
+                      error: (e: Error) => observer.error(e),
                     });
                   }
                 },
-                error: observer.error,
+                error: (e: Error) => observer.error(e),
                 complete: () => {
                   completedCount++;
                   if (completedCount === arr.length) {
@@ -283,8 +283,8 @@ export function permuteo(xs: Term, ys: Term): Goal {
             observer.complete?.();
           }
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }
@@ -307,8 +307,8 @@ export function mapo(
               ys,
               nil,
             )(SimpleObservable.of(s)).subscribe({
-              next: observer.next,
-              error: observer.error,
+              next: (v) => observer.next(v),
+              error: (e: Error) => observer.error(e),
               complete: () => {
                 active--;
                 if (completed && active === 0) observer.complete?.();
@@ -326,8 +326,8 @@ export function mapo(
               rel(xHead, yHead),
               mapo(rel, xTail, yTail),
             )(SimpleObservable.of(s)).subscribe({
-              next: observer.next,
-              error: observer.error,
+              next: (v) => observer.next(v),
+              error: (e: Error) => observer.error(e),
               complete: () => {
                 active--;
                 if (completed && active === 0) observer.complete?.();
@@ -338,7 +338,7 @@ export function mapo(
             if (completed && active === 0) observer.complete?.();
           }
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -370,8 +370,8 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
                 ys,
                 xsVal.tail,
               )(SimpleObservable.of(s)).subscribe({
-                next: observer.next,
-                error: observer.error,
+                next: (v) => observer.next(v),
+                error: (e: Error) => observer.error(e),
                 complete: () => {
                   active--;
                   if (completed && active === 0) observer.complete?.();
@@ -383,8 +383,8 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
                 eq(ys, cons(xsVal.head, rest)),
                 removeFirsto(xsVal.tail, x, rest),
               )(SimpleObservable.of(s)).subscribe({
-                next: observer.next,
-                error: observer.error,
+                next: (v) => observer.next(v),
+                error: (e: Error) => observer.error(e),
                 complete: () => {
                   active--;
                   if (completed && active === 0) observer.complete?.();
@@ -396,7 +396,7 @@ export function removeFirsto(xs: Term, x: Term, ys: Term): Goal {
             if (completed && active === 0) observer.complete?.();
           }
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -438,8 +438,8 @@ export function alldistincto(xs: Term): Goal {
           if (allDistinct) observer.next(s);
           observer.complete?.();
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
     });
 }

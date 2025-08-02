@@ -1,6 +1,6 @@
 {
-  "name": "@swiftfall/facts",
-  "version": "0.0.1",
+  "name": "@codespiral/facts",
+  "version": "0.0.7",
   "description": "",
   "type": "module",
   "scripts": {
@@ -24,7 +24,7 @@
   "packageManager": "pnpm@10.10.0",
   "devDependencies": {},
   "dependencies": {
-    "@swiftfall/logic": "workspace:*",
-    "@swiftfall/observable": "workspace:*"
+    "@codespiral/logic": "workspace:*",
+    "@codespiral/observable": "workspace:*"
   }
 }

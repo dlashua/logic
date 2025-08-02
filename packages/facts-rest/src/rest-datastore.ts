@@ -4,7 +4,7 @@ import type {
   QueryParams,
   RestDataStoreConfig,
   WhereCondition,
-} from "@swiftfall/facts-abstract";
+} from "@codespiral/facts-abstract";
 import type { RelationCache } from "./relation-cache.js";
 import type { RestRelationOptions } from "./types.js";
 

@@ -1,4 +1,4 @@
-import { SimpleObservable, Observer, Observable } from '@swiftfall/observable';
+import { SimpleObservable, Observer, Observable } from '@codespiral/observable';
 
 /**
  * Represents a logic variable, a placeholder for a value.

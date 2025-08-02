@@ -1,4 +1,4 @@
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable } from "@codespiral/observable";
 import { walk } from "../core/kernel.js";
 import type { Goal, Subst, Term, Var } from "../core/types.js";
 
@@ -20,7 +20,7 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
               subgoalEmitted = true;
               results.push(walk(sourceVar, subst));
             },
-            error: observer.error,
+            error: (e: Error) => observer.error(e),
             complete: () => {
               const s2 = new Map(s);
               s2.set(sourceVar.id, results);
@@ -30,7 +30,7 @@ export function aggregateVar(sourceVar: Var, subgoal: Goal): Goal {
             },
           });
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();
@@ -71,7 +71,7 @@ export function aggregateVarMulti(
                 aggArrays[i].push(value);
               }
             },
-            error: observer.error,
+            error: (e: Error) => observer.error(e),
             complete: () => {
               if (groupMap.size === 0) {
                 const s2 = new Map(s);
@@ -93,7 +93,7 @@ export function aggregateVarMulti(
             },
           });
         },
-        error: observer.error,
+        error: (e: Error) => observer.error(e),
         complete: () => {
           completed = true;
           if (active === 0) observer.complete?.();

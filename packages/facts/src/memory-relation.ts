@@ -1,20 +1,19 @@
+import { mergeMap } from "rxjs/operators";
+import { from, EMPTY, Observable } from "rxjs";
 import {
   type Goal,
   indexUtils,
   isVar,
   type Logger,
-  queryUtils,
   type Subst,
   type Term,
-  unificationUtils,
-} from "@swiftfall/logic";
-import { SimpleObservable } from "@swiftfall/observable";
+  unify,
+} from "@codespiral/logic";
 import type { FactRelation, FactRelationConfig } from "./types.js";
 
 export class MemoryRelation {
   private facts: Term[][] = [];
-  private indexes = new Map<number, Map<any, Set<number>>>();
-  private goalIdCounter = 0;
+  private indexes = new Map<number, Map<unknown, Set<number>>>();
 
   constructor(
     private logger: Logger,
@@ -23,8 +22,7 @@ export class MemoryRelation {
 
   createRelation(): FactRelation {
     const goalFn = (...query: Term[]): Goal => {
-      const goalId = this.generateGoalId();
-      return this.createGoal(query, goalId);
+      return this.createGoal(query);
     };
 
     goalFn.set = (...fact: Term[]) => {
@@ -37,145 +35,99 @@ export class MemoryRelation {
     return goalFn;
   }
 
-  private generateGoalId(): number {
-    return ++this.goalIdCounter;
-  }
-
-  private createGoal(query: Term[], goalId: number): Goal {
-    return (input$) =>
-      new SimpleObservable<Subst>((observer) => {
-        let cancelled = false;
-
-        this.logger.log("RUN_START", {
-          message: `Starting memory relation goal ${goalId}`,
-          query,
-        });
-
-        const subscription = input$.subscribe({
-          next: async (s: Subst) => {
-            try {
-              if (cancelled) return;
-
-              const walkedQuery = queryUtils.walkAllArray(query, s);
-
-              // Try to use indexes for optimization
-              const indexedPositions: number[] = [];
-              walkedQuery.forEach((term, i) => {
-                if (!isVar(term) && this.indexes.has(i)) {
-                  indexedPositions.push(i);
-                }
-              });
-
-              let candidateIndexes: Set<number> | null = null;
-
-              if (indexedPositions.length > 0) {
-                this.logger.log("INDEX_LOOKUP", {
-                  message: `Using indexes for positions: ${indexedPositions.join(", ")}`,
-                });
-
-                for (const pos of indexedPositions) {
-                  const term = walkedQuery[pos];
-                  const index = this.indexes.get(pos);
-                  if (!index) continue;
-
-                  const factNums = index.get(term);
-                  if (!factNums || factNums.size === 0) {
-                    candidateIndexes = new Set();
-                    break;
-                  }
-
-                  if (candidateIndexes === null) {
-                    candidateIndexes = new Set(factNums);
-                  } else {
-                    candidateIndexes = indexUtils.intersect(
-                      candidateIndexes,
-                      factNums,
-                    );
-                    if (candidateIndexes.size === 0) break;
-                  }
-                }
-              }
-
-              if (candidateIndexes === null) {
-                this.logger.log("MEMORY_SCAN", {
-                  message: `Full scan of ${this.facts.length} facts`,
-                });
-
-                // Process facts one by one with cancellation support
-                await this.processFacts(
-                  this.facts,
-                  query,
-                  s,
-                  observer,
-                  () => cancelled,
-                );
-              } else {
-                this.logger.log("INDEX_LOOKUP", {
-                  message: `Checking ${candidateIndexes.size} indexed facts`,
-                });
-
-                // Process indexed facts
-                const indexedFacts = Array.from(candidateIndexes).map(
-                  (i) => this.facts[i],
-                );
-                await this.processFacts(
-                  indexedFacts,
-                  query,
-                  s,
-                  observer,
-                  () => cancelled,
-                );
-              }
-            } catch (err) {
-              if (!cancelled) observer.error?.(err);
-            }
-          },
-          complete: () => {
-            if (!cancelled) {
-              this.logger.log("RUN_END", {
-                message: `Completed memory relation goal ${goalId}`,
-              });
-              observer.complete?.();
-            }
-          },
-          error: (err) => {
-            if (!cancelled) observer.error?.(err);
-          },
-        });
-
-        return () => {
-          cancelled = true;
-          subscription.unsubscribe?.();
-        };
+  private createGoal(query: Term[]): Goal {
+    return (input$: Observable<Subst>) => {
+      this.logger.log("RUN_START", {
+        message: `Starting memory relation query`,
+        query,
       });
+
+      // Simplified approach using pure RxJS
+      return input$.pipe(
+        mergeMap((s: Subst) => {
+          const results = this.queryFacts(query, s);
+          return results.length > 0 ? from(results) : EMPTY;
+        }),
+      );
+    };
   }
 
-  private async processFacts(
-    facts: Term[][],
-    query: Term[],
-    s: Subst,
-    observer: any,
-    isCancelled: () => boolean,
-  ): Promise<void> {
-    for (let i = 0; i < facts.length; i++) {
-      if (isCancelled()) break;
+  private queryFacts(query: Term[], substitution: Subst): Subst[] {
+    const results: Subst[] = [];
 
-      const fact = facts[i];
-      const s1 = await unificationUtils.unifyArrays(query, fact, s);
-      if (s1 && !isCancelled()) {
+    // Try to use indexes for optimization
+    const candidateIndexes = this.getCandidateIndexes(query);
+
+    let factsToCheck: Term[][];
+    if (candidateIndexes.size === 0) {
+      // Full scan
+      this.logger.log("FULL_SCAN", {
+        message: `Full scan of ${this.facts.length} facts`,
+      });
+      factsToCheck = this.facts;
+    } else {
+      // Use indexed facts
+      this.logger.log("INDEX_LOOKUP", {
+        message: `Checking ${candidateIndexes.size} indexed facts`,
+      });
+      factsToCheck = Array.from(candidateIndexes).map((i) => this.facts[i]);
+    }
+
+    // Check each fact against the query
+    for (const fact of factsToCheck) {
+      const unificationResult = unify(query, fact, substitution);
+      if (unificationResult) {
         this.logger.log("FACT_MATCH", {
           message: "Fact matched",
           fact,
           query,
         });
-        observer.next(s1);
-      }
-
-      // Yield control periodically to allow cancellation
-      if (i % 10 === 0) {
-        await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+        results.push(unificationResult);
       }
     }
+
+    return results;
+  }
+
+  private getCandidateIndexes(query: Term[]): Set<number> {
+    const indexedPositions: number[] = [];
+    query.forEach((term, i) => {
+      if (!isVar(term) && this.indexes.has(i)) {
+        indexedPositions.push(i);
+      }
+    });
+
+    let candidateIndexes: Set<number> = new Set();
+
+    if (indexedPositions.length > 0) {
+      this.logger.log("INDEX_LOOKUP", {
+        message: `Using indexes for positions: ${indexedPositions.join(", ")}`,
+      });
+
+      for (const pos of indexedPositions) {
+        const term = query[pos];
+        const index = this.indexes.get(pos);
+        if (!index) continue;
+
+        const factNums = index.get(term);
+        if (!factNums || factNums.size === 0) {
+          candidateIndexes = new Set();
+          break;
+        }
+
+        if (
+          candidateIndexes.size === 0 &&
+          indexedPositions.indexOf(pos) === 0
+        ) {
+          candidateIndexes = new Set(factNums);
+        } else {
+          candidateIndexes = indexUtils.intersect(candidateIndexes, factNums);
+          if (candidateIndexes.size === 0) break;
+        }
+      }
+    }
+
+    return candidateIndexes;
   }
 
   private addFact(fact: Term[]): void {

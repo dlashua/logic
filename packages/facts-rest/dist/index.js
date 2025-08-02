@@ -1,6 +1,6 @@
 // src/index.ts
-import { createAbstractRelationSystem } from "@swiftfall/facts-abstract";
-import { getDefaultLogger } from "@swiftfall/logic";
+import { createAbstractRelationSystem } from "@codespiral/facts-abstract";
+import { getDefaultLogger } from "@codespiral/logic";
 
 // src/rest-datastore.ts
 var RestDataStore = class {

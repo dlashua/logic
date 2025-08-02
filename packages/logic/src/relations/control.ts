@@ -1,5 +1,5 @@
 import util from "node:util";
-import { SimpleObservable } from "@swiftfall/observable";
+import { SimpleObservable, flatMap, take } from "@codespiral/observable";
 import { eq } from "../core/combinators.js";
 import { enrichGroupInput, isVar, walk } from "../core/kernel.js";
 import {
@@ -11,43 +11,49 @@ import type { ConsNode, Goal, Subst, Term } from "../core/types.js";
 
 export const uniqueo = (t: Term, g: Goal): Goal =>
   enrichGroupInput("uniqueo", [g], [], (input$: SimpleObservable<Subst>) =>
-    input$.flatMap((s: Subst) => {
-      const seen = new Set();
-      return g(SimpleObservable.of(s)).flatMap((s2: Subst) => {
-        const w_t = walk(t, s2);
-        if (isVar(w_t)) {
-          return SimpleObservable.of(s2);
-        }
-        const key = JSON.stringify(w_t);
-        if (seen.has(key)) return SimpleObservable.empty();
-        seen.add(key);
-        return SimpleObservable.of(s2);
-      });
-    }),
+    input$.pipe(
+      flatMap((s: Subst) => {
+        const seen = new Set();
+        return g(SimpleObservable.of(s)).pipe(
+          flatMap((s2: Subst) => {
+            const w_t = walk(t, s2);
+            if (isVar(w_t)) {
+              return SimpleObservable.of(s2);
+            }
+            const key = JSON.stringify(w_t);
+            if (seen.has(key)) return SimpleObservable.empty();
+            seen.add(key);
+            return SimpleObservable.of(s2);
+          }),
+        );
+      }),
+    ),
   );
 
 export function not(goal: Goal): Goal {
   return enrichGroupInput("not", [], [goal], (input$) =>
-    input$.flatMap((s: Subst) => {
-      return new SimpleObservable<Subst>((observer) => {
-        let hasSolutions = false;
-        const sub = goal(SimpleObservable.of(s)).subscribe({
-          next: (subst) => {
-            if (!subst.has(SUSPENDED_CONSTRAINTS)) {
-              hasSolutions = true;
-            }
-          },
-          error: (err) => observer.error?.(err),
-          complete: () => {
-            if (!hasSolutions) {
-              observer.next(s);
-            }
-            observer.complete?.();
-          },
+    input$.pipe(
+      flatMap((s: Subst) => {
+        return new SimpleObservable<Subst>((observer) => {
+          let hasSolutions = false;
+          const sub = goal(SimpleObservable.of(s)).subscribe({
+            next: (subst) => {
+              if (!subst.has(SUSPENDED_CONSTRAINTS)) {
+                hasSolutions = true;
+              }
+            },
+            error: (err) => observer.error?.(err),
+            complete: () => {
+              if (!hasSolutions) {
+                observer.next(s);
+              }
+              observer.complete?.();
+            },
+          });
+          return () => sub.unsubscribe();
         });
-        return () => sub.unsubscribe();
-      });
-    }),
+      }),
+    ),
   );
 }
 
@@ -57,24 +63,26 @@ export function gv1_not(goal: Goal): Goal {
     [],
     [goal],
     (input$: SimpleObservable<Subst>) =>
-      input$.flatMap((s: Subst) => {
-        return new SimpleObservable<Subst>((observer) => {
-          let hasSolutions = false;
-          const sub = goal(SimpleObservable.of(s)).subscribe({
-            next: () => {
-              hasSolutions = true; // Any solution means the goal succeeds, so not fails
-            },
-            error: (err) => observer.error?.(err),
-            complete: () => {
-              if (!hasSolutions) {
-                observer.next(s); // No solutions means not succeeds
-              }
-              observer.complete?.();
-            },
+      input$.pipe(
+        flatMap((s: Subst) => {
+          return new SimpleObservable<Subst>((observer) => {
+            let hasSolutions = false;
+            const sub = goal(SimpleObservable.of(s)).subscribe({
+              next: () => {
+                hasSolutions = true; // Any solution means the goal succeeds, so not fails
+              },
+              error: (err) => observer.error?.(err),
+              complete: () => {
+                if (!hasSolutions) {
+                  observer.next(s); // No solutions means not succeeds
+                }
+                observer.complete?.();
+              },
+            });
+            return () => sub.unsubscribe();
           });
-          return () => sub.unsubscribe();
-        });
-      }),
+        }),
+      ),
   );
 }
 
@@ -84,30 +92,32 @@ export function old_not(goal: Goal): Goal {
     [],
     [goal],
     (input$: SimpleObservable<Subst>) =>
-      input$.flatMap((s: Subst) => {
-        let found = false;
-        return new SimpleObservable<Subst>((observer) => {
-          goal(SimpleObservable.of(s)).subscribe({
-            next: (subst) => {
-              let addedNewBindings = false;
-              for (const [key, value] of subst) {
-                if (!s.has(key)) {
-                  addedNewBindings = true;
-                  break;
+      input$.pipe(
+        flatMap((s: Subst) => {
+          let found = false;
+          return new SimpleObservable<Subst>((observer) => {
+            goal(SimpleObservable.of(s)).subscribe({
+              next: (subst) => {
+                let addedNewBindings = false;
+                for (const [key, value] of subst) {
+                  if (!s.has(key)) {
+                    addedNewBindings = true;
+                    break;
+                  }
                 }
-              }
-              if (!addedNewBindings) {
-                found = true;
-              }
-            },
-            error: observer.error,
-            complete: () => {
-              if (!found) observer.next(s);
-              observer.complete?.();
-            },
+                if (!addedNewBindings) {
+                  found = true;
+                }
+              },
+              error: (e: Error) => observer.error(e),
+              complete: () => {
+                if (!found) observer.next(s);
+                observer.complete?.();
+              },
+            });
           });
-        });
-      }),
+        }),
+      ),
   );
 }
 
@@ -187,7 +197,7 @@ export function old_neqo(x: Term<any>, y: Term<any>): Goal {
  * Useful for cut-like behavior.
  */
 export function onceo(goal: Goal): Goal {
-  return (input$: SimpleObservable<Subst>) => goal(input$).take(1);
+  return (input$: SimpleObservable<Subst>) => goal(input$).pipe(take(1));
 }
 
 /**
@@ -196,12 +206,14 @@ export function onceo(goal: Goal): Goal {
  */
 export function succeedo(): Goal {
   return (input$: SimpleObservable<Subst>) =>
-    input$.flatMap(
-      (s: Subst) =>
-        new SimpleObservable<Subst>((observer) => {
-          observer.next(s);
-          observer.complete?.();
-        }),
+    input$.pipe(
+      flatMap(
+        (s: Subst) =>
+          new SimpleObservable<Subst>((observer) => {
+            observer.next(s);
+            observer.complete?.();
+          }),
+      ),
     );
 }
 
@@ -210,7 +222,7 @@ export function succeedo(): Goal {
  * Useful for testing or as a base case.
  */
 export function failo(): Goal {
-  return (_input$: SimpleObservable<Subst>) => SimpleObservable.empty<Subst>();
+  return (_input$: SimpleObservable<Subst>) => SimpleObservable.empty();
 }
 
 /**
@@ -218,34 +230,36 @@ export function failo(): Goal {
  */
 export function groundo(term: Term): Goal {
   return (input$: SimpleObservable<Subst>) =>
-    input$.flatMap(
-      (s: Subst) =>
-        new SimpleObservable<Subst>((observer) => {
-          const walked = walk(term, s);
-          function isGround(t: Term): boolean {
-            if (isVar(t)) return false;
-            if (Array.isArray(t)) {
-              return t.every(isGround);
-            }
-            if (t && typeof t === "object" && "tag" in t) {
-              if (t.tag === "cons") {
-                const l = t as ConsNode;
-                return isGround(l.head) && isGround(l.tail);
+    input$.pipe(
+      flatMap(
+        (s: Subst) =>
+          new SimpleObservable<Subst>((observer) => {
+            const walked = walk(term, s);
+            function isGround(t: Term): boolean {
+              if (isVar(t)) return false;
+              if (Array.isArray(t)) {
+                return t.every(isGround);
               }
-              if (t.tag === "nil") {
-                return true;
+              if (t && typeof t === "object" && "tag" in t) {
+                if (t.tag === "cons") {
+                  const l = t as ConsNode;
+                  return isGround(l.head) && isGround(l.tail);
+                }
+                if (t.tag === "nil") {
+                  return true;
+                }
               }
+              if (t && typeof t === "object" && !("tag" in t)) {
+                return Object.values(t).every(isGround);
+              }
+              return true; // primitives are ground
             }
-            if (t && typeof t === "object" && !("tag" in t)) {
-              return Object.values(t).every(isGround);
+            if (isGround(walked)) {
+              observer.next(s);
             }
-            return true; // primitives are ground
-          }
-          if (isGround(walked)) {
-            observer.next(s);
-          }
-          observer.complete?.();
-        }),
+            observer.complete?.();
+          }),
+      ),
     );
 }
 
@@ -282,8 +296,8 @@ export function substLog(msg: string, onlyVars = false): Goal {
             );
             observer.next(s);
           },
-          error: observer.error,
-          complete: observer.complete,
+          error: (e: Error) => observer.error(e),
+          complete: () => observer.complete(),
         });
         return () => sub.unsubscribe();
       }),
@@ -325,7 +339,7 @@ export function thruCount(msg: string, level = 1000): Goal {
             }
             observer.next(s);
           },
-          error: observer.error,
+          error: (e: Error) => observer.error(e),
           complete: () => {
             console.log("THRU COMPLETE", id, msg, cnt);
             observer.complete?.();
@@ -343,8 +357,8 @@ export function fail(): Goal {
         next: (s) => {
           /* pass */
         },
-        error: observer.error,
-        complete: observer.complete,
+        error: (e: Error) => observer.error(e),
+        complete: () => observer.complete(),
       });
       return () => sub.unsubscribe();
     });
